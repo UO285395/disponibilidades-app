@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Card, Button, TextInput, Title, Textarea } from "@mantine/core";
 import { eventsAPI } from "../api/api";
+import { adminAPI } from "../api/adminApi";
 
 export default function AdminEvents() {
   const [events, setEvents] = useState([]);
@@ -55,9 +56,14 @@ export default function AdminEvents() {
   }
 
   async function deleteEvent(id) {
-    await eventsAPI.deleteEvent(id);
+  try {
+    await adminAPI.deleteEvent(id);  
     await reload();
+  } catch (e) {
+    console.error("Error eliminando evento", e);
   }
+}
+
 
   return (
     <>
