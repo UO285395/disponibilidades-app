@@ -37,9 +37,11 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_headers=["*"],
-    allow_methods=["*"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "PUT", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
 
 
 # =========================================================
@@ -415,7 +417,19 @@ def list_events(db: Session = Depends(get_db)):
     if expired:
         db.commit()
 
-    return db.query(Event).all()
+    events = db.query(Event).all();
+
+    return [
+        {
+            "id": e.id,
+            "title": e.title,
+            "description": e.description,
+            "date": e.date.strftime("%Y-%m-%d") if e.date else None,
+            "start_time": e.start_time,
+            "end_time": e.end_time,
+        }
+        for e in events
+    ]
 
 
 

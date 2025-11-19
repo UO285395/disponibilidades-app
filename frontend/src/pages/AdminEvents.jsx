@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { Card, Button, TextInput, Title, Textarea } from "@mantine/core";
-import { eventsAPI } from "../api/api";
 import { adminAPI } from "../api/adminApi";
 
 export default function AdminEvents() {
@@ -14,7 +13,7 @@ export default function AdminEvents() {
 
     (async () => {
       try {
-        const data = await eventsAPI.list();
+        const data = await adminAPI.list();
         if (!cancelled) {
           setEvents(data);
         }
@@ -30,7 +29,7 @@ export default function AdminEvents() {
 
   async function reload() {
     try {
-      const data = await eventsAPI.list();
+      const data = await adminAPI.listEvents();
       setEvents(data);
     } catch (e) {
       console.error("Error recargando eventos", e);
@@ -40,7 +39,7 @@ export default function AdminEvents() {
   async function createEvent() {
     if (!title || !date) return;
 
-    await eventsAPI.create({
+    await adminAPI.create({
       title,
       description,
       date,
