@@ -408,8 +408,8 @@ def create_event(
 def list_events(db: Session = Depends(get_db)):
     today = datetime.utcnow().date()
 
-    # Borrar eventos cuya fecha es anterior a ayer
-    limit = today - timedelta(days=1)
+    # Borrar eventos con fecha < ayer, pero comparando como STRING YYYY-MM-DD
+    limit = (today - timedelta(days=1)).strftime("%Y-%m-%d")
 
     expired = db.query(Event).filter(Event.date < limit).all()
     for ev in expired:
@@ -417,14 +417,14 @@ def list_events(db: Session = Depends(get_db)):
     if expired:
         db.commit()
 
-    events = db.query(Event).all();
+    events = db.query(Event).all()
 
     return [
         {
             "id": e.id,
             "title": e.title,
             "description": e.description,
-            "date": e.date.strftime("%Y-%m-%d") if e.date else None,
+            "date": e.date,
             "start_time": e.start_time,
             "end_time": e.end_time,
         }
