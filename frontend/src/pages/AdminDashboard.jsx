@@ -33,12 +33,12 @@ export default function AdminDashboard() {
         <Tabs.List>
           <Tabs.Tab value="events">Eventos</Tabs.Tab>
           <Tabs.Tab value="availabilities">Disponibilidades semanales</Tabs.Tab>
-          <Tabs.Tab value="users">Usuarios</Tabs.Tab>
+          {/* <Tabs.Tab value="users">Usuarios</Tabs.Tab> */}
         </Tabs.List>
 
-        <Tabs.Panel value="users" pt="xl">
+        {/* <Tabs.Panel value="users" pt="xl">
           <AdminUsers />
-        </Tabs.Panel>
+        </Tabs.Panel> */}
 
         <Tabs.Panel value="events" pt="xl">
           <AdminEvents />
