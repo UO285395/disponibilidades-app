@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Card, Title } from "@mantine/core";
-import { adminAPI } from "../api/adminApi";
+import { adminAPI } from "../api/adminApi.js";
+import { Card, Title, Text } from "@mantine/core";
 
 export default function AdminAvailabilities() {
   const [rows, setRows] = useState([]);
@@ -10,10 +10,8 @@ export default function AdminAvailabilities() {
 
     (async () => {
       try {
-        const data = await adminAPI.listAvailability();
-        if (!cancelled) {
-          setRows(data);
-        }
+        const data = await adminAPI.listAvailabilities();
+        if (!cancelled) setRows(data);
       } catch (e) {
         console.error("Error cargando disponibilidades", e);
       }
@@ -30,9 +28,15 @@ export default function AdminAvailabilities() {
         Disponibilidades semanales
       </Title>
 
+      {rows.length === 0 && (
+        <Text size="sm" c="dimmed">
+          No hay disponibilidades registradas.
+        </Text>
+      )}
+
       {rows.map((r) => (
         <Card key={r.id} shadow="sm" p="md" mb="sm">
-          <b>{r.user}</b>
+          <b>{r.user}</b> ({r.email})
           <br />
           {r.date} — {r.start_time} a {r.end_time}
         </Card>

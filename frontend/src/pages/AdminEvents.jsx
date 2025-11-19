@@ -1,22 +1,22 @@
 import { useEffect, useState } from "react";
-import { Card, Button, TextInput, Title, Textarea } from "@mantine/core";
-import { adminAPI } from "../api/adminApi";
+import { Card, Button, TextInput, Title, Textarea, Text } from "@mantine/core";
+import { adminAPI } from "../api/adminApi.js";
+import { useNavigate } from "react-router-dom";
 
 export default function AdminEvents() {
   const [events, setEvents] = useState([]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [date, setDate] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
-        const data = await adminAPI.list();
-        if (!cancelled) {
-          setEvents(data);
-        }
+        const data = await adminAPI.listEvents();
+        if (!cancelled) setEvents(data);
       } catch (e) {
         console.error("Error cargando eventos", e);
       }
@@ -39,34 +39,40 @@ export default function AdminEvents() {
   async function createEvent() {
     if (!title || !date) return;
 
-    await adminAPI.create({
-      title,
-      description,
-      date,
-      start_time: null,
-      end_time: null,
-    });
+    try {
+      await adminAPI.createEvent({
+        title,
+        description: description || null,
+        date,
+        start_time: null,
+        end_time: null
+      });
 
-    setTitle("");
-    setDescription("");
-    setDate("");
-
-    await reload();
+      setTitle("");
+      setDescription("");
+      setDate("");
+      await reload();
+    } catch (e) {
+      console.error("Error creando evento", e);
+      alert("Error creando evento");
+    }
   }
 
   async function deleteEvent(id) {
-  try {
-    await adminAPI.deleteEvent(id);  
-    await reload();
-  } catch (e) {
-    console.error("Error eliminando evento", e);
+    try {
+      await adminAPI.deleteEvent(id);
+      await reload();
+    } catch (e) {
+      console.error("Error eliminando evento", e);
+      alert("Error eliminando evento");
+    }
   }
-}
-
 
   return (
     <>
-      <Title order={3} mb="md">Crear evento</Title>
+      <Title order={3} mb="md">
+        Crear evento
+      </Title>
 
       <Card shadow="sm" p="md" mb="xl">
         <TextInput
@@ -92,16 +98,24 @@ export default function AdminEvents() {
         <Button onClick={createEvent}>Crear evento</Button>
       </Card>
 
-      <Title order={3} mb="md">Eventos existentes</Title>
+      <Title order={3} mb="md">
+        Eventos existentes
+      </Title>
+
+      {events.length === 0 && (
+        <Text size="sm" c="dimmed">
+          No hay eventos.
+        </Text>
+      )}
 
       {events.map((ev) => (
         <Card key={ev.id} shadow="sm" p="md" mb="md">
           <b>{ev.title}</b> — {ev.date}
-          <p>{ev.description}</p>
+          {ev.description && <p>{ev.description}</p>}
 
           <Button
             mt="sm"
-            onClick={() => (window.location = `/admin/event/${ev.id}`)}
+            onClick={() => navigate(`/admin/event/${ev.id}`)}
           >
             Ver respuestas
           </Button>

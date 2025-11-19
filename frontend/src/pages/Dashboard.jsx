@@ -1,32 +1,35 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Title, Button, Box, Text, Divider, Group } from "@mantine/core";
 import { userAPI, getToken, clearToken } from "../api/api.js";
-
 import WeekCalendar from "../components/WeekCalendar.jsx";
 import EventsSection from "../components/EventsSection.jsx";
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);
-  const [weekOffset, setWeekOffset] = useState(0); // 0 = semana actual, 1 = siguiente
+  const [offsetWeeks, setOffsetWeeks] = useState(0);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!getToken()) {
-      window.location = "/";
+      navigate("/");
       return;
     }
 
-    userAPI
-      .me()
-      .then(setUser)
-      .catch(() => {
+    (async () => {
+      try {
+        const u = await userAPI.me();
+        setUser(u);
+      } catch {
         clearToken();
-        window.location = "/";
-      });
-  }, []);
+        navigate("/");
+      }
+    })();
+  }, [navigate]);
 
   function logout() {
     clearToken();
-    window.location = "/";
+    navigate("/");
   }
 
   if (!user) return null;
@@ -39,7 +42,7 @@ export default function Dashboard() {
         style={{
           display: "flex",
           justifyContent: "space-between",
-          alignItems: "center",
+          alignItems: "center"
         }}
       >
         <Box>
@@ -49,49 +52,61 @@ export default function Dashboard() {
           </Text>
         </Box>
 
-        <Button color="red" onClick={logout}>
-          Cerrar sesión
-        </Button>
+        <Group>
+          {user.role === "admin" && (
+            <Button variant="outline" onClick={() => navigate("/admin")}>
+              Ir al panel admin
+            </Button>
+          )}
+          <Button color="red" onClick={logout}>
+            Cerrar sesión
+          </Button>
+        </Group>
       </Box>
 
       <Divider my="md" />
 
-      {/* Botones de navegación */}
-      <Group mb="md">
-        <Button
-          variant={weekOffset === 0 ? "filled" : "light"}
-          onClick={() => setWeekOffset(0)}
-        >
-          Semana actual
-        </Button>
-
-        <Button
-          variant={weekOffset === 1 ? "filled" : "light"}
-          onClick={() => setWeekOffset(1)}
-        >
-          Semana siguiente
-        </Button>
-      </Group>
-
-      {/* Contenido principal */}
+      {/* Contenido principal: calendario + eventos */}
       <Box
         mt="md"
         style={{
           display: "grid",
           gridTemplateColumns: "2fr 1fr",
-          gap: "1.5rem",
+          gap: "1.5rem"
         }}
       >
-        {/* Calendario */}
+        {/* Calendario semanal */}
         <Box
           style={{
             border: "1px solid #e0e0e0",
             borderRadius: 8,
             padding: "1rem",
-            backgroundColor: "white",
+            backgroundColor: "white"
           }}
         >
-          <WeekCalendar offsetWeeks={weekOffset} />
+          <Group mb="md">
+            <Title order={3}>Disponibilidad</Title>
+            <Button
+              size="xs"
+              variant={offsetWeeks === 0 ? "filled" : "outline"}
+              onClick={() => setOffsetWeeks(0)}
+            >
+              Semana actual
+            </Button>
+            <Button
+              size="xs"
+              variant={offsetWeeks === 1 ? "filled" : "outline"}
+              onClick={() => setOffsetWeeks(1)}
+            >
+              Semana siguiente
+            </Button>
+          </Group>
+
+          <Text size="sm" c="dimmed" mb="md">
+            Haz clic en las celdas para marcar o desmarcar tu disponibilidad por horas.
+          </Text>
+
+          <WeekCalendar offsetWeeks={offsetWeeks} />
         </Box>
 
         {/* Eventos */}
@@ -100,7 +115,7 @@ export default function Dashboard() {
             border: "1px solid #e0e0e0",
             borderRadius: 8,
             padding: "1rem",
-            backgroundColor: "white",
+            backgroundColor: "white"
           }}
         >
           <EventsSection />

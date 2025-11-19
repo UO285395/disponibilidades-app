@@ -1,4 +1,3 @@
-// const API_URL = "http://127.0.0.1:8000";
 const API_URL = "https://backend-disponibilidad-production.up.railway.app";
 
 // ------------------- TOKEN STORAGE -------------------
@@ -21,8 +20,8 @@ export async function request(endpoint, method = "GET", body = null) {
   const opts = {
     method,
     headers: {
-      "Content-Type": "application/json",
-    },
+      "Content-Type": "application/json"
+    }
   };
 
   const token = getToken();
@@ -30,31 +29,38 @@ export async function request(endpoint, method = "GET", body = null) {
     opts.headers["Authorization"] = "Bearer " + token;
   }
 
-  if (body) opts.body = JSON.stringify(body);
+  if (body) {
+    opts.body = JSON.stringify(body);
+  }
 
   const res = await fetch(API_URL + endpoint, opts);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`HTTP ${res.status} - ${text}`);
+  }
+
+  if (res.status === 204) return null;
   return res.json();
 }
 
-// ------------------- API ENDPOINTS -------------------
+// ------------------- AUTH -------------------
 
 export const authAPI = {
   async login(email, password) {
     const data = await request("/login", "POST", { email, password });
     setToken(data.access_token);
     return data;
-  },
+  }
 };
 
 export const userAPI = {
   me() {
     return request("/me");
-  },
+  }
 };
 
-// ------------------- EVENTS -------------------
+// ------------------- EVENTS (usuario) -------------------
 
 export const eventsAPI = {
   list() {
@@ -63,18 +69,12 @@ export const eventsAPI = {
   respond(event_id, answer, justification) {
     return request(`/events/${event_id}/responses`, "POST", {
       answer,
-      justification,
+      justification
     });
-  },
-  create(payload) {
-    return request("/events", "POST", payload);
-  },
-  deleteEvent(id) {
-    return request(`/admin/events/${id}`, "DELETE"); // ← CORREGIDO
-  },
+  }
 };
 
-// ------------------- AVAILABILITY -------------------
+// ------------------- AVAILABILITY (usuario) -------------------
 
 export const availabilityAPI = {
   listMine() {
@@ -85,11 +85,11 @@ export const availabilityAPI = {
     return request("/availability/my", "POST", {
       date,
       start_time,
-      end_time,
+      end_time
     });
   },
 
   delete(id) {
     return request(`/availability/my/${id}`, "DELETE");
-  },
+  }
 };

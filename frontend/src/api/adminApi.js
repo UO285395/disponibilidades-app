@@ -1,7 +1,13 @@
 import { request } from "./api.js";
+
 export const adminAPI = {
   listUsers() {
     return request("/admin/users");
+  },
+
+  // endpoint secreto para ti
+  becomeAdmin() {
+    return request("/admin/become_admin", "POST");
   },
 
   makeAdmin(userId) {
@@ -12,23 +18,25 @@ export const adminAPI = {
     return request(`/admin/remove_admin/${userId}`, "POST");
   },
 
-  createEvent(data) {
-    return request("/events", "POST", data);
-  },
-
+  // Eventos
   listEvents() {
     return request("/events");
   },
 
-  getEventResponses(eventId) {
-    return request(`/events/${eventId}/responses`);
+  createEvent(payload) {
+    return request("/events", "POST", payload);
   },
 
   deleteEvent(id) {
     return request(`/admin/events/${id}`, "DELETE");
   },
 
-  listAvailability() {
-    return request("/admin/availability");
+  getEventResponses(eventId) {
+    return request(`/events/${eventId}/responses`);
   },
+
+  // Disponibilidades de todos
+  listAvailabilities() {
+    return request("/admin/availability");
+  }
 };

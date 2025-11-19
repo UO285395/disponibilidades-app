@@ -1,48 +1,55 @@
-import { useEffect, useRef, useState } from "react";
-import { adminAPI } from "../api/adminApi";
-import { Card, Title } from "@mantine/core";
-import { useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { adminAPI } from "../api/adminApi.js";
+import { Card, Title, Text, Button, Box } from "@mantine/core";
 
 export default function AdminEventResponses() {
   const { id } = useParams();
   const [responses, setResponses] = useState([]);
-  const loadedRef = useRef(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
-    if (loadedRef.current) return;
-    loadedRef.current = true;
+    let cancelled = false;
 
     (async () => {
       try {
         const data = await adminAPI.getEventResponses(id);
-        setResponses(data);
-      } catch (err) {
-        console.error("Error cargando respuestas:", err);
+        if (!cancelled) setResponses(data);
+      } catch (e) {
+        console.error("Error cargando respuestas", e);
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   return (
-    <div>
-      <Title order={2}>Respuestas del evento {id}</Title>
+    <Box p="lg">
+      <Button mb="md" variant="outline" onClick={() => navigate("/admin")}>
+        Volver
+      </Button>
 
-      {responses.length === 0 && (
-        <p style={{ marginTop: "20px" }}>Nadie ha respondido todavía.</p>
-      )}
+      <Title order={2} mb="lg">
+        Respuestas del evento {id}
+      </Title>
 
-      {responses.map((r) => (
-        <Card key={r.id} mt="md" shadow="sm" p="lg">
-          <b>Usuario:</b> {r.user_full_name} ({r.user_email})
-          <br />
-          <b>Respuesta:</b> {r.answer}
-          <br />
-          {r.justification && r.justification.trim() !== "" && (
-            <p>
+      {responses.length === 0 && <Text>No hay respuestas todavía.</Text>}
+
+      {responses.map((r, idx) => (
+        <Card key={idx} mt="md" shadow="sm" p="lg">
+          <Text fw={600}>{r.user_full_name}</Text>
+          <Text>
+            <b>Respuesta:</b> {r.answer}
+          </Text>
+          {r.justification && (
+            <Text>
               <b>Justificación:</b> {r.justification}
-            </p>
+            </Text>
           )}
         </Card>
       ))}
-    </div>
+    </Box>
   );
 }
