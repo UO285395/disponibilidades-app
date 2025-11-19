@@ -279,7 +279,26 @@ def admin_all_availability(
     if user.role != "admin":
         raise HTTPException(403, "No autorizado")
 
-    items = db.query(Availability).all()
+    today = datetime.utcnow().date()
+
+    # Borrar disponibilidades pasadas
+    old = (
+        db.query(Availability)
+        .filter(Availability.date < today.strftime("%Y-%m-%d"))
+        .all()
+    )
+    for a in old:
+        db.delete(a)
+    if old:
+        db.commit()
+
+    # Seleccionar SOLO las que siguen siendo válidas
+    items = (
+        db.query(Availability)
+        .filter(Availability.date >= today.strftime("%Y-%m-%d"))
+        .all()
+    )
+
     return [
         {
             "id": a.id,
