@@ -47,7 +47,7 @@ export default function AdminDashboard() {
         </Group>
       </Group>
 
-      <Tabs mt="lg" defaultValue="users">
+      <Tabs mt="lg" defaultValue="availabilities">
         <Tabs.List>
           <Tabs.Tab value="events">Eventos</Tabs.Tab>
           <Tabs.Tab value="availabilities">Disponibilidades semanales</Tabs.Tab>
