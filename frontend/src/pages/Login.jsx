@@ -22,7 +22,7 @@ export default function Login() {
 
         <TextInput
           label="Email"
-          placeholder="tu@email.com"
+          placeholder="Usuario@Colectivo"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           mb="md"
@@ -30,7 +30,7 @@ export default function Login() {
 
         <PasswordInput
           label="Contraseña"
-          placeholder="••••••••"
+          placeholder="••••••••••••••••"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           mb="md"
