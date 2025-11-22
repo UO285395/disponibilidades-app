@@ -55,16 +55,16 @@ export default function EventsSection() {
             </Text>
           )}
 
+          <Button mt="sm" mr="sm" onClick={() => respond(ev.id, "yes")}>
+            Sí
+          </Button>
+
           <TextInput
             id={`just_${ev.id}`}
             placeholder="Justificación si respondes NO"
             mt="sm"
           />
-
-          <Button mt="sm" mr="sm" onClick={() => respond(ev.id, "yes")}>
-            Sí
-          </Button>
-
+          
           <Button mt="sm" color="red" onClick={() => respond(ev.id, "no")}>
             No
           </Button>

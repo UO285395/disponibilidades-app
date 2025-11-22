@@ -21,7 +21,7 @@ export default function Login() {
         <Title order={2} align="center" mb="lg">Iniciar sesión</Title>
 
         <TextInput
-          label="Email"
+          label="Usuario"
           placeholder="Usuario@Colectivo"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
