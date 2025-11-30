@@ -41,37 +41,46 @@ export default function AdminAvailabilities() {
   }, [rows, filterCode]);
 
   // -------------------------------
-  // BEST MATCH (robusto + sin falsos positivos)
+  // BEST MATCH: personas únicas por franja
   // -------------------------------
   const bestMatches = useMemo(() => {
     if (filtered.length === 0) return [];
 
+    // key: "YYYY-MM-DD HH:00-HH+1:00" -> Set(emails)
     const counter = {};
 
-    // SOLO contamos franjas de los usuarios filtrados
     for (const r of filtered) {
       const startHour = Number(r.start_time.slice(0, 2));
       const endHour = Number(r.end_time.slice(0, 2));
       const day = r.date;
+      const email = r.email;
 
       for (let h = startHour; h < endHour; h++) {
-        const key = `${day} ${String(h).padStart(2, "0")}:00-${String(
+        const slot = `${day} ${String(h).padStart(2, "0")}:00-${String(
           h + 1
         ).padStart(2, "0")}:00`;
 
-        counter[key] = (counter[key] || 0) + 1;
+        if (!counter[slot]) {
+          counter[slot] = new Set();
+        }
+        counter[slot].add(email); // persona única por franja
       }
     }
 
-    const maxVal = Math.max(...Object.values(counter));
+    const entries = Object.entries(counter);
+    if (entries.length === 0) return [];
 
-    // No hay coincidencias → devolver vacío
+    // Tamaño máximo de set (nº de personas)
+    const maxVal = Math.max(...entries.map(([_, set]) => set.size));
     if (maxVal === 0) return [];
 
-    // Devolver TODAS las coincidencias iguales al máximo
-    return Object.entries(counter)
-      .filter(([_, count]) => count === maxVal)
-      .map(([slot, count]) => ({ slot, count }));
+    // Devolver TODAS las franjas empatadas al máximo
+    return entries
+      .filter(([_, set]) => set.size === maxVal)
+      .map(([slot, set]) => ({
+        slot,
+        count: set.size,
+      }));
   }, [filtered]);
 
   return (
@@ -80,7 +89,7 @@ export default function AdminAvailabilities() {
         Disponibilidades semanales
       </Title>
 
-      {/* Filtro */}
+      {/* Filtro por código */}
       <TextInput
         placeholder="Filtrar por colectivo (código del email)"
         value={filterCode}
@@ -88,14 +97,14 @@ export default function AdminAvailabilities() {
         mb="lg"
       />
 
-      {/* BEST MATCH */}
+      {/* Mejores franjas */}
       {bestMatches.length > 0 && (
         <Card shadow="md" p="md" mb="lg" style={{ background: "#e8f7e4" }}>
           <Text fw={700} mb="xs">
-            Mejores coincidencias (máximo {bestMatches[0].count} personas):
+            Mejores coincidencias ( {bestMatches[0].count} personas):
           </Text>
 
-          <Group gap="xs">
+          <Group gap="xs" mt="xs">
             {bestMatches.map((b, i) => (
               <Badge key={i} color="green" size="lg">
                 {b.slot}
@@ -105,7 +114,13 @@ export default function AdminAvailabilities() {
         </Card>
       )}
 
-      {/* LISTADO */}
+      {/* Listado de disponibilidades (ya filtrado) */}
+      {filtered.length === 0 && (
+        <Text size="sm" c="dimmed">
+          No hay disponibilidades que coincidan con el filtro.
+        </Text>
+      )}
+
       {filtered.map((r) => (
         <Card key={r.id} shadow="sm" p="md" mb="sm">
           <b>{r.user}</b> ({r.email})
