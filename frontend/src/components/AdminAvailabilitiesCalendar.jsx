@@ -9,6 +9,7 @@ import {
   Modal,
   List,
   Table,
+  Group,
 } from "@mantine/core";
 
 function pad2(n) {
@@ -65,22 +66,45 @@ export default function AdminAvailabilitiesCalendar() {
   }, [rows, filterCode]);
 
   // -------------------------------------
-  // DÍAS ÚNICOS DEL CALENDARIO
+  // FILTRAR TAMBIÉN POR FECHAS FUTURAS / HOY
+  // (evitar que slots pasados entren en el bestMatch)
+  // -------------------------------------
+  const today = useMemo(() => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    return t;
+  }, []);
+
+  const filteredFuture = useMemo(() => {
+    return filtered.filter((r) => {
+      if (!r.date) return false;
+      const d = new Date(r.date);
+      if (Number.isNaN(d.getTime())) return false;
+      d.setHours(0, 0, 0, 0);
+      return d >= today;
+    });
+  }, [filtered, today]);
+
+  // -------------------------------------
+  // DÍAS ÚNICOS DEL CALENDARIO (solo futuros)
   // -------------------------------------
   const days = useMemo(() => {
-    const unique = [...new Set(filtered.map((r) => r.date))].filter(Boolean);
+    const unique = [...new Set(filteredFuture.map((r) => r.date))].filter(
+      Boolean
+    );
     return unique.sort();
-  }, [filtered]);
+  }, [filteredFuture]);
 
   const hours = Array.from({ length: 14 }, (_, i) => i + 8); // 08 → 21
 
   // -------------------------------------
-  // MAPA celda → lista de usuarios
+  // MAPA celda → lista de usuarios (solo futuros)
+  // key: "YYYY-MM-DD-HH"
   // -------------------------------------
   const cellMap = useMemo(() => {
-    const map = {}; // "YYYY-MM-DD-HH" → [usuarios]
+    const map = {};
 
-    for (const r of filtered) {
+    for (const r of filteredFuture) {
       if (!r.date || !r.start_time || !r.end_time) continue;
 
       const startHour = Number(r.start_time.slice(0, 2));
@@ -92,29 +116,37 @@ export default function AdminAvailabilitiesCalendar() {
         map[key].push({ user: r.user, email: r.email });
       }
     }
+
     return map;
-  }, [filtered]);
+  }, [filteredFuture]);
 
   // -------------------------------------
   // BEST MATCH (todas las franjas empatadas)
+  // igual que en AdminAvailabilities: personas únicas por slot
   // -------------------------------------
   const bestMatches = useMemo(() => {
-    const entries = Object.entries(cellMap);
+    const entries = Object.entries(cellMap); // [key, usuarios[]]
 
     if (entries.length === 0) return [];
 
-    const maxVal = Math.max(...entries.map(([_, arr]) => arr.length));
+    // Contador por slot basado en emails únicos
+    const slotCounts = entries.map(([key, users]) => {
+      const emailSet = new Set(users.map((u) => u.email));
+      return { key, count: emailSet.size };
+    });
+
+    const maxVal = Math.max(...slotCounts.map((s) => s.count));
     if (maxVal === 0) return [];
 
-    return entries
-      .filter(([_, arr]) => arr.length === maxVal)
-      .map(([key, arr]) => {
+    return slotCounts
+      .filter((s) => s.count === maxVal)
+      .map(({ key, count }) => {
         const [day, hourStr] = key.split("-");
         const hour = Number(hourStr);
         return {
           day,
           hour,
-          count: arr.length,
+          count,
           slot: `${formatDay(day)} ${pad2(hour)}:00-${pad2(hour + 1)}:00`,
         };
       });
@@ -154,18 +186,20 @@ export default function AdminAvailabilitiesCalendar() {
         mb="lg"
       />
 
-      {/* BEST MATCH (card resumen, no el calendario) */}
+      {/* BEST MATCH: resumen arriba, como en el otro componente */}
       {bestMatches.length > 0 && (
         <Card shadow="md" p="md" mb="lg" style={{ background: "#e8f7e4" }}>
-          <Text fw={700}>
-            Mejor coincidencia: {bestMatches[0].count} personas
+          <Text fw={700} mb="xs">
+            Mejores coincidencias ({bestMatches[0].count} personas):
           </Text>
 
-          {bestMatches.map((b, i) => (
-            <Badge key={i} color="green" mt="xs" size="lg">
-              {b.slot}
-            </Badge>
-          ))}
+          <Group gap="xs" mt="xs">
+            {bestMatches.map((b, i) => (
+              <Badge key={i} color="green" size="lg">
+                {b.slot}
+              </Badge>
+            ))}
+          </Group>
         </Card>
       )}
 
