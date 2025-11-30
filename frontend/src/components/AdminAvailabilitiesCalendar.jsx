@@ -20,7 +20,6 @@ function pad2(n) {
 function formatDay(d) {
   const dt = new Date(d);
   if (Number.isNaN(dt.getTime())) {
-    // Si por lo que sea no parsea, muestra el raw para depurar
     return String(d);
   }
   return dt.toLocaleDateString("es-ES", {
@@ -67,7 +66,6 @@ export default function AdminAvailabilitiesCalendar() {
 
   // -------------------------------------
   // FILTRAR TAMBIÉN POR FECHAS FUTURAS / HOY
-  // (evitar que slots pasados entren en el bestMatch)
   // -------------------------------------
   const today = useMemo(() => {
     const t = new Date();
@@ -86,7 +84,7 @@ export default function AdminAvailabilitiesCalendar() {
   }, [filtered, today]);
 
   // -------------------------------------
-  // DÍAS ÚNICOS DEL CALENDARIO (solo futuros)
+  // DÍAS ÚNICOS DEL CALENDARIO
   // -------------------------------------
   const days = useMemo(() => {
     const unique = [...new Set(filteredFuture.map((r) => r.date))].filter(
@@ -98,7 +96,7 @@ export default function AdminAvailabilitiesCalendar() {
   const hours = Array.from({ length: 14 }, (_, i) => i + 8); // 08 → 21
 
   // -------------------------------------
-  // MAPA celda → lista de usuarios (solo futuros)
+  // MAPA celda → lista de usuarios
   // key: "YYYY-MM-DD-HH"
   // -------------------------------------
   const cellMap = useMemo(() => {
@@ -121,15 +119,13 @@ export default function AdminAvailabilitiesCalendar() {
   }, [filteredFuture]);
 
   // -------------------------------------
-  // BEST MATCH (todas las franjas empatadas)
-  // igual que en AdminAvailabilities: personas únicas por slot
+  // BEST MATCH (todas las franjas empatadas, por emails únicos)
   // -------------------------------------
   const bestMatches = useMemo(() => {
-    const entries = Object.entries(cellMap); // [key, usuarios[]]
-
+    const entries = Object.entries(cellMap);
     if (entries.length === 0) return [];
 
-    // Contador por slot basado en emails únicos
+    // Calcular nº de personas únicas por slot
     const slotCounts = entries.map(([key, users]) => {
       const emailSet = new Set(users.map((u) => u.email));
       return { key, count: emailSet.size };
@@ -141,8 +137,11 @@ export default function AdminAvailabilitiesCalendar() {
     return slotCounts
       .filter((s) => s.count === maxVal)
       .map(({ key, count }) => {
-        const [day, hourStr] = key.split("-");
-        const hour = Number(hourStr);
+        // ⬇️ aquí estaba el bug: hay varios '-' en la fecha
+        const lastDash = key.lastIndexOf("-");
+        const day = key.slice(0, lastDash);      // "2025-01-01"
+        const hour = Number(key.slice(lastDash + 1)); // 12
+
         return {
           day,
           hour,
@@ -152,7 +151,7 @@ export default function AdminAvailabilitiesCalendar() {
       });
   }, [cellMap]);
 
-  // Set de claves "día-hora" que son bestMatch → para pintar en rojo el calendario
+  // Set con "YYYY-MM-DD-HH" de los bestMatches
   const bestMatchKeys = useMemo(() => {
     return new Set(bestMatches.map((b) => `${b.day}-${b.hour}`));
   }, [bestMatches]);
@@ -186,7 +185,7 @@ export default function AdminAvailabilitiesCalendar() {
         mb="lg"
       />
 
-      {/* BEST MATCH: resumen arriba, como en el otro componente */}
+      {/* BEST MATCH */}
       {bestMatches.length > 0 && (
         <Card shadow="md" p="md" mb="lg" style={{ background: "#e8f7e4" }}>
           <Text fw={700} mb="xs">
@@ -234,9 +233,9 @@ export default function AdminAvailabilitiesCalendar() {
                       style={{
                         cursor: count > 0 ? "pointer" : "default",
                         background: isBest
-                          ? "#ffb3b3" // 🔴 BEST MATCH → rojo claro
+                          ? "#ffb3b3" // 🔴 best match
                           : count > 0
-                          ? "#d3f5ff" // azul para celdas con gente
+                          ? "#d3f5ff" // azul si hay gente
                           : undefined,
                         textAlign: "center",
                         fontWeight: 600,
