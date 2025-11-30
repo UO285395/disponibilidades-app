@@ -27,42 +27,50 @@ export default function AdminAvailabilities() {
   }, []);
 
   // -------------------------------
-  // FILTRAR POR CÓDIGO (email → nombre@CÓDIGO)
+  // FILTRAR POR CÓDIGO
   // -------------------------------
   const filtered = useMemo(() => {
     if (!filterCode.trim()) return rows;
 
+    const codeSearch = filterCode.toLowerCase();
+
     return rows.filter((r) => {
-      const code = r.email.split("@")[1]?.toLowerCase();
-      return code && code.includes(filterCode.toLowerCase());
+      const domain = r.email.split("@")[1]?.toLowerCase() || "";
+      return domain.includes(codeSearch);
     });
   }, [rows, filterCode]);
 
   // -------------------------------
-  // BEST MATCH (usando FILTRADOS)
-  // y devolviendo TODOS los empates
+  // BEST MATCH (robusto + sin falsos positivos)
   // -------------------------------
   const bestMatches = useMemo(() => {
     if (filtered.length === 0) return [];
 
     const counter = {};
 
+    // SOLO contamos franjas de los usuarios filtrados
     for (const r of filtered) {
       const startHour = Number(r.start_time.slice(0, 2));
       const endHour = Number(r.end_time.slice(0, 2));
+      const day = r.date;
 
       for (let h = startHour; h < endHour; h++) {
-        const key = `${r.date} ${h}:00-${h + 1}:00`;
+        const key = `${day} ${String(h).padStart(2, "0")}:00-${String(
+          h + 1
+        ).padStart(2, "0")}:00`;
+
         counter[key] = (counter[key] || 0) + 1;
       }
     }
 
-    // hallar valor máximo
     const maxVal = Math.max(...Object.values(counter));
 
-    // devolver TODAS las claves que tengan ese valor
+    // No hay coincidencias → devolver vacío
+    if (maxVal === 0) return [];
+
+    // Devolver TODAS las coincidencias iguales al máximo
     return Object.entries(counter)
-      .filter(([_, v]) => v === maxVal)
+      .filter(([_, count]) => count === maxVal)
       .map(([slot, count]) => ({ slot, count }));
   }, [filtered]);
 
@@ -72,9 +80,7 @@ export default function AdminAvailabilities() {
         Disponibilidades semanales
       </Title>
 
-      {/* ---------------------------
-            FILTRO POR CÓDIGO
-       ---------------------------- */}
+      {/* Filtro */}
       <TextInput
         placeholder="Filtrar por colectivo (código del email)"
         value={filterCode}
@@ -82,12 +88,10 @@ export default function AdminAvailabilities() {
         mb="lg"
       />
 
-      {/* ---------------------------
-            BEST MATCH (con empates)
-       ---------------------------- */}
+      {/* BEST MATCH */}
       {bestMatches.length > 0 && (
         <Card shadow="md" p="md" mb="lg" style={{ background: "#e8f7e4" }}>
-          <Text fw={700} mb="sm">
+          <Text fw={700} mb="xs">
             Mejores coincidencias (máximo {bestMatches[0].count} personas):
           </Text>
 
@@ -101,15 +105,7 @@ export default function AdminAvailabilities() {
         </Card>
       )}
 
-      {/* ---------------------------
-            LISTADO DE DISPONIBILIDADES
-       ---------------------------- */}
-      {filtered.length === 0 && (
-        <Text size="sm" c="dimmed">
-          No hay disponibilidades que coincidan con el filtro.
-        </Text>
-      )}
-
+      {/* LISTADO */}
       {filtered.map((r) => (
         <Card key={r.id} shadow="sm" p="md" mb="sm">
           <b>{r.user}</b> ({r.email})
