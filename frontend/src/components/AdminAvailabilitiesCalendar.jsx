@@ -15,10 +15,17 @@ function pad2(n) {
   return n.toString().padStart(2, "0");
 }
 
-// Formato DD/MM
+// Formato DD/MM con fallback
 function formatDay(d) {
-  const [_, m, day] = d.split("-");
-  return `${day}/${m}`;
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) {
+    // Si por lo que sea no parsea, muestra el raw para depurar
+    return String(d);
+  }
+  return dt.toLocaleDateString("es-ES", {
+    day: "2-digit",
+    month: "2-digit",
+  });
 }
 
 export default function AdminAvailabilitiesCalendar() {
@@ -61,7 +68,7 @@ export default function AdminAvailabilitiesCalendar() {
   // DÍAS ÚNICOS DEL CALENDARIO
   // -------------------------------------
   const days = useMemo(() => {
-    const unique = [...new Set(filtered.map((r) => r.date))];
+    const unique = [...new Set(filtered.map((r) => r.date))].filter(Boolean);
     return unique.sort();
   }, [filtered]);
 
@@ -74,6 +81,8 @@ export default function AdminAvailabilitiesCalendar() {
     const map = {}; // "YYYY-MM-DD-HH" → [usuarios]
 
     for (const r of filtered) {
+      if (!r.date || !r.start_time || !r.end_time) continue;
+
       const startHour = Number(r.start_time.slice(0, 2));
       const endHour = Number(r.end_time.slice(0, 2));
 
@@ -100,17 +109,18 @@ export default function AdminAvailabilitiesCalendar() {
     return entries
       .filter(([_, arr]) => arr.length === maxVal)
       .map(([key, arr]) => {
-        const [day, hour] = key.split("-");
+        const [day, hourStr] = key.split("-");
+        const hour = Number(hourStr);
         return {
           day,
-          hour: Number(hour),
+          hour,
           count: arr.length,
           slot: `${formatDay(day)} ${pad2(hour)}:00-${pad2(hour + 1)}:00`,
         };
       });
   }, [cellMap]);
 
-  // Set para resaltar franjas ganadoras en el calendario
+  // Set de claves "día-hora" que son bestMatch → para pintar en rojo el calendario
   const bestMatchKeys = useMemo(() => {
     return new Set(bestMatches.map((b) => `${b.day}-${b.hour}`));
   }, [bestMatches]);
@@ -144,15 +154,15 @@ export default function AdminAvailabilitiesCalendar() {
         mb="lg"
       />
 
-      {/* BEST MATCH */}
+      {/* BEST MATCH (card resumen, no el calendario) */}
       {bestMatches.length > 0 && (
-        <Card shadow="md" p="md" mb="lg" style={{ background: "#ffe8e8" }}>
+        <Card shadow="md" p="md" mb="lg" style={{ background: "#e8f7e4" }}>
           <Text fw={700}>
             Mejor coincidencia: {bestMatches[0].count} personas
           </Text>
 
           {bestMatches.map((b, i) => (
-            <Badge key={i} color="red" mt="xs" size="lg">
+            <Badge key={i} color="green" mt="xs" size="lg">
               {b.slot}
             </Badge>
           ))}
@@ -181,7 +191,6 @@ export default function AdminAvailabilitiesCalendar() {
                 {days.map((d) => {
                   const key = `${d}-${h}`;
                   const count = cellMap[key]?.length || 0;
-
                   const isBest = bestMatchKeys.has(key);
 
                   return (
@@ -191,9 +200,9 @@ export default function AdminAvailabilitiesCalendar() {
                       style={{
                         cursor: count > 0 ? "pointer" : "default",
                         background: isBest
-                          ? "#ffb3b3" // 🔴 rojo suave BEST MATCH
+                          ? "#ffb3b3" // 🔴 BEST MATCH → rojo claro
                           : count > 0
-                          ? "#d3f5ff" // azul para disponibilidad normal
+                          ? "#d3f5ff" // azul para celdas con gente
                           : undefined,
                         textAlign: "center",
                         fontWeight: 600,
