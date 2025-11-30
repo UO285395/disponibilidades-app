@@ -55,7 +55,7 @@ export default function EventsSection() {
             </Text>
           )}
 
-          <Button mt="sm" mr="sm" onClick={() => respond(ev.id, "yes")}>
+          <Button mt="sm" mr="sm" onClick={() => respond(ev.id, "si")}>
             Sí
           </Button>
 
