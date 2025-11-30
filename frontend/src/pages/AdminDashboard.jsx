@@ -5,6 +5,7 @@ import { userAPI, clearToken } from "../api/api.js";
 import AdminUsers from "../components/AdminUsers.jsx";
 import AdminEvents from "../components/AdminEvents.jsx";
 import AdminAvailabilities from "../components/AdminAvailabilities.jsx";
+import AdminAvailabilitiesCalendar from "../components/AdminAvailabilitiesCalendar.jsx";
 
 export default function AdminDashboard() {
   const [user, setUser] = useState(null);
@@ -47,9 +48,10 @@ export default function AdminDashboard() {
         </Group>
       </Group>
 
-      <Tabs mt="lg" defaultValue="availabilities">
+      <Tabs mt="lg" defaultValue="availabilities-calendar">
         <Tabs.List>
           <Tabs.Tab value="events">Eventos</Tabs.Tab>
+          <Tabs.Tab value="availabilities-calendar">Calendario de disponibilidad</Tabs.Tab>
           <Tabs.Tab value="availabilities">Disponibilidades semanales</Tabs.Tab>
           <Tabs.Tab value="users">Usuarios</Tabs.Tab>
         </Tabs.List>
@@ -64,6 +66,10 @@ export default function AdminDashboard() {
 
         <Tabs.Panel value="availabilities" pt="xl">
           <AdminAvailabilities />
+        </Tabs.Panel>
+
+        <Tabs.Panel value="availabilities-calendar" pt="xl">
+          <AdminAvailabilitiesCalendar />
         </Tabs.Panel>
       </Tabs>
     </Box>
