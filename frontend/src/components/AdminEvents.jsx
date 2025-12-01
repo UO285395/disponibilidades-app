@@ -3,7 +3,6 @@ import { Card, Button, TextInput, Title, Textarea, Text } from "@mantine/core";
 import { adminAPI } from "../api/adminApi.js";
 import { useNavigate } from "react-router-dom";
 
-// ---- Función para resumir votos SIN duplicar usuario ----
 function contarSiNo(answers = []) {
   const unique = new Map();
 

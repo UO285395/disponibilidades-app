@@ -10,24 +10,38 @@ import {
   List,
   Table,
   Group,
+  Button,
 } from "@mantine/core";
 
+// ============================================
+// Helpers
+// ============================================
 function pad2(n) {
   return n.toString().padStart(2, "0");
 }
 
-// Formato DD/MM con fallback
-function formatDay(d) {
-  const dt = new Date(d);
-  if (Number.isNaN(dt.getTime())) {
-    return String(d);
-  }
-  return dt.toLocaleDateString("es-ES", {
-    day: "2-digit",
-    month: "2-digit",
-  });
+function startOfWeek(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day; // lunes
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
 }
 
+function formatISO(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+function formatDay(d) {
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return d;
+  return dt.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" });
+}
+
+// ============================================
+// COMPONENTE
+// ============================================
 export default function AdminAvailabilitiesCalendar() {
   const [rows, setRows] = useState([]);
   const [filterCode, setFilterCode] = useState("");
@@ -36,9 +50,10 @@ export default function AdminAvailabilitiesCalendar() {
   const [modalUsers, setModalUsers] = useState([]);
   const [modalSlot, setModalSlot] = useState("");
 
-  // -------------------------------------
-  // CARGAR DATOS
-  // -------------------------------------
+  // control de semana actual (0 = actual, 1 = siguiente)
+  const [weekOffset, setWeekOffset] = useState(0);
+
+  // cargar disponibilidades
   useEffect(() => {
     (async () => {
       try {
@@ -50,59 +65,55 @@ export default function AdminAvailabilitiesCalendar() {
     })();
   }, []);
 
-  // -------------------------------------
-  // FILTRO POR CÓDIGO (dominio email)
-  // -------------------------------------
-  const filtered = useMemo(() => {
+  // filtrado por dominio
+  const filteredByEmail = useMemo(() => {
     if (!filterCode.trim()) return rows;
-
     const code = filterCode.toLowerCase();
-
     return rows.filter((r) => {
       const domain = r.email.split("@")[1]?.toLowerCase() || "";
       return domain.includes(code);
     });
   }, [rows, filterCode]);
 
-  // -------------------------------------
-  // FILTRAR TAMBIÉN POR FECHAS FUTURAS / HOY
-  // -------------------------------------
-  const today = useMemo(() => {
-    const t = new Date();
-    t.setHours(0, 0, 0, 0);
-    return t;
-  }, []);
+  // semana actual / siguiente
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
-  const filteredFuture = useMemo(() => {
-    return filtered.filter((r) => {
+  const baseWeekStart = startOfWeek(today);
+  const weekStart = useMemo(
+    () => new Date(baseWeekStart.getTime() + weekOffset * 7 * 86400000),
+    [baseWeekStart, weekOffset]
+  );
+
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 7);
+
+  // obtener filas solo de la semana visible
+  const weekRows = useMemo(() => {
+    return filteredByEmail.filter((r) => {
       if (!r.date) return false;
       const d = new Date(r.date);
-      if (Number.isNaN(d.getTime())) return false;
       d.setHours(0, 0, 0, 0);
-      return d >= today;
+      return d >= weekStart && d < weekEnd;
     });
-  }, [filtered, today]);
+  }, [filteredByEmail, weekStart, weekEnd]);
 
-  // -------------------------------------
-  // DÍAS ÚNICOS DEL CALENDARIO
-  // -------------------------------------
-  const days = useMemo(() => {
-    const unique = [...new Set(filteredFuture.map((r) => r.date))].filter(
-      Boolean
-    );
-    return unique.sort();
-  }, [filteredFuture]);
+  // días de la semana
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(weekStart);
+    d.setDate(weekStart.getDate() + i);
+    return d;
+  });
 
-  const hours = Array.from({ length: 14 }, (_, i) => i + 8); // 08 → 21
+  const hours = Array.from({ length: 14 }, (_, i) => i + 8); // 08 a 21
 
-  // -------------------------------------
-  // MAPA celda → lista de usuarios
-  // key: "YYYY-MM-DD-HH"
-  // -------------------------------------
+  // ============================================
+  // MAPA CELDA (date-hour → lista usuarios)
+  // ============================================
   const cellMap = useMemo(() => {
     const map = {};
 
-    for (const r of filteredFuture) {
+    for (const r of weekRows) {
       if (!r.date || !r.start_time || !r.end_time) continue;
 
       const startHour = Number(r.start_time.slice(0, 2));
@@ -111,24 +122,27 @@ export default function AdminAvailabilitiesCalendar() {
       for (let h = startHour; h < endHour; h++) {
         const key = `${r.date}-${h}`;
         if (!map[key]) map[key] = [];
-        map[key].push({ user: r.user, email: r.email });
+
+        // evita duplicados por persona
+        if (!map[key].some((u) => u.email === r.email)) {
+          map[key].push({ user: r.user, email: r.email });
+        }
       }
     }
 
     return map;
-  }, [filteredFuture]);
+  }, [weekRows]);
 
-  // -------------------------------------
-  // BEST MATCH (todas las franjas empatadas, por emails únicos)
-  // -------------------------------------
+  // ============================================
+  // BEST MATCH (franjas más votadas)
+  // ============================================
   const bestMatches = useMemo(() => {
     const entries = Object.entries(cellMap);
     if (entries.length === 0) return [];
 
-    // Calcular nº de personas únicas por slot
     const slotCounts = entries.map(([key, users]) => {
-      const emailSet = new Set(users.map((u) => u.email));
-      return { key, count: emailSet.size };
+      const uniqueUsers = new Set(users.map((u) => u.email));
+      return { key, count: uniqueUsers.size };
     });
 
     const maxVal = Math.max(...slotCounts.map((s) => s.count));
@@ -137,10 +151,9 @@ export default function AdminAvailabilitiesCalendar() {
     return slotCounts
       .filter((s) => s.count === maxVal)
       .map(({ key, count }) => {
-        // ⬇️ aquí estaba el bug: hay varios '-' en la fecha
         const lastDash = key.lastIndexOf("-");
-        const day = key.slice(0, lastDash);      // "2025-01-01"
-        const hour = Number(key.slice(lastDash + 1)); // 12
+        const day = key.slice(0, lastDash);
+        const hour = Number(key.slice(lastDash + 1));
 
         return {
           day,
@@ -151,14 +164,14 @@ export default function AdminAvailabilitiesCalendar() {
       });
   }, [cellMap]);
 
-  // Set con "YYYY-MM-DD-HH" de los bestMatches
-  const bestMatchKeys = useMemo(() => {
-    return new Set(bestMatches.map((b) => `${b.day}-${b.hour}`));
-  }, [bestMatches]);
+  const bestMatchKeys = useMemo(
+    () => new Set(bestMatches.map((b) => `${b.day}-${b.hour}`)),
+    [bestMatches]
+  );
 
-  // -------------------------------------
-  // MODAL: mostrar usuarios
-  // -------------------------------------
+  // ============================================
+  // MODAL USUARIOS
+  // ============================================
   function openSlotUsers(date, hour) {
     const key = `${date}-${hour}`;
     const users = cellMap[key] || [];
@@ -168,24 +181,40 @@ export default function AdminAvailabilitiesCalendar() {
     setModalOpen(true);
   }
 
-  // -------------------------------------
+  // ============================================
   // RENDER
-  // -------------------------------------
+  // ============================================
   return (
     <div>
       <Title order={3} mb="md">
-        Disponibilidades semanales
+        Disponibilidades (Semana actual y siguiente)
       </Title>
 
-      {/* FILTRO */}
+      {/* Filtro por dominio */}
       <TextInput
-        placeholder="Filtrar por código (dominio del email)"
+        placeholder="Filtrar por dominio (ej: gmail.com)"
         value={filterCode}
         onChange={(e) => setFilterCode(e.target.value)}
         mb="lg"
       />
 
-      {/* BEST MATCH */}
+      {/* Botones de semana */}
+      <Group mb="md">
+        <Button
+          disabled={weekOffset === 0}
+          onClick={() => setWeekOffset((v) => v - 1)}
+        >
+          Semana anterior
+        </Button>
+        <Button
+          disabled={weekOffset === 1}
+          onClick={() => setWeekOffset((v) => v + 1)}
+        >
+          Semana siguiente
+        </Button>
+      </Group>
+
+      {/* Mejor coincidencia */}
       {bestMatches.length > 0 && (
         <Card shadow="md" p="md" mb="lg" style={{ background: "#e8f7e4" }}>
           <Text fw={700} mb="xs">
@@ -202,14 +231,16 @@ export default function AdminAvailabilitiesCalendar() {
         </Card>
       )}
 
-      {/* CALENDARIO */}
+      {/* Calendario */}
       <Card shadow="md" p="lg">
         <Table withColumnBorders striped highlightOnHover>
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Hora</Table.Th>
               {days.map((d) => (
-                <Table.Th key={d}>{formatDay(d)}</Table.Th>
+                <Table.Th key={d.toISOString()}>
+                  {d.toLocaleDateString("es-ES")}
+                </Table.Th>
               ))}
             </Table.Tr>
           </Table.Thead>
@@ -217,25 +248,24 @@ export default function AdminAvailabilitiesCalendar() {
           <Table.Tbody>
             {hours.map((h) => (
               <Table.Tr key={h}>
-                <Table.Td>
-                  {pad2(h)}:00-{pad2(h + 1)}:00
-                </Table.Td>
+                <Table.Td>{pad2(h)}:00-{pad2(h + 1)}:00</Table.Td>
 
                 {days.map((d) => {
-                  const key = `${d}-${h}`;
+                  const date = formatISO(d);
+                  const key = `${date}-${h}`;
                   const count = cellMap[key]?.length || 0;
                   const isBest = bestMatchKeys.has(key);
 
                   return (
                     <Table.Td
                       key={key}
-                      onClick={() => count > 0 && openSlotUsers(d, h)}
+                      onClick={() => count > 0 && openSlotUsers(date, h)}
                       style={{
                         cursor: count > 0 ? "pointer" : "default",
                         background: isBest
-                          ? "#ffb3b3" // 🔴 best match
+                          ? "#ffb3b3"
                           : count > 0
-                          ? "#d3f5ff" // azul si hay gente
+                          ? "#d3f5ff"
                           : undefined,
                         textAlign: "center",
                         fontWeight: 600,
@@ -251,7 +281,7 @@ export default function AdminAvailabilitiesCalendar() {
         </Table>
       </Card>
 
-      {/* MODAL */}
+      {/* Modal usuarios */}
       <Modal
         opened={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -260,7 +290,7 @@ export default function AdminAvailabilitiesCalendar() {
         {modalUsers.length === 0 ? (
           <Text>No hay usuarios</Text>
         ) : (
-          <List spacing="xs" size="sm" center>
+          <List spacing="xs" size="sm">
             {modalUsers.map((u, i) => (
               <List.Item key={i}>
                 <b>{u.user}</b> — {u.email}
