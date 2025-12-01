@@ -80,13 +80,21 @@ export default function AdminAvailabilitiesCalendar() {
   today.setHours(0, 0, 0, 0);
 
   const baseWeekStart = startOfWeek(today);
-  const weekStart = useMemo(
-    () => new Date(baseWeekStart.getTime() + weekOffset * 7 * 86400000),
-    [baseWeekStart, weekOffset]
-  );
+const weekStart = useMemo(() => {
+  const d = new Date(baseWeekStart);
+  d.setDate(d.getDate() + weekOffset * 7);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}, [baseWeekStart, weekOffset]);
 
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 7);
+
+  const weekEnd = useMemo(() => {
+  const d = new Date(weekStart);
+  d.setDate(weekStart.getDate() + 7);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}, [weekStart]);
+
 
   // obtener filas solo de la semana visible
   const weekRows = useMemo(() => {
