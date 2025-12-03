@@ -450,6 +450,29 @@ def list_events(db: Session = Depends(get_db)):
         for e in events
     ]
 
+@app.get("/events/{event_id}")
+def get_event(
+    event_id: int,
+    db: Session = Depends(get_db),
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme)
+):
+    user = get_user_from_token(cred.credentials, db)
+    if user.role != "admin":
+        raise HTTPException(403, "No autorizado")
+
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    if not ev:
+        raise HTTPException(404, "Evento no encontrado")
+
+    return {
+        "id": ev.id,
+        "title": ev.title,
+        "description": ev.description,
+        "date": ev.date,
+        "start_time": ev.start_time,
+        "end_time": ev.end_time
+    }
+
 
 
 @app.get("/events/{event_id}/responses")

@@ -23,6 +23,11 @@ export const adminAPI = {
     return request("/events");
   },
 
+  getEvent(id) {
+  return request(`/events/${id}`);
+  },
+
+
   createEvent(payload) {
     return request("/events", "POST", payload);
   },
