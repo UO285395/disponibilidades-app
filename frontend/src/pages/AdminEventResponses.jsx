@@ -16,7 +16,7 @@ function resumirVotos(responses) {
     if (seen.has(key)) continue;
     seen.add(key);
 
-    if (r.answer === "yes") si++;
+    if (r.answer === "yes" || r.answer ==="si") si++;
     else if (r.answer === "no") no++;
   }
 
