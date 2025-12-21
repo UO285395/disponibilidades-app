@@ -52,7 +52,6 @@ export default function AdminDashboard() {
         <Tabs.List>
           <Tabs.Tab value="events">Eventos</Tabs.Tab>
           <Tabs.Tab value="availabilities-calendar">Calendario de disponibilidad</Tabs.Tab>
-          <Tabs.Tab value="availabilities">Disponibilidades semanales</Tabs.Tab>
           <Tabs.Tab value="users">Usuarios</Tabs.Tab>
         </Tabs.List>
 
@@ -62,10 +61,6 @@ export default function AdminDashboard() {
 
         <Tabs.Panel value="events" pt="xl">
           <AdminEvents />
-        </Tabs.Panel>
-
-        <Tabs.Panel value="availabilities" pt="xl">
-          <AdminAvailabilities />
         </Tabs.Panel>
 
         <Tabs.Panel value="availabilities-calendar" pt="xl">

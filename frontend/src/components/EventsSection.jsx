@@ -4,6 +4,8 @@ import { eventsAPI } from "../api/api.js";
 
 export default function EventsSection() {
   const [events, setEvents] = useState([]);
+  const [votedEvents, setVotedEvents] = useState(new Set());
+  const [sending, setSending] = useState(null); // id del evento en envío
 
   useEffect(() => {
     let cancelled = false;
@@ -23,14 +25,23 @@ export default function EventsSection() {
   }, []);
 
   async function respond(id, answer) {
+    if (votedEvents.has(id) || sending === id) return;
+
     const justification =
       document.getElementById("just_" + id)?.value.trim() || "";
+
     try {
+      setSending(id);
+
       await eventsAPI.respond(id, answer, justification);
-      alert("Respuesta enviada");
+
+      // marcar evento como votado
+      setVotedEvents((prev) => new Set(prev).add(id));
     } catch (e) {
       console.error("Error enviando respuesta", e);
       alert("Error enviando respuesta");
+    } finally {
+      setSending(null);
     }
   }
 
@@ -46,30 +57,53 @@ export default function EventsSection() {
         </Text>
       )}
 
-      {events.map((ev) => (
-        <Card key={ev.id} shadow="sm" p="md" radius="md" mb="md">
-          <b>{ev.title}</b> — {ev.date}
-          {ev.description && (
-            <Text size="sm" mt="xs">
-              {ev.description}
-            </Text>
-          )}
+      {events.map((ev) => {
+        const voted = votedEvents.has(ev.id);
+        const disabled = voted || sending === ev.id;
 
-          <Button mt="sm" mr="sm" onClick={() => respond(ev.id, "si")}>
-            Sí
-          </Button>
+        return (
+          <Card key={ev.id} shadow="sm" p="md" radius="md" mb="md">
+            <b>{ev.title}</b> — {ev.date}
 
-          <TextInput
-            id={`just_${ev.id}`}
-            placeholder="Justificación si respondes NO"
-            mt="sm"
-          />
-          
-          <Button mt="sm" color="red" onClick={() => respond(ev.id, "no")}>
-            No
-          </Button>
-        </Card>
-      ))}
+            {ev.description && (
+              <Text size="sm" mt="xs">
+                {ev.description}
+              </Text>
+            )}
+
+            {voted && (
+              <Text size="sm" c="green" mt="sm">
+                ✔ Respuesta enviada
+              </Text>
+            )}
+
+            <Button
+              mt="sm"
+              mr="sm"
+              disabled={disabled}
+              onClick={() => respond(ev.id, "si")}
+            >
+              Sí
+            </Button>
+
+            <TextInput
+              id={`just_${ev.id}`}
+              placeholder="Justificación (si respondes NO)"
+              mt="sm"
+              disabled={disabled}
+            />
+
+            <Button
+              mt="sm"
+              color="red"
+              disabled={disabled}
+              onClick={() => respond(ev.id, "no")}
+            >
+              No
+            </Button>
+          </Card>
+        );
+      })}
     </Card>
   );
 }

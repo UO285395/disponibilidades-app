@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Title, Button, Box, Text, Divider, Group } from "@mantine/core";
+import {
+  Title,
+  Button,
+  Box,
+  Text,
+  Divider,
+  Group
+} from "@mantine/core";
 import { userAPI, getToken, clearToken } from "../api/api.js";
 import WeekCalendar from "../components/WeekCalendar.jsx";
 import EventsSection from "../components/EventsSection.jsx";
@@ -36,29 +43,44 @@ export default function Dashboard() {
 
   return (
     <Box p="lg">
-      {/* Cabecera */}
+      {/* ================= CABECERA ================= */}
       <Box
         mb="lg"
         style={{
           display: "flex",
           justifyContent: "space-between",
-          alignItems: "center"
+          alignItems: "center",
+          gap: "1rem",
+          flexWrap: "wrap"
         }}
       >
-        <Box>
+        <Box style={{ minWidth: 250 }}>
           <Title order={2}>Camarada, {user.full_name}</Title>
           <Text size="sm" c="dimmed">
             {user.email}
           </Text>
         </Box>
 
-        <Group>
+        <Group
+          style={{
+            flexWrap: "wrap",
+            justifyContent: "flex-end"
+          }}
+        >
           {user.role === "admin" && (
-            <Button variant="outline" onClick={() => navigate("/admin")}>
+            <Button
+              variant="outline"
+              onClick={() => navigate("/admin")}
+              fullWidth={window.innerWidth < 768}
+            >
               Ir al panel admin
             </Button>
           )}
-          <Button color="red" onClick={logout}>
+          <Button
+            color="red"
+            onClick={logout}
+            fullWidth={window.innerWidth < 768}
+          >
             Cerrar sesión
           </Button>
         </Group>
@@ -66,50 +88,64 @@ export default function Dashboard() {
 
       <Divider my="md" />
 
-      {/* Contenido principal: calendario + eventos */}
+      {/* ================= CONTENIDO ================= */}
       <Box
         mt="md"
         style={{
           display: "grid",
           gridTemplateColumns: "2fr 1fr",
-          gap: "1.5rem"
+          gap: "1.5rem",
+          alignItems: "stretch"
+        }}
+        sx={{
+          "@media (max-width: 768px)": {
+            gridTemplateColumns: "1fr"
+          }
         }}
       >
-        {/* Calendario semanal */}
+        {/* ===== Calendario ===== */}
         <Box
           style={{
             border: "1px solid #e0e0e0",
             borderRadius: 8,
             padding: "1rem",
-            backgroundColor: "white"
+            backgroundColor: "white",
+            overflowX: "auto"
           }}
         >
-          <Group mb="md">
+          <Group
+            mb="md"
+            position="apart"
+            style={{ flexWrap: "wrap", gap: "0.5rem" }}
+          >
             <Title order={3}>Disponibilidad</Title>
-            <Button
-              size="xs"
-              variant={offsetWeeks === 0 ? "filled" : "outline"}
-              onClick={() => setOffsetWeeks(0)}
-            >
-              Semana actual
-            </Button>
-            <Button
-              size="xs"
-              variant={offsetWeeks === 1 ? "filled" : "outline"}
-              onClick={() => setOffsetWeeks(1)}
-            >
-              Semana siguiente
-            </Button>
+
+            <Group>
+              <Button
+                size="xs"
+                variant={offsetWeeks === 0 ? "filled" : "outline"}
+                onClick={() => setOffsetWeeks(0)}
+              >
+                Semana actual
+              </Button>
+              <Button
+                size="xs"
+                variant={offsetWeeks === 1 ? "filled" : "outline"}
+                onClick={() => setOffsetWeeks(1)}
+              >
+                Semana siguiente
+              </Button>
+            </Group>
           </Group>
 
           <Text size="sm" c="dimmed" mb="md">
-            Haz clic en las celdas para marcar o desmarcar tu disponibilidad por horas.
+            Marca tu disponibilidad por horas pulsando sobre las celdas.
           </Text>
 
           <WeekCalendar offsetWeeks={offsetWeeks} />
         </Box>
 
-        {/* Eventos */}
+        {/* ===== Eventos ===== */}
         <Box
           style={{
             border: "1px solid #e0e0e0",
