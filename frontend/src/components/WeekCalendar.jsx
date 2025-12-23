@@ -126,9 +126,22 @@ async function loadAvailability() {
       <Table striped highlightOnHover withColumnBorders>
         <Table.Thead>
           <Table.Tr>
-            <Table.Th>Hora</Table.Th>
+            <Table.Th
+  style={{
+    position: "sticky",
+    left: 0,
+    background: "white",
+    zIndex: 3,
+  }}
+>
+  Hora
+</Table.Th>
             {days.map((d, i) => (
-              <Table.Th key={i}>{d.toLocaleDateString("es-ES")}</Table.Th>
+              <Table.Th key={i}>{d.toLocaleDateString("es-ES", {
+  weekday: "short",
+  day: "2-digit",
+})}
+</Table.Th>
             ))}
           </Table.Tr>
         </Table.Thead>

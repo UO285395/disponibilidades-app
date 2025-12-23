@@ -240,14 +240,40 @@ const weekStart = useMemo(() => {
       )}
 
       {/* Calendario */}
-      <Card shadow="md" p="lg">
-        <Table withColumnBorders striped highlightOnHover>
-          <Table.Thead>
+<Card shadow="md" p="lg">
+  <div
+    style={{
+      overflowX: "auto",
+      WebkitOverflowScrolling: "touch",
+    }}
+  >
+    <Table
+      withColumnBorders
+      striped
+      highlightOnHover
+      style={{
+        minWidth: 900, // fuerza scroll en móvil
+      }}
+    >
+<Table.Thead>
             <Table.Tr>
-              <Table.Th>Hora</Table.Th>
+             <Table.Th
+  style={{
+    position: "sticky",
+    left: 0,
+    background: "white",
+    zIndex: 3,
+  }}
+>
+  Hora
+</Table.Th>
+
               {days.map((d) => (
                 <Table.Th key={d.toISOString()}>
-                  {d.toLocaleDateString("es-ES")}
+                 {d.toLocaleDateString("es-ES", {
+  weekday: "short",
+  day: "2-digit",
+})}
                 </Table.Th>
               ))}
             </Table.Tr>
@@ -256,7 +282,17 @@ const weekStart = useMemo(() => {
           <Table.Tbody>
             {hours.map((h) => (
               <Table.Tr key={h}>
-                <Table.Td>{pad2(h)}:00-{pad2(h + 1)}:00</Table.Td>
+                <Table.Td
+  style={{
+    position: "sticky",
+    left: 0,
+    background: "white",
+    zIndex: 2,
+    fontWeight: 600,
+  }}
+>
+  {pad2(h)}:00-{pad2(h + 1)}:00
+</Table.Td>
 
                 {days.map((d) => {
                   const date = formatISO(d);
@@ -287,6 +323,7 @@ const weekStart = useMemo(() => {
             ))}
           </Table.Tbody>
         </Table>
+        </div>
       </Card>
 
       {/* Modal usuarios */}

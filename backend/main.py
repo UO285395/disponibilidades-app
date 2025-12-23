@@ -93,29 +93,24 @@ def get_user_from_token(token: str, db: Session):
 # LIMPIEZA AUTOMÁTICA CENTRALIZADA
 # =========================================================
 def cleanup_expired_data(db: Session):
-    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    today = datetime.utcnow().date()
+    today_str = today.strftime("%Y-%m-%d")
 
     # --- Eventos expirados ---
     expired_events = db.query(Event).filter(Event.date < today_str).all()
     expired_event_ids = [e.id for e in expired_events]
 
     if expired_event_ids:
-        # Borrar votos
         db.query(EventResponse)\
-            .filter(EventResponse.event_id.in_(expired_event_ids))\
-            .delete(synchronize_session=False)
+          .filter(EventResponse.event_id.in_(expired_event_ids))\
+          .delete(synchronize_session=False)
 
-        # Borrar eventos
         db.query(Event)\
-            .filter(Event.id.in_(expired_event_ids))\
-            .delete(synchronize_session=False)
-
-    # --- Disponibilidades pasadas ---
-    db.query(Availability)\
-        .filter(Availability.date < today_str)\
-        .delete(synchronize_session=False)
+          .filter(Event.id.in_(expired_event_ids))\
+          .delete(synchronize_session=False)
 
     db.commit()
+
 
 
 # =========================================================
@@ -317,7 +312,6 @@ def get_my_availability(
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
     db: Session = Depends(get_db)
 ):
-    cleanup_expired_data(db)
     user = get_user_from_token(cred.credentials, db)
     return db.query(Availability).filter(Availability.user_id == user.id).all()
 
@@ -361,3 +355,36 @@ def delete_availability(
     db.delete(a)
     db.commit()
     return {"ok": True}
+
+
+@app.get("/admin/availability")
+def admin_all_availability(
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    if admin.role != "admin":
+        raise HTTPException(403, "No autorizado")
+
+    # 🔥 limpieza SOLO aquí
+    limit = (datetime.utcnow().date() - timedelta(days=14)).strftime("%Y-%m-%d")
+
+    db.query(Availability)\
+      .filter(Availability.date < limit)\
+      .delete(synchronize_session=False)
+
+    db.commit()
+
+    items = db.query(Availability).all()
+
+    return [
+        {
+            "id": a.id,
+            "user": a.user.full_name,
+            "email": a.user.email,
+            "date": a.date,
+            "start_time": a.start_time,
+            "end_time": a.end_time,
+        }
+        for a in items
+    ]
