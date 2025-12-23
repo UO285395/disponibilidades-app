@@ -5,24 +5,32 @@ import { eventsAPI } from "../api/api.js";
 export default function EventsSection() {
   const [events, setEvents] = useState([]);
   const [votedEvents, setVotedEvents] = useState(new Set());
-  const [sending, setSending] = useState(null); // id del evento en envío
+  const [sending, setSending] = useState(null);
 
-  useEffect(() => {
-    let cancelled = false;
+useEffect(() => {
+  let cancelled = false;
 
-    (async () => {
-      try {
-        const data = await eventsAPI.list();
-        if (!cancelled) setEvents(data);
-      } catch (e) {
-        console.error("Error cargando eventos", e);
+  (async () => {
+    try {
+      const [eventsData, votedIds] = await Promise.all([
+        eventsAPI.list(),
+        eventsAPI.myResponses()
+      ]);
+
+      if (!cancelled) {
+        setEvents(eventsData);
+        setVotedEvents(new Set(votedIds));
       }
-    })();
+    } catch (e) {
+      console.error("Error cargando eventos", e);
+    }
+  })();
 
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  return () => {
+    cancelled = true;
+  };
+}, []);
+
 
   async function respond(id, answer) {
     if (votedEvents.has(id) || sending === id) return;
@@ -32,10 +40,7 @@ export default function EventsSection() {
 
     try {
       setSending(id);
-
       await eventsAPI.respond(id, answer, justification);
-
-      // marcar evento como votado
       setVotedEvents((prev) => new Set(prev).add(id));
     } catch (e) {
       console.error("Error enviando respuesta", e);
@@ -63,7 +68,16 @@ export default function EventsSection() {
 
         return (
           <Card key={ev.id} shadow="sm" p="md" radius="md" mb="md">
-            <b>{ev.title}</b> — {ev.date}
+            <Text fw={700}>{ev.title}</Text>
+
+            {/* FECHA + HORA */}
+            <Text size="sm" c="dimmed">
+              {ev.date} ·{" "}
+              <Text component="span" fw={700} size="md">
+                {ev.start_time}
+                {ev.end_time && ` – ${ev.end_time}`}
+              </Text>
+            </Text>
 
             {ev.description && (
               <Text size="sm" mt="xs">
@@ -73,7 +87,7 @@ export default function EventsSection() {
 
             {voted && (
               <Text size="sm" c="green" mt="sm">
-                ✔ Respuesta enviada
+                ✔ Ya has votado en este evento
               </Text>
             )}
 
@@ -81,7 +95,7 @@ export default function EventsSection() {
               mt="sm"
               mr="sm"
               disabled={disabled}
-              onClick={() => respond(ev.id, "si")}
+              onClick={() => respond(ev.id, "yes")}
             >
               Sí
             </Button>

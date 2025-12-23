@@ -294,6 +294,18 @@ def respond_event(
 ):
     user = get_user_from_token(cred.credentials, db)
 
+    existing = (
+        db.query(EventResponse)
+        .filter(
+            EventResponse.event_id == event_id,
+            EventResponse.user_id == user.id
+        )
+        .first()
+    )
+
+    if existing:
+        raise HTTPException(400, "Ya has votado en este evento")
+
     db.add(EventResponse(
         event_id=event_id,
         user_id=user.id,
@@ -301,7 +313,23 @@ def respond_event(
         justification=data.justification
     ))
     db.commit()
+
     return {"ok": True}
+
+
+@app.get("/events/my-responses")
+def my_event_responses(
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    user = get_user_from_token(cred.credentials, db)
+
+    return [
+        r.event_id
+        for r in db.query(EventResponse)
+                   .filter(EventResponse.user_id == user.id)
+                   .all()
+    ]
 
 
 # =========================================================

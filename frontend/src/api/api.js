@@ -66,13 +66,19 @@ export const eventsAPI = {
   list() {
     return request("/events");
   },
+
   respond(event_id, answer, justification) {
     return request(`/events/${event_id}/responses`, "POST", {
       answer,
       justification
     });
+  },
+
+  myResponses() {
+    return request("/events/my-responses");
   }
 };
+
 
 // ------------------- AVAILABILITY (usuario) -------------------
 
