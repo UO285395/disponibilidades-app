@@ -7,30 +7,35 @@ export default function EventsSection() {
   const [votedEvents, setVotedEvents] = useState(new Set());
   const [sending, setSending] = useState(null);
 
-useEffect(() => {
-  let cancelled = false;
+  useEffect(() => {
+    let cancelled = false;
 
-  (async () => {
-    try {
-      const [eventsData, votedIds] = await Promise.all([
-        eventsAPI.list(),
-        eventsAPI.myResponses()
-      ]);
-
-      if (!cancelled) {
-        setEvents(eventsData);
-        setVotedEvents(new Set(votedIds));
+    (async () => {
+      // 1) Cargar eventos SIEMPRE
+      try {
+        const eventsData = await eventsAPI.list();
+        if (!cancelled) setEvents(eventsData);
+      } catch (e) {
+        console.error("Error cargando eventos", e);
+        return;
       }
-    } catch (e) {
-      console.error("Error cargando eventos", e);
-    }
-  })();
 
-  return () => {
-    cancelled = true;
-  };
-}, []);
+      // 2) Intentar cargar eventos ya votados (si falla, no rompe la vista)
+      try {
+        const votedIds = await eventsAPI.myResponses();
+        if (!cancelled) setVotedEvents(new Set(votedIds));
+      } catch (e) {
+        console.warn(
+          "No se pudo cargar /events/my-responses (no bloquea el listado de eventos):",
+          e
+        );
+      }
+    })();
 
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function respond(id, answer) {
     if (votedEvents.has(id) || sending === id) return;
@@ -41,7 +46,13 @@ useEffect(() => {
     try {
       setSending(id);
       await eventsAPI.respond(id, answer, justification);
-      setVotedEvents((prev) => new Set(prev).add(id));
+
+      // marcar como votado
+      setVotedEvents((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
     } catch (e) {
       console.error("Error enviando respuesta", e);
       alert("Error enviando respuesta");
@@ -70,12 +81,12 @@ useEffect(() => {
           <Card key={ev.id} shadow="sm" p="md" radius="md" mb="md">
             <Text fw={700}>{ev.title}</Text>
 
-            {/* FECHA + HORA */}
+            {/* Fecha + hora (hora en negrita y un poco más grande) */}
             <Text size="sm" c="dimmed">
               {ev.date} ·{" "}
               <Text component="span" fw={700} size="md">
-                {ev.start_time}
-                {ev.end_time && ` – ${ev.end_time}`}
+                {ev.start_time || ""}
+                {ev.end_time ? ` – ${ev.end_time}` : ""}
               </Text>
             </Text>
 
