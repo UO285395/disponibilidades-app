@@ -215,7 +215,6 @@ def create_event(
 
 @app.get("/events")
 def list_events(db: Session = Depends(get_db)):
-    cleanup_expired_data(db)
 
     return [
         {
@@ -240,8 +239,6 @@ def get_event(
     if admin.role != "admin":
         raise HTTPException(403, "No autorizado")
 
-    cleanup_expired_data(db)
-
     ev = db.query(Event).filter(Event.id == event_id).first()
     if not ev:
         raise HTTPException(404, "Evento no encontrado")
@@ -265,8 +262,6 @@ def event_responses(
     admin = get_user_from_token(cred.credentials, db)
     if admin.role != "admin":
         raise HTTPException(403, "No autorizado")
-
-    cleanup_expired_data(db)
 
     resp = (
         db.query(EventResponse, User)
@@ -332,6 +327,7 @@ def my_event_responses(
     ]
 
 
+
 # =========================================================
 # DISPONIBILIDADES
 # =========================================================
@@ -394,7 +390,8 @@ def admin_all_availability(
     if admin.role != "admin":
         raise HTTPException(403, "No autorizado")
 
-    # 🔥 limpieza SOLO aquí
+    cleanup_expired_data(db)
+    
     limit = (datetime.utcnow().date() - timedelta(days=14)).strftime("%Y-%m-%d")
 
     db.query(Availability)\
@@ -402,6 +399,7 @@ def admin_all_availability(
       .delete(synchronize_session=False)
 
     db.commit()
+
 
     items = db.query(Availability).all()
 
