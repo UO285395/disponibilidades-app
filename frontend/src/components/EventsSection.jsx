@@ -6,29 +6,28 @@ export default function EventsSection() {
   const [events, setEvents] = useState([]);
   const [votedEvents, setVotedEvents] = useState(new Set());
   const [sending, setSending] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
-      // 1) Cargar eventos SIEMPRE
       try {
+        // 1️⃣ Cargar eventos
         const eventsData = await eventsAPI.list();
-        if (!cancelled) setEvents(eventsData);
-      } catch (e) {
-        console.error("Error cargando eventos", e);
-        return;
-      }
+        if (cancelled) return;
+        setEvents(eventsData);
 
-      // 2) Intentar cargar eventos ya votados (si falla, no rompe la vista)
-      try {
+        // 2️⃣ Cargar eventos ya votados
         const votedIds = await eventsAPI.myResponses();
-        if (!cancelled) setVotedEvents(new Set(votedIds));
+        if (cancelled) return;
+
+        // 🔒 Marcar como votados desde el inicio
+        setVotedEvents(new Set(votedIds));
       } catch (e) {
-        console.warn(
-          "No se pudo cargar /events/my-responses (no bloquea el listado de eventos):",
-          e
-        );
+        console.error("Error cargando eventos o votos", e);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
 
@@ -47,7 +46,7 @@ export default function EventsSection() {
       setSending(id);
       await eventsAPI.respond(id, answer, justification);
 
-      // marcar como votado
+      // 🔒 Persistir estado tras votar
       setVotedEvents((prev) => {
         const next = new Set(prev);
         next.add(id);
@@ -55,10 +54,20 @@ export default function EventsSection() {
       });
     } catch (e) {
       console.error("Error enviando respuesta", e);
-      alert("Error enviando respuesta");
+      alert(e.message || "Error enviando respuesta");
     } finally {
       setSending(null);
     }
+  }
+
+  if (loading) {
+    return (
+      <Card shadow="md" p="lg">
+        <Text size="sm" c="dimmed">
+          Cargando eventos…
+        </Text>
+      </Card>
+    );
   }
 
   return (
@@ -81,12 +90,12 @@ export default function EventsSection() {
           <Card key={ev.id} shadow="sm" p="md" radius="md" mb="md">
             <Text fw={700}>{ev.title}</Text>
 
-            {/* Fecha + hora (hora en negrita y un poco más grande) */}
+            {/* Fecha normal + hora en negrita */}
             <Text size="sm" c="dimmed">
               {ev.date} ·{" "}
               <Text component="span" fw={700} size="md">
-                {ev.start_time || ""}
-                {ev.end_time ? ` – ${ev.end_time}` : ""}
+                {ev.start_time}
+                {ev.end_time && ` – ${ev.end_time}`}
               </Text>
             </Text>
 
