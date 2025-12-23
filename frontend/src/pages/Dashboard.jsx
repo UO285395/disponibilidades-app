@@ -1,13 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  Title,
-  Button,
-  Box,
-  Text,
-  Divider,
-  Group
-} from "@mantine/core";
+import { Title, Button, Box, Text, Divider, Group } from "@mantine/core";
 import { userAPI, getToken, clearToken } from "../api/api.js";
 import WeekCalendar from "../components/WeekCalendar.jsx";
 import EventsSection from "../components/EventsSection.jsx";
@@ -50,37 +43,22 @@ export default function Dashboard() {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          gap: "1rem",
-          flexWrap: "wrap"
         }}
       >
-        <Box style={{ minWidth: 250 }}>
+        <Box>
           <Title order={2}>Camarada, {user.full_name}</Title>
           <Text size="sm" c="dimmed">
             {user.email}
           </Text>
         </Box>
 
-        <Group
-          style={{
-            flexWrap: "wrap",
-            justifyContent: "flex-end"
-          }}
-        >
+        <Group>
           {user.role === "admin" && (
-            <Button
-              variant="outline"
-              onClick={() => navigate("/admin")}
-              fullWidth={window.innerWidth < 768}
-            >
+            <Button variant="outline" onClick={() => navigate("/admin")}>
               Ir al panel admin
             </Button>
           )}
-          <Button
-            color="red"
-            onClick={logout}
-            fullWidth={window.innerWidth < 768}
-          >
+           <Button color="red" onClick={logout}>
             Cerrar sesión
           </Button>
         </Group>
@@ -95,12 +73,6 @@ export default function Dashboard() {
           display: "grid",
           gridTemplateColumns: "2fr 1fr",
           gap: "1.5rem",
-          alignItems: "stretch"
-        }}
-        sx={{
-          "@media (max-width: 768px)": {
-            gridTemplateColumns: "1fr"
-          }
         }}
       >
         {/* ===== Calendario ===== */}
@@ -110,37 +82,29 @@ export default function Dashboard() {
             borderRadius: 8,
             padding: "1rem",
             backgroundColor: "white",
-            overflowX: "auto"
           }}
         >
-          <Group
-            mb="md"
-            position="apart"
-            style={{ flexWrap: "wrap", gap: "0.5rem" }}
-          >
+          <Group mb="md">
             <Title order={3}>Disponibilidad</Title>
 
-            <Group>
-              <Button
-                size="xs"
-                variant={offsetWeeks === 0 ? "filled" : "outline"}
-                onClick={() => setOffsetWeeks(0)}
-              >
-                Semana actual
-              </Button>
-              <Button
-                size="xs"
-                variant={offsetWeeks === 1 ? "filled" : "outline"}
-                onClick={() => setOffsetWeeks(1)}
-              >
-                Semana siguiente
-              </Button>
-            </Group>
+             <Button
+              size="xs"
+              variant={offsetWeeks === 0 ? "filled" : "outline"}
+              onClick={() => setOffsetWeeks(0)}
+            >
+              Semana actual
+            </Button>
+            <Button
+              size="xs"
+              variant={offsetWeeks === 1 ? "filled" : "outline"}
+              onClick={() => setOffsetWeeks(1)}
+            >
+              Semana siguiente
+            </Button>
           </Group>
 
           <Text size="sm" c="dimmed" mb="md">
-            Marca tu disponibilidad por horas pulsando sobre las celdas.
-          </Text>
+            Haz clic en las celdas para marcar o desmarcar tu disponibilidad por horas.</Text>
 
           <WeekCalendar offsetWeeks={offsetWeeks} />
         </Box>
