@@ -257,14 +257,7 @@ const weekStart = useMemo(() => {
     >
 <Table.Thead>
             <Table.Tr>
-             <Table.Th
-  style={{
-    position: "sticky",
-    left: 0,
-    background: "white",
-    zIndex: 3,
-  }}
->
+             <Table.Th>
   Hora
 </Table.Th>
 
@@ -282,16 +275,8 @@ const weekStart = useMemo(() => {
           <Table.Tbody>
             {hours.map((h) => (
               <Table.Tr key={h}>
-                <Table.Td
-  style={{
-    position: "sticky",
-    left: 0,
-    background: "white",
-    zIndex: 2,
-    fontWeight: 600,
-  }}
->
-  {pad2(h)}:00-{pad2(h + 1)}:00
+                <Table.Td  style={{textAlign: "center"}}>
+  {pad2(h)}:00 - {pad2(h + 1)}:00
 </Table.Td>
 
                 {days.map((d) => {
