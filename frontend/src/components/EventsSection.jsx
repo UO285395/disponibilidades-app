@@ -106,7 +106,7 @@ export default function EventsSection() {
               mt="sm"
               mr="sm"
               disabled={disabled}
-              onClick={() => respond(ev.id, "yes")}
+              onClick={() => respond(ev.id, "si")}
             >
               Sí
             </Button>
