@@ -44,4 +44,6 @@ export const adminAPI = {
   listAvailabilities() {
     return request("/admin/availability");
   }
+
+  
 };

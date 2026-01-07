@@ -185,6 +185,87 @@ def me(
         "role": user.role
     }
 
+@app.post("/admin/become_admin")
+def become_admin(
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    user = get_user_from_token(cred.credentials, db)
+
+    # seguridad mínima: solo si no hay admins aún
+    existing_admin = db.query(User).filter(User.role == "admin").first()
+    if existing_admin:
+        raise HTTPException(403, "Ya existe un admin")
+
+    user.role = "admin"
+    db.commit()
+
+    return {"ok": True}
+
+
+@app.get("/admin/users")
+def admin_list_users(
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    if admin.role != "admin":
+        raise HTTPException(403, "No autorizado")
+
+    return [
+        {
+            "id": u.id,
+            "full_name": u.full_name,
+            "email": u.email,
+            "role": u.role
+        }
+        for u in db.query(User).all()
+    ]
+
+
+@app.post("/admin/remove_admin/{user_id}")
+def remove_admin(
+    user_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    if admin.role != "admin":
+        raise HTTPException(403, "No autorizado")
+
+    if admin.id == user_id:
+        raise HTTPException(400, "No puedes quitarte el rol a ti mismo")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "Usuario no encontrado")
+
+    user.role = "user"
+    db.commit()
+
+    return {"ok": True}
+
+
+@app.post("/admin/make_admin/{user_id}")
+def make_admin(
+    user_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    if admin.role != "admin":
+        raise HTTPException(403, "No autorizado")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "Usuario no encontrado")
+
+    user.role = "admin"
+    db.commit()
+
+    return {"ok": True}
+
+
 
 # =========================================================
 # EVENTOS
@@ -391,7 +472,7 @@ def admin_all_availability(
         raise HTTPException(403, "No autorizado")
 
     cleanup_expired_data(db)
-    
+
     limit = (datetime.utcnow().date() - timedelta(days=14)).strftime("%Y-%m-%d")
 
     db.query(Availability)\
