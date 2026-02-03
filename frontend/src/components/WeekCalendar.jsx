@@ -147,7 +147,7 @@ async function loadAvailability() {
         </Table.Thead>
 
         <Table.Tbody>
-          {Array.from({ length: 14 }, (_, h) => h + 8).map((hour) => (
+          {Array.from({ length: 15 }, (_, h) => h + 8).map((hour) => (
             <Table.Tr key={hour}>
               <Table.Td>{pad2(hour)}:00 - {pad2(hour + 1)}:00</Table.Td>
               {days.map((d, idx) => {
