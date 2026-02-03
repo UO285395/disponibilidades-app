@@ -407,6 +407,29 @@ def my_event_responses(
                    .all()
     ]
 
+@app.delete("/events/{event_id}")
+def delete_event(
+    event_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    if admin.role != "admin":
+        raise HTTPException(403, "Solo admin")
+
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    if not ev:
+        raise HTTPException(404, "Evento no encontrado")
+
+    # borrar primero respuestas asociadas
+    db.query(EventResponse)\
+      .filter(EventResponse.event_id == event_id)\
+      .delete(synchronize_session=False)
+
+    db.delete(ev)
+    db.commit()
+
+    return {"ok": True}
 
 
 # =========================================================

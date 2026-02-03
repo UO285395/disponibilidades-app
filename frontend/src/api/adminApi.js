@@ -33,7 +33,7 @@ export const adminAPI = {
   },
 
   deleteEvent(id) {
-    return request(`/admin/events/${id}`, "DELETE");
+  return request(`/events/${id}`, "DELETE");
   },
 
   getEventResponses(eventId) {
