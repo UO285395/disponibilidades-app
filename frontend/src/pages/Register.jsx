@@ -1,7 +1,13 @@
 import { useState } from "react";
-import { authAPI } from "../api/api";
-import { Box, Input, Button, Heading, VStack } from "@chakra-ui/react";
 import { useNavigate } from "react-router-dom";
+import {
+  TextInput,
+  PasswordInput,
+  Button,
+  Card,
+  Title
+} from "@mantine/core";
+import { authAPI } from "../api/api";
 
 export default function Register() {
   const nav = useNavigate();
@@ -9,47 +15,65 @@ export default function Register() {
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
 
-  async function doRegister() {
+  async function doRegister(e) {
+    e.preventDefault();
+
     try {
       await authAPI.register(email, fullName, password);
       alert("Usuario registrado. Inicia sesión.");
       nav("/");
-    } catch (e) {
+    } catch (err) {
       alert("Error al registrarse");
-      console.error(e);
+      console.error(err);
     }
   }
 
   return (
-    <Box maxW="350px" mx="auto" mt="100px">
-      <Heading textAlign="center" mb={4}>
-        Registro
-      </Heading>
+    <div style={{ maxWidth: 400, margin: "80px auto" }}>
+      <Card shadow="md" padding="lg" radius="md">
+        <Title order={2} align="center" mb="lg">
+          Registro
+        </Title>
 
-      <VStack spacing={3}>
-        <Input
-          placeholder="Nombre completo"
-          value={fullName}
-          onChange={(e) => setFullName(e.target.value)}
-        />
+        <form onSubmit={doRegister}>
+          <TextInput
+            label="Nombre completo"
+            placeholder="Nombre completo"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            mb="md"
+          />
 
-        <Input
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
+          <TextInput
+            label="Email"
+            placeholder="usuario@colectivo"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            mb="md"
+          />
 
-        <Input
-          placeholder="Contraseña"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
+          <PasswordInput
+            label="Contraseña"
+            placeholder="••••••••••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            mb="md"
+          />
 
-        <Button colorScheme="green" w="100%" onClick={doRegister}>
-          Crear cuenta
+          <Button fullWidth mt="md" type="submit">
+            Crear cuenta
+          </Button>
+        </form>
+
+        <Button
+          variant="subtle"
+          mt="md"
+          fullWidth
+          onClick={() => nav("/")}
+        >
+          Volver a iniciar sesión
         </Button>
-      </VStack>
-    </Box>
+      </Card>
+    </div>
   );
 }

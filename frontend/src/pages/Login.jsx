@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   TextInput,
   PasswordInput,
@@ -11,6 +12,7 @@ import { authAPI } from "../api/api.js";
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const navigate = useNavigate();
 
   async function handleLogin(e) {
     e.preventDefault(); // evita recarga al pulsar Enter
@@ -52,6 +54,15 @@ export default function Login() {
             Entrar
           </Button>
         </form>
+
+        <Button
+          variant="subtle"
+          mt="md"
+          fullWidth
+          onClick={() => navigate("/register")}
+        >
+          Crear cuenta nueva
+        </Button>
       </Card>
     </div>
   );

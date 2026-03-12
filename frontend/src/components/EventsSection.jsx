@@ -54,7 +54,13 @@ export default function EventsSection() {
       });
     } catch (e) {
       console.error("Error enviando respuesta", e);
-      alert(e.message || "Error enviando respuesta");
+
+      const message = e?.message || "";
+      if (message.includes("Ya has votado en este evento")) {
+        alert("Ya has votado en este evento.");
+      } else {
+        alert(message || "Error enviando respuesta");
+      }
     } finally {
       setSending(null);
     }

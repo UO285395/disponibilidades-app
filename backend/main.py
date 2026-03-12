@@ -297,17 +297,42 @@ def create_event(
 @app.get("/events")
 def list_events(db: Session = Depends(get_db)):
 
-    return [
-        {
-            "id": e.id,
-            "title": e.title,
-            "description": e.description,
-            "date": e.date,
-            "start_time": e.start_time,
-            "end_time": e.end_time,
-        }
-        for e in db.query(Event).all()
-    ]
+    events = db.query(Event).all()
+
+    result = []
+    for e in events:
+        yes_count = (
+            db.query(EventResponse)
+            .filter(
+                EventResponse.event_id == e.id,
+                EventResponse.answer.in_(["yes", "si"]),
+            )
+            .count()
+        )
+
+        no_count = (
+            db.query(EventResponse)
+            .filter(
+                EventResponse.event_id == e.id,
+                EventResponse.answer == "no",
+            )
+            .count()
+        )
+
+        result.append(
+            {
+                "id": e.id,
+                "title": e.title,
+                "description": e.description,
+                "date": e.date,
+                "start_time": e.start_time,
+                "end_time": e.end_time,
+                "yes_count": yes_count,
+                "no_count": no_count,
+            }
+        )
+
+    return result
 
 
 @app.get("/events/{event_id}")

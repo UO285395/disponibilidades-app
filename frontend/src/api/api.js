@@ -51,6 +51,14 @@ export const authAPI = {
     const data = await request("/login", "POST", { email, password });
     setToken(data.access_token);
     return data;
+  },
+
+  async register(email, fullName, password) {
+    return request("/register", "POST", {
+      email,
+      full_name: fullName,
+      password
+    });
   }
 };
 

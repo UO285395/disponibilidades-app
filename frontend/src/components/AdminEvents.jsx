@@ -3,25 +3,6 @@ import { Card, Button, TextInput, Title, Textarea, Text } from "@mantine/core";
 import { adminAPI } from "../api/adminApi.js";
 import { useNavigate } from "react-router-dom";
 
-function contarSiNo(answers = []) {
-  const unique = new Map();
-
-  for (const a of answers) {
-    if (!unique.has(a.user_id)) {
-      unique.set(a.user_id, a.answer); // "yes" o "no"
-    }
-  }
-
-  let si = 0, no = 0;
-
-  for (const v of unique.values()) {
-    if (v === "yes" || v==="si") si++;
-    else if (v === "no") no++;
-  }
-
-  return { si, no };
-}
-
 export default function AdminEvents() {
   const [events, setEvents] = useState([]);
   const [title, setTitle] = useState("");
@@ -133,20 +114,11 @@ export default function AdminEvents() {
           {ev.description && <p>{ev.description}</p>}
 
           {/* Resumen de votos Sí / No */}
-          {ev.answers && ev.answers.length > 0 && (
-            <div style={{ marginTop: "10px" }}>
-              <b>Resumen de votos:</b>
-              {(() => {
-                const { si, no } = contarSiNo(ev.answers);
-                return (
-                  <>
-                    <div>Sí: {si}</div>
-                    <div>No: {no}</div>
-                  </>
-                );
-              })()}
-            </div>
-          )}
+          <div style={{ marginTop: "10px" }}>
+            <b>Resumen de votos:</b>
+            <div>Sí: {ev.yes_count ?? 0}</div>
+            <div>No: {ev.no_count ?? 0}</div>
+          </div>
 
           <Button
             mt="sm"
