@@ -18,12 +18,20 @@ export default function EventsSection() {
         if (cancelled) return;
         setEvents(eventsData);
 
-        // 2️⃣ Cargar eventos ya votados
-        const votedIds = await eventsAPI.myResponses();
+        // 2️⃣ Cargar eventos ya votados desde API
+        const votedIdsFromApi = await eventsAPI.myResponses();
         if (cancelled) return;
 
+        // 3️⃣ Combinar con lo guardado en localStorage (persistencia entre recargas)
+        const storedRaw = localStorage.getItem("voted_events");
+        const storedIds = storedRaw ? JSON.parse(storedRaw) : [];
+
+        const mergedIds = Array.from(
+          new Set([...votedIdsFromApi, ...storedIds])
+        );
+
         // 🔒 Marcar como votados desde el inicio
-        setVotedEvents(new Set(votedIds));
+        setVotedEvents(new Set(mergedIds));
       } catch (e) {
         console.error("Error cargando eventos o votos", e);
       } finally {
@@ -52,6 +60,18 @@ export default function EventsSection() {
         next.add(id);
         return next;
       });
+
+      // Guardar también en localStorage para que siga deshabilitado tras recargar
+      try {
+        const raw = localStorage.getItem("voted_events");
+        const current = raw ? JSON.parse(raw) : [];
+        if (!current.includes(id)) {
+          current.push(id);
+        }
+        localStorage.setItem("voted_events", JSON.stringify(current));
+      } catch {
+        // si localStorage falla, simplemente lo ignoramos
+      }
     } catch (e) {
       console.error("Error enviando respuesta", e);
 

@@ -156,8 +156,10 @@ const weekStart = useMemo(() => {
     const maxVal = Math.max(...slotCounts.map((s) => s.count));
     if (maxVal === 0) return [];
 
+    // Tomar solo las primeras 5 franjas con máximo número de personas
     return slotCounts
       .filter((s) => s.count === maxVal)
+      .slice(0, 5)
       .map(({ key, count }) => {
         const lastDash = key.lastIndexOf("-");
         const day = key.slice(0, lastDash);

@@ -137,7 +137,6 @@ class EventCreate(BaseModel):
     description: str | None
     date: str
     start_time: str | None
-    end_time: str | None
 
 class EventResponseCreate(BaseModel):
     answer: str
@@ -285,7 +284,6 @@ def create_event(
         description=data.description,
         date=data.date,
         start_time=data.start_time,
-        end_time=data.end_time,
         created_by=admin.id
     )
     db.add(ev)
@@ -326,7 +324,6 @@ def list_events(db: Session = Depends(get_db)):
                 "description": e.description,
                 "date": e.date,
                 "start_time": e.start_time,
-                "end_time": e.end_time,
                 "yes_count": yes_count,
                 "no_count": no_count,
             }

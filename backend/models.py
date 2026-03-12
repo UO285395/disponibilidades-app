@@ -38,7 +38,6 @@ class Event(Base):
     description = Column(String)
     date = Column(String, nullable=False)
     start_time = Column(String)
-    end_time = Column(String)
 
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
 

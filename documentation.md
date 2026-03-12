@@ -92,7 +92,6 @@ El objetivo de este documento es **centralizar toda la definición funcional, el
   - `description`: string, opcional.
   - `date`: string, obligatorio (fecha del evento).
   - `start_time`: string opcional (hora inicio).
-  - `end_time`: string opcional (hora fin).
   - `created_by`: FK a `users.id`.
   - Relaciones:
     - `creator`: usuario que creó el evento.
@@ -185,17 +184,17 @@ El objetivo de este documento es **centralizar toda la definición funcional, el
 - **POST `/events`**
   - Crea un nuevo evento.
   - Solo para usuarios admin.
-  - Guarda: título, descripción, fecha, `start_time`, `end_time` y `created_by`.
+  - Guarda: título, descripción, fecha, `start_time` y `created_by`.
   - Respuesta: el objeto `Event` recién creado.
   - **Uso front**:
     - `AdminEvents.jsx` (función `createEvent`):
-      - Envía `title`, `description`, `date`, `start_time: null`, `end_time: null`.
+      - Envía `title`, `description`, `date` y, opcionalmente, `start_time` a partir del campo de hora de inicio en el formulario.
       - Tras crear recarga la lista.
 
 - **GET `/events`**
   - Lista todos los eventos sin filtrado.
   - Respuesta: array de objetos con:
-    - `id`, `title`, `description`, `date`, `start_time`, `end_time`.
+    - `id`, `title`, `description`, `date`, `start_time`.
     - `yes_count`, `no_count`: número de respuestas “sí” / “no” para ese evento (derivadas de `EventResponse`).
   - **Uso front**:
     - `EventsSection.jsx` carga lista para usuarios (ignora los campos de resumen).

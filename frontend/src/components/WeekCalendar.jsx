@@ -57,60 +57,59 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
     });
   }
 
-async function toggleCell(date, hour) {
-  const h = parseInt(hour);
+  async function toggleCell(date, hour) {
+    const h = parseInt(hour);
 
-  const exist = availabilities.find((a) => {
-    const start = parseInt(a.start_time.slice(0, 2));
-    const end = parseInt(a.end_time.slice(0, 2));
-    return a.date === date && h >= start && h < end;
-  });
+    const exist = availabilities.find((a) => {
+      const start = parseInt(a.start_time.slice(0, 2));
+      const end = parseInt(a.end_time.slice(0, 2));
+      return a.date === date && h >= start && h < end;
+    });
 
-  // --- UI Optimista ---
-  if (exist) {
-    // Quitar visualmente SIN esperar API
-    setAvailabilities((prev) => prev.filter((a) => a.id !== exist.id));
+    // --- UI Optimista ---
+    if (exist) {
+      // Quitar visualmente SIN esperar API
+      setAvailabilities((prev) => prev.filter((a) => a.id !== exist.id));
 
-    // Luego eliminar en backend
-    try {
-      await availabilityAPI.delete(exist.id);
-    } catch (err) {
-      console.error(err);
-      // revertir si falla
-      await loadAvailability();
-    }
-  } else {
-    // Añadir visualmente SIN esperar API
-   const tmpId = "tmp_" + crypto.randomUUID();
+      // Luego eliminar en backend
+      try {
+        await availabilityAPI.delete(exist.id);
+        // Re-sincronizar con el backend para evitar estados fantasma
+        await loadAvailability();
+      } catch (err) {
+        console.error(err);
+        // revertir si falla
+        await loadAvailability();
+      }
+    } else {
+      // Añadir visualmente SIN esperar API
+      const tmpId = "tmp_" + crypto.randomUUID();
 
-    const newEntry = {
-      id: tmpId,
-      date,
-      start_time: `${pad2(hour)}:00:00`,
-      end_time: `${pad2(hour + 1)}:00:00`,
-    };
-
-    setAvailabilities((prev) => [...prev, newEntry]);
-
-    // Crear en backend
-    try {
-      const saved = await availabilityAPI.create(
+      const newEntry = {
+        id: tmpId,
         date,
-        newEntry.start_time,
-        newEntry.end_time
-      );
+        start_time: `${pad2(hour)}:00:00`,
+        end_time: `${pad2(hour + 1)}:00:00`,
+      };
 
-      // Reemplazar el temporal con la versión real del backend
-      setAvailabilities((prev) =>
-        prev.map((a) => (a.id === tmpId ? saved : a))
-      );
-    } catch (err) {
-      console.error(err);
-      // revertir si falla
-      await loadAvailability();
+      setAvailabilities((prev) => [...prev, newEntry]);
+
+      // Crear en backend
+      try {
+        await availabilityAPI.create(
+          date,
+          newEntry.start_time,
+          newEntry.end_time
+        );
+        // Re-sincronizar con el backend para evitar duplicados o tiempos distintos
+        await loadAvailability();
+      } catch (err) {
+        console.error(err);
+        // revertir si falla
+        await loadAvailability();
+      }
     }
   }
-}
 
 async function loadAvailability() {
   const data = await availabilityAPI.listMine();

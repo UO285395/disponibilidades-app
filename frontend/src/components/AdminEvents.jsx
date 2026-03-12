@@ -8,6 +8,7 @@ export default function AdminEvents() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [date, setDate] = useState("");
+  const [startTime, setStartTime] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -44,13 +45,13 @@ export default function AdminEvents() {
         title,
         description: description || null,
         date,
-        start_time: null,
-        end_time: null
+        start_time: startTime || null
       });
 
       setTitle("");
       setDescription("");
       setDate("");
+      setStartTime("");
       await reload();
     } catch (e) {
       console.error("Error creando evento", e);
@@ -92,6 +93,13 @@ export default function AdminEvents() {
           label="Fecha"
           value={date}
           onChange={(e) => setDate(e.target.value)}
+          mb="sm"
+        />
+        <TextInput
+          type="time"
+          label="Hora inicio"
+          value={startTime}
+          onChange={(e) => setStartTime(e.target.value)}
           mb="sm"
         />
 
