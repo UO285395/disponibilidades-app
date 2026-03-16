@@ -666,15 +666,26 @@ def create_reservation(
     if not space:
         raise HTTPException(404, "Espacio no encontrado")
 
-    start_time = data.start_time or "00:00:00"
-    end_time = data.end_time or "23:59:59"
+    raw_start = (data.start_time or "").strip()
+    raw_end = (data.end_time or "").strip()
+
+    start_time = raw_start if raw_start else "00:00:00"
+    end_time = raw_end if raw_end else "23:59:59"
 
     if len(start_time) == 5:
         start_time = start_time + ":00"
     if len(end_time) == 5:
         end_time = end_time + ":00"
 
-    if start_time >= end_time:
+    from datetime import datetime
+
+    try:
+        start_dt = datetime.strptime(start_time, "%H:%M:%S")
+        end_dt = datetime.strptime(end_time, "%H:%M:%S")
+    except ValueError:
+        raise HTTPException(400, "Formato de time inválido, use HH:MM o HH:MM:SS")
+
+    if start_dt >= end_dt:
         raise HTTPException(400, "start_time debe ser anterior a end_time")
 
     # No forzar validación de colisiones en sprint inicial, se asume allowed.

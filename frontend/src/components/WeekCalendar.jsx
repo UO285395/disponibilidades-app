@@ -142,6 +142,11 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
                   left: 0,
                   background: "white",
                   zIndex: 3,
+                  width: "5.5rem",
+                  minWidth: "5.5rem",
+                  maxWidth: "5.5rem",
+                  padding: "6px 8px",
+                  whiteSpace: "nowrap",
                 }}
               >
                 Hora
