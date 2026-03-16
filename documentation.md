@@ -559,6 +559,13 @@ Los siguientes sprints se centrarán en **nuevas funcionalidades** (definición 
   - Mejoras visuales en el calendario (resaltado de hoy, tooltips, etc.).
   - Recordatorios o notificaciones (email / push, según alcance del proyecto).
 
+- **Bugfix de calendario de disponibilidad**
+  - `WeekCalendar.jsx` usa ahora columna `Hora` sticky y `z-index` alto para evitar solaparse con días cuando se desliza.
+  - Se implementó un mapa `pendingKeys` para gestionar clics rápido y evitar la condición de carrera de toggle rápido.
+
+- **Bugfix de selección de fecha en eventos y reservas**
+  - `AdminEvents.jsx` y `SpaceReservations.jsx` usan ahora `DatePicker` de Mantine como calendario integrado, con navegación de meses.
+
 Cada sprint deberá:
 
 - Mantener este `documentation.md` actualizado.

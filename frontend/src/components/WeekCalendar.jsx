@@ -27,7 +27,7 @@ function formatISO(d) {
 
 export default function WeekCalendar({ offsetWeeks = 0 }) {
   const [availabilities, setAvailabilities] = useState([]);
-  const [updatingKey, setUpdatingKey] = useState(null);
+  const [pendingKeys, setPendingKeys] = useState(new Set());
 
   const baseWeekStart = startOfWeek(new Date());
   const weekStart = addDays(baseWeekStart, offsetWeeks * 7);
@@ -74,6 +74,7 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
     if (exist) {
       // Optimistic remove
       setAvailabilities((prev) => prev.filter((a) => a.id !== exist.id));
+      setPendingKeys((prev) => new Set(prev).add(key));
 
       try {
         await availabilityAPI.delete(exist.id);
@@ -82,7 +83,11 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
         // Revert on failure
         setAvailabilities((prev) => [...prev, exist]);
       } finally {
-        setUpdatingKey(null);
+        setPendingKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
       }
       return;
     }
@@ -97,6 +102,7 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
     };
 
     setAvailabilities((prev) => [...prev, tempEntry]);
+    setPendingKeys((prev) => new Set(prev).add(key));
 
     try {
       const created = await availabilityAPI.create(
@@ -112,7 +118,11 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
       console.error(err);
       setAvailabilities((prev) => prev.filter((a) => a.id !== tempId));
     } finally {
-      setUpdatingKey(null);
+      setPendingKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     }
   }
 
@@ -151,17 +161,34 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
           <Table.Tbody>
             {hours.map((hour) => (
               <Table.Tr key={hour}>
-                <Table.Td>{pad2(hour)}:00 - {pad2(hour + 1)}:00</Table.Td>
+                <Table.Td
+                  style={{
+                    position: "sticky",
+                    left: 0,
+                    background: "white",
+                    zIndex: 4,
+                    cursor: "default",
+                  }}
+                >
+                  {pad2(hour)}:00 - {pad2(hour + 1)}:00
+                </Table.Td>
                 {days.map((d, idx) => {
                   const date = formatISO(d);
                   const active = isAvailable(date, hour);
+                  const key = `${date}-${hour}`;
+                  const pending = pendingKeys.has(key);
                   return (
                     <Table.Td
                       key={idx}
-                      onClick={() => toggleCell(date, hour)}
+                      onClick={() => !pending && toggleCell(date, hour)}
                       style={{
-                        cursor: "pointer",
-                        background: active ? "#abf5d1" : undefined,
+                        cursor: pending ? "not-allowed" : "pointer",
+                        background: pending
+                          ? "#ffeaa7"
+                          : active
+                          ? "#abf5d1"
+                          : undefined,
+                        opacity: pending ? 0.7 : 1,
                       }}
                     />
                   );

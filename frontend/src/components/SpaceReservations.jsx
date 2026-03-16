@@ -107,6 +107,17 @@ export default function SpaceReservations() {
             onChange={setDate}
             style={{ flex: 1 }}
             placeholder="Selecciona fecha"
+            firstDayOfWeek="monday"
+            inputFormat="DD/MM/YYYY"
+            amountOfMonths={1}
+            hideOutsideDates={false}
+            allowLevelChange
+            styles={{
+              calendarHeaderControl: {
+                margin: 0,
+                padding: 0,
+              },
+            }}
           />
         </Group>
 
