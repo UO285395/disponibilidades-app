@@ -62,8 +62,7 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
     const h = parseInt(hour, 10);
     const key = `${date}-${h}`;
 
-    if (updatingKey === key) return;
-    setUpdatingKey(key);
+    if (pendingKeys.has(key)) return;
 
     const exist = availabilities.find((a) => {
       const start = parseInt(a.start_time.slice(0, 2), 10);

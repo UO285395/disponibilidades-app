@@ -561,10 +561,10 @@ Los siguientes sprints se centrarán en **nuevas funcionalidades** (definición 
 
 - **Bugfix de calendario de disponibilidad**
   - `WeekCalendar.jsx` usa ahora columna `Hora` sticky y `z-index` alto para evitar solaparse con días cuando se desliza.
-  - Se implementó un mapa `pendingKeys` para gestionar clics rápido y evitar la condición de carrera de toggle rápido.
+  - Se implementó `pendingKeys` para gestionar clics rápido y evitar la condición de carrera de toggle rápido.
 
-- **Bugfix de selección de fecha en eventos y reservas**
-  - `AdminEvents.jsx` y `SpaceReservations.jsx` usan ahora `DatePicker` de Mantine como calendario integrado, con navegación de meses.
+- **Bugfix de selector de fecha en eventos y reservas**
+  - `AdminEvents.jsx` y `SpaceReservations.jsx` usan input nativo `type="date"` para garantizar compatibilidad y comportamiento simple.
 
 Cada sprint deberá:
 

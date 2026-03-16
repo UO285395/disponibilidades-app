@@ -11,7 +11,6 @@ import {
   Notification,
 } from "@mantine/core";
 import { spacesAPI, reservationsAPI } from "../api/api.js";
-import { DatePicker } from "@mantine/dates";
 
 export default function SpaceReservations() {
   const [spaces, setSpaces] = useState([]);
@@ -58,9 +57,11 @@ export default function SpaceReservations() {
     }
 
     try {
+      const dateIso = date instanceof Date ? date.toISOString().slice(0, 10) : date;
+
       await reservationsAPI.create(
         spaceId,
-        date.toISOString().slice(0, 10),
+        dateIso,
         startTime || null,
         endTime || null,
         reason || null
@@ -101,23 +102,13 @@ export default function SpaceReservations() {
             style={{ flex: 1 }}
           />
 
-          <DatePicker
+          <TextInput
             label="Día"
-            value={date}
-            onChange={setDate}
+            type="date"
+            value={date || ""}
+            onChange={(e) => setDate(e.target.value)}
             style={{ flex: 1 }}
             placeholder="Selecciona fecha"
-            firstDayOfWeek="monday"
-            inputFormat="DD/MM/YYYY"
-            amountOfMonths={1}
-            hideOutsideDates={false}
-            allowLevelChange
-            styles={{
-              calendarHeaderControl: {
-                margin: 0,
-                padding: 0,
-              },
-            }}
           />
         </Group>
 

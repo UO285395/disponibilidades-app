@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { Card, Button, TextInput, Title, Textarea, Text } from "@mantine/core";
-import { DatePicker } from "@mantine/dates";
 import { adminAPI } from "../api/adminApi.js";
 import { useNavigate } from "react-router-dom";
 
@@ -41,7 +40,7 @@ export default function AdminEvents() {
   async function createEvent() {
     if (!title || !date) return;
 
-    const isoDate = date instanceof Date ? date.toISOString().slice(0, 10) : date;
+    const isoDate = typeof date === "string" ? date : date instanceof Date ? date.toISOString().slice(0, 10) : "";
 
     try {
       await adminAPI.createEvent({
@@ -91,16 +90,12 @@ export default function AdminEvents() {
           onChange={(e) => setDescription(e.target.value)}
           mb="sm"
         />
-        <DatePicker
+        <TextInput
+          type="date"
           label="Fecha"
-          value={date}
-          onChange={setDate}
+          value={date || ""}
+          onChange={(e) => setDate(e.target.value)}
           mb="sm"
-          allowLevelChange={false}
-          withWithinPortal
-          dropdownType="popover"
-          inputFormat="DD/MM/YYYY"
-          placeholder="Selecciona fecha"
         />
         <TextInput
           type="time"
