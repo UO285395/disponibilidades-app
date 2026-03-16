@@ -500,7 +500,14 @@ Esta sección recoge **desajustes entre la intención funcional y la implementac
 - **Acciones propuestas**:
   - Sustituir `alert` por componentes de notificación de la librería UI (Mantine).
   - Añadir mensajes de validación de formularios (campos obligatorios, formato de email, etc.).
+- **Bug corregido en calendario de disponibilidad**:
+  - `WeekCalendar.jsx` volvió a la tabla semanal clásica con 7 días y 15 franjas horarias.
+  - Anterior vista "card per day" fue eliminada por problema de filtrado nativo de días.
+  - `toggleCell` ahora es optimista: actualiza el estado local de inmediato y gestiona revert on error.
 
+- **Bug corregido en formulario de eventos admin**:
+  - `AdminEvents.jsx` usa `DatePicker` de Mantine en vez de `type="date"` (evita flechas extrañas y hace usable la selección de mes/día).
+  - Fecha se guarda en formato ISO `YYYY-MM-DD`.
 ---
 
 ### 7. Plan de actualización y mejora

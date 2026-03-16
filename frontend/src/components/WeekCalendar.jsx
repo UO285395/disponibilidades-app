@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { Card, Table, Text, ScrollArea, Grid, Title } from "@mantine/core";
-import { useMediaQuery } from "@mantine/hooks";
+import { Card, Table } from "@mantine/core";
 import { availabilityAPI } from "../api/api.js";
 
 function startOfWeek(date) {
@@ -60,105 +59,67 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
   }
 
   async function toggleCell(date, hour) {
-    const h = parseInt(hour);
+    const h = parseInt(hour, 10);
     const key = `${date}-${h}`;
 
-    // Evitar clicks repetidos mientras se procesa esta celda
     if (updatingKey === key) return;
     setUpdatingKey(key);
 
     const exist = availabilities.find((a) => {
-      const start = parseInt(a.start_time.slice(0, 2));
-      const end = parseInt(a.end_time.slice(0, 2));
+      const start = parseInt(a.start_time.slice(0, 2), 10);
+      const end = parseInt(a.end_time.slice(0, 2), 10);
       return a.date === date && h >= start && h < end;
     });
 
-    // --- UI Optimista ---
-    try {
-      if (exist) {
-        // Eliminar en backend y luego refrescar desde servidor
+    if (exist) {
+      // Optimistic remove
+      setAvailabilities((prev) => prev.filter((a) => a.id !== exist.id));
+
+      try {
         await availabilityAPI.delete(exist.id);
-      } else {
-        // Crear en backend y luego refrescar desde servidor
-        await availabilityAPI.create(
-          date,
-          `${pad2(hour)}:00:00`,
-          `${pad2(hour + 1)}:00:00`
-        );
+      } catch (err) {
+        console.error(err);
+        // Revert on failure
+        setAvailabilities((prev) => [...prev, exist]);
+      } finally {
+        setUpdatingKey(null);
       }
+      return;
+    }
+
+    const tempId = `tmp-${key}`;
+    const tempEntry = {
+      id: tempId,
+      user_id: null,
+      date,
+      start_time: `${pad2(hour)}:00:00`,
+      end_time: `${pad2(hour + 1)}:00:00`,
+    };
+
+    setAvailabilities((prev) => [...prev, tempEntry]);
+
+    try {
+      const created = await availabilityAPI.create(
+        date,
+        `${pad2(hour)}:00:00`,
+        `${pad2(hour + 1)}:00:00`
+      );
+
+      setAvailabilities((prev) =>
+        prev.map((a) => (a.id === tempId ? created : a))
+      );
     } catch (err) {
       console.error(err);
+      setAvailabilities((prev) => prev.filter((a) => a.id !== tempId));
     } finally {
-      await loadAvailability();
       setUpdatingKey(null);
     }
   }
-
-async function loadAvailability() {
-  const data = await availabilityAPI.listMine();
-  setAvailabilities(data);
-}
 
 
 
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const hours = Array.from({ length: 15 }, (_, h) => h + 8);
-  const isMobile = useMediaQuery("(max-width: 900px)");
-
-  if (isMobile) {
-    return (
-      <Card shadow="md" p="sm" radius="md">
-        <Title order={4} mb="xs">
-          Disponibilidad semanal
-        </Title>
-        <ScrollArea style={{ maxHeight: "calc(100vh - 200px)" }} type="auto">
-          <Grid gutter="xs">
-            {days.map((d) => {
-              const dayString = formatISO(d);
-              return (
-                <Grid.Col xs={12} sm={6} key={dayString}>
-                  <Card withBorder p="xs" radius="md" style={{ minHeight: 200 }}>
-                    <Text weight={700} size="sm" mb="xs">
-                      {d.toLocaleDateString("es-ES", { weekday: "short", day: "2-digit" })}
-                    </Text>
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
-                        gap: 4,
-                      }}
-                    >
-                      {hours.map((hour) => {
-                        const active = isAvailable(dayString, hour);
-                        return (
-                          <button
-                            key={`${dayString}-${hour}`}
-                            onClick={() => toggleCell(dayString, hour)}
-                            style={{
-                              background: active ? "#abf5d1" : "#f0f0f0",
-                              border: "1px solid #d0d0d0",
-                              borderRadius: 4,
-                              padding: "6px 4px",
-                              fontSize: 10,
-                              cursor: "pointer",
-                              minHeight: 32,
-                            }}
-                            aria-label={`${dayString} ${hour}:00`}
-                          >
-                            {pad2(hour)}:00
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </Card>
-                </Grid.Col>
-              );
-            })}
-          </Grid>
-        </ScrollArea>
-      </Card>
-    );
-  }
 
   return (
     <Card shadow="md" p="lg" radius="md">
