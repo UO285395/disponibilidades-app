@@ -44,7 +44,23 @@ export const adminAPI = {
   // Disponibilidades de todos
   listAvailabilities() {
     return request("/admin/availability");
-  }
+  },
 
-  
+  // Espacios
+  listSpaces() {
+    return request("/spaces");
+  },
+
+  createSpace(name, description) {
+    return request("/spaces", "POST", { name, description });
+  },
+
+  deleteSpace(spaceId) {
+    return request(`/spaces/${spaceId}`, "DELETE");
+  },
+
+  // Reservas admin
+  listReservations() {
+    return request("/admin/reservations");
+  },
 };

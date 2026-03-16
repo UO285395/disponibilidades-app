@@ -298,6 +298,60 @@ El objetivo de este documento es **centralizar toda la definición funcional, el
     - Devuelve todas las disponibilidades restantes con:
       - `id`, `user` (nombre), `email`, `date`, `start_time`, `end_time`.
   - **Uso front**:
+    - `AdminAvailabilitiesCalendar.jsx`.
+
+---
+
+#### 4.6 Gestión de espacios y reservas
+
+**Modelos Pydantic:**
+
+- `SpaceCreate`: `name`, `description?`.
+- `SpaceReservationCreate`: `space_id`, `date`, `start_time?`, `end_time?`, `reason?`.
+
+**Endpoints (usuario estándar):**
+
+- **GET `/spaces`**
+  - Lista todos los espacios disponibles.
+  - **Uso front**:
+    - `SpaceReservations.jsx` carga para poblar select.
+
+- **GET `/reservations`**
+  - Devuelve todas las reservas de espacios (de todos los usuarios).
+  - Para cada reserva incluye:
+    - `id`, `space_id`, `space_name`, `creator_name`, `creator_email`, `date`, `start_time`, `end_time`, `reason`, `visible_reason`.
+  - `reason` solo se muestra si el dominio (@...) del creador coincide con el dominio del usuario solicitante.
+  - **Uso front**:
+    - `SpaceReservations.jsx` muestra tabla con motivo condicional.
+
+- **POST `/reservations`**
+  - Crea reserva para usuario autenticado.
+  - Si `start_time` no está presente, se usa `00:00:00`.
+  - Si `end_time` no está presente, se usa `23:59:59`.
+  - Valida `start_time < end_time`.
+  - **Uso front**:
+    - `SpaceReservations.jsx` formulario de creación.
+
+**Endpoints (admin):**
+
+- **GET `/admin/reservations`**
+  - Lista todas las reservas con datos completos (motivo visible siempre).
+  - **Uso front**: pendiente de incorporación (próximos sprints si se requiere). 
+
+- **GET `/spaces`**
+  - Lista todos los espacios (mismo endpoint que usuario).
+
+- **POST `/spaces`**
+  - Crea un nuevo espacio (admin).
+  - **Uso front**:
+    - `AdminSpaces.jsx` formulario de creación.
+
+- **DELETE `/spaces/{space_id}`**
+  - Elimina espacio y sus reservas asociadas (admin).
+  - **Uso front**:
+    - `AdminSpaces.jsx`.
+
+
     - `AdminAvailabilitiesCalendar.jsx`:
       - Construye un mapa `cellMap` de `date-hour → [usuarios]`.
       - Permite filtrar por dominio de email.
