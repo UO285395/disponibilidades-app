@@ -111,7 +111,11 @@ export const reservationsAPI = {
       end_time,
       reason,
     });
-  }
+  },
+
+  delete(id) {
+    return request(`/reservations/${id}`, "DELETE");
+  },
 };
 
 // ------------------- AVAILABILITY (usuario) -------------------

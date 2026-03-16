@@ -669,24 +669,30 @@ def create_reservation(
     raw_start = (data.start_time or "").strip()
     raw_end = (data.end_time or "").strip()
 
-    start_time = raw_start if raw_start else "00:00:00"
-    end_time = raw_end if raw_end else "23:59:59"
+    def parse_time(value):
+        if value is None or str(value).strip() == "":
+            return None
+        t = str(value).strip()
 
-    if len(start_time) == 5:
-        start_time = start_time + ":00"
-    if len(end_time) == 5:
-        end_time = end_time + ":00"
+        if len(t) == 4 and t[1] == ":":
+            t = "0" + t
+        if len(t) == 5 and t.count(":") == 1:
+            t = t + ":00"
 
-    from datetime import datetime
+        from datetime import datetime
+        try:
+            return datetime.strptime(t, "%H:%M:%S").time()
+        except ValueError:
+            raise HTTPException(400, "Formato de time inválido, use HH:MM o HH:MM:SS")
 
-    try:
-        start_dt = datetime.strptime(start_time, "%H:%M:%S")
-        end_dt = datetime.strptime(end_time, "%H:%M:%S")
-    except ValueError:
-        raise HTTPException(400, "Formato de time inválido, use HH:MM o HH:MM:SS")
+    start_dt = parse_time(raw_start) or parse_time("00:00")
+    end_dt = parse_time(raw_end) or parse_time("23:59")
 
     if start_dt >= end_dt:
         raise HTTPException(400, "start_time debe ser anterior a end_time")
+
+    start_time = start_dt.strftime("%H:%M:%S")
+    end_time = end_dt.strftime("%H:%M:%S")
 
     # No forzar validación de colisiones en sprint inicial, se asume allowed.
     r = models.SpaceReservation(
@@ -709,6 +715,26 @@ def create_reservation(
         "end_time": r.end_time,
         "reason": r.reason,
     }
+
+
+@app.delete("/reservations/{reservation_id}")
+def delete_reservation(
+    reservation_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    user = get_user_from_token(cred.credentials, db)
+
+    r = db.query(models.SpaceReservation).filter(models.SpaceReservation.id == reservation_id).first()
+    if not r:
+        raise HTTPException(404, "Reserva no encontrada")
+
+    if user.role != "admin" and r.user_id != user.id:
+        raise HTTPException(403, "No autorizado")
+
+    db.delete(r)
+    db.commit()
+    return {"ok": True}
 
 
 @app.get("/admin/reservations")

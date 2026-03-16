@@ -56,9 +56,19 @@ export default function SpaceReservations() {
       return;
     }
 
-    try {
-      const dateIso = date instanceof Date ? date.toISOString().slice(0, 10) : date;
+    const dateIso = date instanceof Date ? date.toISOString().slice(0, 10) : date;
 
+    if (startTime && !/^\d{1,2}:\d{2}$/.test(startTime) && !/^\d{1,2}:\d{2}:\d{2}$/.test(startTime)) {
+      setError("Formato de hora inicio inválido");
+      return;
+    }
+
+    if (endTime && !/^\d{1,2}:\d{2}$/.test(endTime) && !/^\d{1,2}:\d{2}:\d{2}$/.test(endTime)) {
+      setError("Formato de hora fin inválido");
+      return;
+    }
+
+    try {
       await reservationsAPI.create(
         spaceId,
         dateIso,
@@ -73,6 +83,19 @@ export default function SpaceReservations() {
       refresh();
     } catch (e) {
       setError(e.message || "Error al crear reserva");
+    }
+  }
+
+  async function deleteReservation(id) {
+    setError("");
+    setSuccess("");
+
+    try {
+      await reservationsAPI.delete(id);
+      setSuccess("Reserva cancelada");
+      refresh();
+    } catch (e) {
+      setError(e.message || "Error al cancelar reserva");
     }
   }
 
@@ -147,7 +170,7 @@ export default function SpaceReservations() {
               <th>Hasta</th>
               <th>Usuario</th>
               <th>Motivo</th>
-              <th>Visible motivo</th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
@@ -159,7 +182,11 @@ export default function SpaceReservations() {
                 <td>{r.end_time}</td>
                 <td>{r.creator_name}</td>
                 <td>{r.visible_reason ? r.reason : "--"}</td>
-                <td>{r.visible_reason ? "Sí" : "No"}</td>
+                <td>
+                  <Button size="xs" color="red" onClick={() => deleteReservation(r.id)}>
+                    Cancelar
+                  </Button>
+                </td>
               </tr>
             ))}
           </tbody>

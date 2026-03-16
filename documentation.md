@@ -566,6 +566,12 @@ Los siguientes sprints se centrarán en **nuevas funcionalidades** (definición 
 - **Bugfix de selector de fecha en eventos y reservas**
   - `AdminEvents.jsx` y `SpaceReservations.jsx` usan input nativo `type="date"` para garantizar compatibilidad y comportamiento simple.
 
+- **Bugfix y mejora en reservas de espacios**
+  - `SpaceReservations.jsx` valida el formato `HH:MM` o `HH:MM:SS` para hora inicio y fin.
+  - `backend/main.py` normaliza y valida correctamente las horas. End sin hora -> 23:59:59.
+  - Nuevo endpoint `DELETE /reservations/{id}` para cancelar reserva.
+  - En la interfaz de reservas ahora hay botón `Cancelar` y no se muestra permanentemente `visible_reason`.
+
 Cada sprint deberá:
 
 - Mantener este `documentation.md` actualizado.
