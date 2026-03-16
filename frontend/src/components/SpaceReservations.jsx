@@ -10,7 +10,7 @@ import {
   Group,
   Notification,
 } from "@mantine/core";
-import { spacesAPI, reservationsAPI } from "../api/api.js";
+import { spacesAPI, reservationsAPI, userAPI } from "../api/api.js";
 
 export default function SpaceReservations() {
   const [spaces, setSpaces] = useState([]);
@@ -22,16 +22,19 @@ export default function SpaceReservations() {
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [user, setUser] = useState(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const [spaceList, reservationList] = await Promise.all([
+        const [spaceList, reservationList, userInfo] = await Promise.all([
           spacesAPI.list(),
           reservationsAPI.list(),
+          userAPI.me(),
         ]);
         setSpaces(spaceList);
         setReservations(reservationList);
+        setUser(userInfo);
       } catch (e) {
         console.error(e);
       }
@@ -97,6 +100,25 @@ export default function SpaceReservations() {
     } catch (e) {
       setError(e.message || "Error al cancelar reserva");
     }
+  }
+
+  function formatDateShort(value) {
+    if (!value) return "";
+    const [year, month, day] = value.split("-");
+    return `${day}/${month}`;
+  }
+
+  function formatTimeShort(value) {
+    if (!value) return "";
+    const parts = value.split(":");
+    if (parts.length >= 2) return `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}`;
+    return value;
+  }
+
+  function canCancel(reservation) {
+    if (!user) return false;
+    if (user.role === "admin") return true;
+    return user.email === reservation.creator_email;
   }
 
   return (
@@ -177,15 +199,19 @@ export default function SpaceReservations() {
             {reservations.map((r) => (
               <tr key={r.id}>
                 <td>{r.space_name}</td>
-                <td>{r.date}</td>
-                <td>{r.start_time}</td>
-                <td>{r.end_time}</td>
+                <td>{formatDateShort(r.date)}</td>
+                <td>{formatTimeShort(r.start_time)}</td>
+                <td>{formatTimeShort(r.end_time)}</td>
                 <td>{r.creator_name}</td>
                 <td>{r.visible_reason ? r.reason : "--"}</td>
                 <td>
-                  <Button size="xs" color="red" onClick={() => deleteReservation(r.id)}>
-                    Cancelar
-                  </Button>
+                  {canCancel(r) ? (
+                    <Button size="xs" color="red" onClick={() => deleteReservation(r.id)}>
+                      Cancelar
+                    </Button>
+                  ) : (
+                    ""
+                  )}
                 </td>
               </tr>
             ))}
