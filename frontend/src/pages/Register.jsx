@@ -37,16 +37,16 @@ export default function Register() {
 
         <form onSubmit={doRegister}>
           <TextInput
-            label="Nombre completo"
-            placeholder="Nombre completo"
+            label="Apodo"
+            placeholder="Apodo / Nombre"
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
             mb="md"
           />
 
           <TextInput
-            label="Email"
-            placeholder="usuario@colectivo"
+            label="Codigo"
+            placeholder="UsuarioAA@Colectivo"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             mb="md"
