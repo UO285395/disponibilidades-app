@@ -36,6 +36,18 @@ export default function AdminDashboard() {
 
   if (!user) return null;
 
+  const canEvents = user.role === "superadmin" || user.events_enabled;
+  const canAvailabilities = user.role === "superadmin" || user.availabilities_enabled;
+  const canSpaces = user.role === "superadmin" || user.spaces_enabled;
+
+  const defaultTab = canEvents
+    ? "events"
+    : canAvailabilities
+    ? "availabilities-calendar"
+    : canSpaces
+    ? "spaces"
+    : "users";
+
   return (
     <Box p="lg">
       <Group justify="space-between" mb="lg">
@@ -50,11 +62,11 @@ export default function AdminDashboard() {
         </Group>
       </Group>
 
-      <Tabs mt="lg" defaultValue="availabilities-calendar">
+      <Tabs mt="lg" defaultValue={defaultTab}>
         <Tabs.List>
-          <Tabs.Tab value="events">Eventos</Tabs.Tab>
-          <Tabs.Tab value="availabilities-calendar">Calendario de disponibilidad</Tabs.Tab>
-          <Tabs.Tab value="spaces">Espacios</Tabs.Tab>
+          {canEvents && <Tabs.Tab value="events">Eventos</Tabs.Tab>}
+          {canAvailabilities && <Tabs.Tab value="availabilities-calendar">Calendario de disponibilidad</Tabs.Tab>}
+          {canSpaces && <Tabs.Tab value="spaces">Espacios</Tabs.Tab>}
           <Tabs.Tab value="users">Usuarios</Tabs.Tab>
           {user.role === "superadmin" && (
             <Tabs.Tab value="domain-policies">Políticas de dominio</Tabs.Tab>
@@ -65,17 +77,23 @@ export default function AdminDashboard() {
           <AdminUsers />
         </Tabs.Panel>
 
-        <Tabs.Panel value="events" pt="xl">
-          <AdminEvents />
-        </Tabs.Panel>
+        {canEvents && (
+          <Tabs.Panel value="events" pt="xl">
+            <AdminEvents />
+          </Tabs.Panel>
+        )}
 
-        <Tabs.Panel value="spaces" pt="xl">
-          <AdminSpaces />
-        </Tabs.Panel>
+        {canSpaces && (
+          <Tabs.Panel value="spaces" pt="xl">
+            <AdminSpaces />
+          </Tabs.Panel>
+        )}
 
-        <Tabs.Panel value="availabilities-calendar" pt="xl">
-          <AdminAvailabilitiesCalendar />
-        </Tabs.Panel>
+        {canAvailabilities && (
+          <Tabs.Panel value="availabilities-calendar" pt="xl">
+            <AdminAvailabilitiesCalendar />
+          </Tabs.Panel>
+        )}
 
         {user.role === "superadmin" && (
           <Tabs.Panel value="domain-policies" pt="xl">

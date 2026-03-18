@@ -9,6 +9,7 @@ import SpaceReservations from "../components/SpaceReservations.jsx";
 export default function Dashboard() {
   const [user, setUser] = useState(null);
   const [offsetWeeks, setOffsetWeeks] = useState(0);
+  const [activeTab, setActiveTab] = useState("availability");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -21,6 +22,15 @@ export default function Dashboard() {
       try {
         const u = await userAPI.me();
         setUser(u);
+
+        const firstTab = u.availabilities_enabled
+          ? "availability"
+          : u.events_enabled
+          ? "events"
+          : u.spaces_enabled
+          ? "reservations"
+          : "availability";
+        setActiveTab(firstTab);
       } catch {
         clearToken();
         navigate("/");
@@ -72,62 +82,68 @@ export default function Dashboard() {
           Panel de usuario
         </Title>
 
-        <Tabs defaultValue="availability">
+        <Tabs value={activeTab} onTabChange={(val) => setActiveTab(val)}>
           <Tabs.List>
-            <Tabs.Tab value="availability">Disponibilidad</Tabs.Tab>
-            <Tabs.Tab value="events">Eventos</Tabs.Tab>
-            <Tabs.Tab value="reservations">Reserva espacios</Tabs.Tab>
+            {user.availabilities_enabled && <Tabs.Tab value="availability">Disponibilidad</Tabs.Tab>}
+            {user.events_enabled && <Tabs.Tab value="events">Eventos</Tabs.Tab>}
+            {user.spaces_enabled && <Tabs.Tab value="reservations">Reserva espacios</Tabs.Tab>}
           </Tabs.List>
 
-          <Tabs.Panel value="availability" pt="md">
-            <Card
-              style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: "1rem" }}
-              mb="md"
-            >
-              <Group mb="md">
-                <Title order={4}>Disponibilidad</Title>
+          {user.availabilities_enabled && (
+            <Tabs.Panel value="availability" pt="md">
+              <Card
+                style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: "1rem" }}
+                mb="md"
+              >
+                <Group mb="md">
+                  <Title order={4}>Disponibilidad</Title>
 
-                <Button
-                  size="xs"
-                  variant={offsetWeeks === 0 ? "filled" : "outline"}
-                  onClick={() => setOffsetWeeks(0)}
-                >
-                  Semana actual
-                </Button>
-                <Button
-                  size="xs"
-                  variant={offsetWeeks === 1 ? "filled" : "outline"}
-                  onClick={() => setOffsetWeeks(1)}
-                >
-                  Semana siguiente
-                </Button>
-              </Group>
+                  <Button
+                    size="xs"
+                    variant={offsetWeeks === 0 ? "filled" : "outline"}
+                    onClick={() => setOffsetWeeks(0)}
+                  >
+                    Semana actual
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant={offsetWeeks === 1 ? "filled" : "outline"}
+                    onClick={() => setOffsetWeeks(1)}
+                  >
+                    Semana siguiente
+                  </Button>
+                </Group>
 
-              <Text size="sm" c="dimmed" mb="md">
-                Haz clic en las celdas para marcar o desmarcar tu disponibilidad por horas.
-              </Text>
+                <Text size="sm" c="dimmed" mb="md">
+                  Haz clic en las celdas para marcar o desmarcar tu disponibilidad por horas.
+                </Text>
 
-              <WeekCalendar offsetWeeks={offsetWeeks} />
-            </Card>
-          </Tabs.Panel>
+                <WeekCalendar offsetWeeks={offsetWeeks} />
+              </Card>
+            </Tabs.Panel>
+          )}
 
-          <Tabs.Panel value="events" pt="md">
-            <Card
-              style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: "1rem" }}
-              mb="md"
-            >
-              <EventsSection />
-            </Card>
-          </Tabs.Panel>
+          {user.events_enabled && (
+            <Tabs.Panel value="events" pt="md">
+              <Card
+                style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: "1rem" }}
+                mb="md"
+              >
+                <EventsSection />
+              </Card>
+            </Tabs.Panel>
+          )}
 
-          <Tabs.Panel value="reservations" pt="md">
-            <Card
-              style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: "1rem" }}
-              mb="md"
-            >
-              <SpaceReservations />
-            </Card>
-          </Tabs.Panel>
+          {user.spaces_enabled && (
+            <Tabs.Panel value="reservations" pt="md">
+              <Card
+                style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: "1rem" }}
+                mb="md"
+              >
+                <SpaceReservations />
+              </Card>
+            </Tabs.Panel>
+          )}
         </Tabs>
       </Box>
     </Box>

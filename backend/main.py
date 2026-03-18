@@ -209,12 +209,26 @@ def me(
 ):
     user = get_user_from_token(cred.credentials, db)
     domain = user.email.split("@")[-1].lower() if "@" in user.email else ""
+
+    policy = _get_domain_policy(db, domain)
+    events_enabled = True
+    availabilities_enabled = True
+    spaces_enabled = True
+
+    if user.role != "superadmin" and policy:
+        events_enabled = bool(policy.events_enabled)
+        availabilities_enabled = bool(policy.availabilities_enabled)
+        spaces_enabled = bool(policy.spaces_enabled)
+
     return {
         "id": user.id,
         "email": user.email,
         "full_name": user.full_name,
         "role": user.role,
         "domain": domain,
+        "events_enabled": events_enabled,
+        "availabilities_enabled": availabilities_enabled,
+        "spaces_enabled": spaces_enabled,
     }
 
 @app.post("/admin/become_admin")
@@ -485,10 +499,14 @@ def list_events(
         except HTTPException:
             user = None
 
+    user_domain = _get_domain(user.email) if user else None
+
+    if user and user.role != "superadmin" and not _is_feature_enabled(db, user_domain, "events"):
+        raise HTTPException(403, "Eventos deshabilitados para tu dominio")
+
     events = db.query(Event).all()
 
     filtered = []
-    user_domain = _get_domain(user.email) if user else None
 
     for e in events:
         if e.allowed_domain:
@@ -583,7 +601,8 @@ def event_responses(
     user_domain = _get_domain(user.email)
 
     if ev.allowed_domain and user.role != "superadmin":
-        if _get_domain(ev.allowed_domain) != user_domain:
+        event_domain = ev.allowed_domain.strip().lower()
+        if event_domain != user_domain:
             raise HTTPException(403, "No autorizado para ver respuestas de otro dominio")
 
     resp = (
@@ -694,6 +713,8 @@ def get_my_availability(
     db: Session = Depends(get_db)
 ):
     user = get_user_from_token(cred.credentials, db)
+    if user.role != "superadmin" and not _is_feature_enabled(db, _get_domain(user.email), "availabilities"):
+        raise HTTPException(403, "Disponibilidades deshabilitadas para tu dominio")
     return db.query(Availability).filter(Availability.user_id == user.id).all()
 
 
@@ -704,6 +725,8 @@ def create_my_availability(
     db: Session = Depends(get_db)
 ):
     user = get_user_from_token(cred.credentials, db)
+    if user.role != "superadmin" and not _is_feature_enabled(db, _get_domain(user.email), "availabilities"):
+        raise HTTPException(403, "Disponibilidades deshabilitadas para tu dominio")
 
     a = Availability(
         user_id=user.id,
