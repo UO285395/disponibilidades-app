@@ -466,7 +466,7 @@ def create_event(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "events"):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "events", admin.role):
         raise HTTPException(403, "Eventos deshabilitados para tu dominio")
 
     allowed_domain = data.allowed_domain.strip().lower() if data.allowed_domain else None
@@ -501,7 +501,7 @@ def list_events(
 
     user_domain = _get_domain(user.email) if user else None
 
-    if user and user.role != "superadmin" and not _is_feature_enabled(db, user_domain, "events"):
+    if user and not _is_feature_enabled(db, user_domain, "events", user.role):
         raise HTTPException(403, "Eventos deshabilitados para tu dominio")
 
     events = db.query(Event).all()
@@ -713,7 +713,7 @@ def get_my_availability(
     db: Session = Depends(get_db)
 ):
     user = get_user_from_token(cred.credentials, db)
-    if user.role != "superadmin" and not _is_feature_enabled(db, _get_domain(user.email), "availabilities"):
+    if not _is_feature_enabled(db, _get_domain(user.email), "availabilities", user.role):
         raise HTTPException(403, "Disponibilidades deshabilitadas para tu dominio")
     return db.query(Availability).filter(Availability.user_id == user.id).all()
 
@@ -725,7 +725,7 @@ def create_my_availability(
     db: Session = Depends(get_db)
 ):
     user = get_user_from_token(cred.credentials, db)
-    if user.role != "superadmin" and not _is_feature_enabled(db, _get_domain(user.email), "availabilities"):
+    if not _is_feature_enabled(db, _get_domain(user.email), "availabilities", user.role):
         raise HTTPException(403, "Disponibilidades deshabilitadas para tu dominio")
 
     a = Availability(
@@ -814,7 +814,10 @@ def _get_domain_policy(db: Session, domain: str):
     return db.query(models.DomainPolicy).filter(models.DomainPolicy.domain == domain).first()
 
 
-def _is_feature_enabled(db: Session, domain: str, feature: str):
+def _is_feature_enabled(db: Session, domain: str, feature: str, role: str = "user"):
+    if role == "superadmin":
+        return True
+
     policy = _get_domain_policy(db, domain)
     if not policy:
         return True
