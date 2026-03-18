@@ -54,12 +54,12 @@ export default function Dashboard() {
         </Box>
 
         <Group>
-          {user.role === "admin" && (
+          {(user.role === "admin" || user.role === "superadmin") && (
             <Button variant="outline" onClick={() => navigate("/admin")}>
               Ir al panel admin
             </Button>
           )}
-           <Button color="red" onClick={logout}>
+          <Button color="red" onClick={logout}>
             Cerrar sesión
           </Button>
         </Group>

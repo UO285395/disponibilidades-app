@@ -456,6 +456,8 @@ def create_event(
         raise HTTPException(403, "Eventos deshabilitados para tu dominio")
 
     allowed_domain = data.allowed_domain.strip().lower() if data.allowed_domain else None
+    if allowed_domain in ["todos", "all"]:
+        allowed_domain = None
 
     ev = Event(
         title=data.title,

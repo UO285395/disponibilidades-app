@@ -43,13 +43,16 @@ export default function AdminEvents() {
 
     const isoDate = typeof date === "string" ? date : date instanceof Date ? date.toISOString().slice(0, 10) : "";
 
+    const normalized = allowedDomain.trim().toLowerCase();
+    const domainToSend = !normalized || normalized === "todos" || normalized === "all" ? null : normalized;
+
     try {
       await adminAPI.createEvent({
         title,
         description: description || null,
         date: isoDate,
         start_time: startTime || null,
-        allowed_domain: allowedDomain.trim() || null,
+        allowed_domain: domainToSend,
       });
 
       setTitle("");
@@ -108,7 +111,7 @@ export default function AdminEvents() {
           mb="sm"
         />
         <TextInput
-          label="Dominio permitido (p.ej.: example.com)"
+          label="Colectivo permitido o vacio para Todos"
           value={allowedDomain}
           onChange={(e) => setAllowedDomain(e.target.value)}
           mb="sm"
