@@ -9,7 +9,7 @@ import SpaceReservations from "../components/SpaceReservations.jsx";
 export default function Dashboard() {
   const [user, setUser] = useState(null);
   const [offsetWeeks, setOffsetWeeks] = useState(0);
-  const [activeTab, setActiveTab] = useState("availability");
+  const [activeTab, setActiveTab] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -82,7 +82,12 @@ export default function Dashboard() {
           Panel de usuario
         </Title>
 
-        <Tabs value={activeTab} onTabChange={(val) => setActiveTab(val)}>
+        <Tabs
+          value={activeTab}
+          onTabChange={(val) => {
+            if (val) setActiveTab(val);
+          }}
+        >
           <Tabs.List>
             {user.availabilities_enabled && <Tabs.Tab value="availability">Disponibilidad</Tabs.Tab>}
             {user.events_enabled && <Tabs.Tab value="events">Eventos</Tabs.Tab>}
