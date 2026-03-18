@@ -38,12 +38,24 @@ class Event(Base):
     description = Column(String)
     date = Column(String, nullable=False)
     start_time = Column(String)
+    allowed_domain = Column(String, nullable=True)  # si null visible para todos
 
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
 
     # RELACIONES
     creator = relationship("User", back_populates="events_created")
     responses = relationship("EventResponse", back_populates="event")
+
+
+class DomainPolicy(Base):
+    __tablename__ = "domain_policies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    domain = Column(String, unique=True, nullable=False)
+    events_enabled = Column(Integer, default=1)
+    availabilities_enabled = Column(Integer, default=1)
+    spaces_enabled = Column(Integer, default=1)
+
 
 
 class EventResponse(Base):

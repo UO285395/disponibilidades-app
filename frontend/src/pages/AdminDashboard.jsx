@@ -7,6 +7,7 @@ import AdminEvents from "../components/AdminEvents.jsx";
 import AdminAvailabilities from "../components/AdminAvailabilities.jsx";
 import AdminAvailabilitiesCalendar from "../components/AdminAvailabilitiesCalendar.jsx";
 import AdminSpaces from "../components/AdminSpaces.jsx";
+import AdminDomainPolicies from "../components/AdminDomainPolicies.jsx";
 
 export default function AdminDashboard() {
   const [user, setUser] = useState(null);
@@ -16,7 +17,7 @@ export default function AdminDashboard() {
     (async () => {
       try {
         const u = await userAPI.me();
-        if (u.role !== "admin") {
+        if (u.role !== "admin" && u.role !== "superadmin") {
           navigate("/dashboard");
           return;
         }
@@ -55,6 +56,9 @@ export default function AdminDashboard() {
           <Tabs.Tab value="availabilities-calendar">Calendario de disponibilidad</Tabs.Tab>
           <Tabs.Tab value="spaces">Espacios</Tabs.Tab>
           <Tabs.Tab value="users">Usuarios</Tabs.Tab>
+          {user.role === "superadmin" && (
+            <Tabs.Tab value="domain-policies">Políticas de dominio</Tabs.Tab>
+          )}
         </Tabs.List>
 
         <Tabs.Panel value="users" pt="xl">
@@ -72,6 +76,12 @@ export default function AdminDashboard() {
         <Tabs.Panel value="availabilities-calendar" pt="xl">
           <AdminAvailabilitiesCalendar />
         </Tabs.Panel>
+
+        {user.role === "superadmin" && (
+          <Tabs.Panel value="domain-policies" pt="xl">
+            <AdminDomainPolicies />
+          </Tabs.Panel>
+        )}
       </Tabs>
     </Box>
   );

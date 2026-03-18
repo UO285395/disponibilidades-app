@@ -63,4 +63,31 @@ export const adminAPI = {
   listReservations() {
     return request("/admin/reservations");
   },
+
+  // Políticas de Dominio (superadmin)
+  listDomainPolicies() {
+    return request("/admin/domain-policies");
+  },
+
+  createDomainPolicy(domain, eventsEnabled, availabilitiesEnabled, spacesEnabled) {
+    return request("/admin/domain-policies", "POST", {
+      domain,
+      events_enabled: eventsEnabled,
+      availabilities_enabled: availabilitiesEnabled,
+      spaces_enabled: spacesEnabled,
+    });
+  },
+
+  updateDomainPolicy(id, domain, eventsEnabled, availabilitiesEnabled, spacesEnabled) {
+    return request(`/admin/domain-policies/${id}`, "PUT", {
+      domain,
+      events_enabled: eventsEnabled,
+      availabilities_enabled: availabilitiesEnabled,
+      spaces_enabled: spacesEnabled,
+    });
+  },
+
+  deleteDomainPolicy(id) {
+    return request(`/admin/domain-policies/${id}`, "DELETE");
+  },
 };

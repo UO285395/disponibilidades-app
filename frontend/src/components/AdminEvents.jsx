@@ -9,6 +9,7 @@ export default function AdminEvents() {
   const [description, setDescription] = useState("");
   const [date, setDate] = useState(null);
   const [startTime, setStartTime] = useState("");
+  const [allowedDomain, setAllowedDomain] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -47,13 +48,15 @@ export default function AdminEvents() {
         title,
         description: description || null,
         date: isoDate,
-        start_time: startTime || null
+        start_time: startTime || null,
+        allowed_domain: allowedDomain.trim() || null,
       });
 
       setTitle("");
       setDescription("");
       setDate(null);
       setStartTime("");
+      setAllowedDomain("");
       await reload();
     } catch (e) {
       console.error("Error creando evento", e);
@@ -104,6 +107,12 @@ export default function AdminEvents() {
           onChange={(e) => setStartTime(e.target.value)}
           mb="sm"
         />
+        <TextInput
+          label="Dominio permitido (p.ej.: example.com)"
+          value={allowedDomain}
+          onChange={(e) => setAllowedDomain(e.target.value)}
+          mb="sm"
+        />
 
         <Button onClick={createEvent}>Crear evento</Button>
       </Card>
@@ -121,6 +130,11 @@ export default function AdminEvents() {
       {events.map((ev) => (
         <Card key={ev.id} shadow="sm" p="md" mb="md">
           <b>{ev.title}</b> — {ev.date}
+          {ev.allowed_domain && (
+            <p style={{ margin: '4px 0', color: '#555' }}>
+              Dominio asignado: <strong>{ev.allowed_domain}</strong>
+            </p>
+          )}
           {ev.description && <p>{ev.description}</p>}
 
           {/* Resumen de votos Sí / No */}
