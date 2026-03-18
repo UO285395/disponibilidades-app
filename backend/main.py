@@ -484,7 +484,15 @@ def create_event(
     db.add(ev)
     db.commit()
     db.refresh(ev)
-    return ev
+    return {
+        "id": ev.id,
+        "title": ev.title,
+        "description": ev.description,
+        "date": ev.date,
+        "start_time": ev.start_time,
+        "allowed_domain": ev.allowed_domain,
+        "created_by": ev.created_by,
+    }
 
 
 @app.get("/events")
