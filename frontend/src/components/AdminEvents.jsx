@@ -111,7 +111,8 @@ export default function AdminEvents() {
           mb="sm"
         />
         <TextInput
-          label="Colectivo permitido o vacio para Todos"
+          label="Colectivo permitido (parte después de @)"
+          description="Dejar vacío o escribir 'Todos' para evento general."
           value={allowedDomain}
           onChange={(e) => setAllowedDomain(e.target.value)}
           mb="sm"
