@@ -494,13 +494,17 @@ def list_events(
         if e.allowed_domain:
             if user is None:
                 continue
-            if user.role != "superadmin" and _get_domain(e.allowed_domain) != user_domain:
+
+            event_domain = e.allowed_domain.strip().lower()
+            if user.role != "superadmin" and event_domain != user_domain:
                 continue
 
-        # If an admin is non-superadmin, enforce active domain policy by their domain
-        if user and user.role == "admin" and user.role != "superadmin":
-            if e.allowed_domain and _get_domain(e.allowed_domain) != user_domain:
-                continue
+        # Si el usuario es admin de dominio limpio, mantiene la misma lógica (superadmin no filtra).
+        if user and user.role == "admin":
+            if e.allowed_domain:
+                event_domain = e.allowed_domain.strip().lower()
+                if event_domain != user_domain:
+                    continue
 
         filtered.append(e)
 
