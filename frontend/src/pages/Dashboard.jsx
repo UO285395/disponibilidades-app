@@ -9,7 +9,6 @@ import SpaceReservations from "../components/SpaceReservations.jsx";
 export default function Dashboard() {
   const [user, setUser] = useState(null);
   const [offsetWeeks, setOffsetWeeks] = useState(0);
-  const [activeTab, setActiveTab] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -22,15 +21,6 @@ export default function Dashboard() {
       try {
         const u = await userAPI.me();
         setUser(u);
-
-        const firstTab = u.availabilities_enabled
-          ? "availability"
-          : u.events_enabled
-          ? "events"
-          : u.spaces_enabled
-          ? "reservations"
-          : "availability";
-        setActiveTab(firstTab);
       } catch {
         clearToken();
         navigate("/");
@@ -44,6 +34,14 @@ export default function Dashboard() {
   }
 
   if (!user) return null;
+
+  const defaultTab = user.availabilities_enabled
+    ? "availability"
+    : user.events_enabled
+    ? "events"
+    : user.spaces_enabled
+    ? "reservations"
+    : "availability";
 
   return (
     <Box p="lg">
@@ -82,12 +80,7 @@ export default function Dashboard() {
           Panel de usuario
         </Title>
 
-        <Tabs
-          value={activeTab}
-          onTabChange={(val) => {
-            if (val) setActiveTab(val);
-          }}
-        >
+        <Tabs defaultValue={defaultTab}>
           <Tabs.List>
             {user.availabilities_enabled && <Tabs.Tab value="availability">Disponibilidad</Tabs.Tab>}
             {user.events_enabled && <Tabs.Tab value="events">Eventos</Tabs.Tab>}
