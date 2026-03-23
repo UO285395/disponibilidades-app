@@ -38,6 +38,7 @@ class Event(Base):
     description = Column(String)
     date = Column(String, nullable=False)
     start_time = Column(String)
+    end_time = Column(String)
 
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
 
@@ -58,30 +59,3 @@ class EventResponse(Base):
     # Relaciones
     event = relationship("Event", back_populates="responses")
     user = relationship("User", back_populates="responses")
-
-
-class Space(Base):
-    __tablename__ = "spaces"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False, unique=True)
-    description = Column(String)
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
-
-    creator = relationship("User")
-    reservations = relationship("SpaceReservation", back_populates="space")
-
-
-class SpaceReservation(Base):
-    __tablename__ = "space_reservations"
-
-    id = Column(Integer, primary_key=True, index=True)
-    space_id = Column(Integer, ForeignKey("spaces.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    date = Column(String, nullable=False)
-    start_time = Column(String, nullable=False)
-    end_time = Column(String, nullable=False)
-    reason = Column(String)
-
-    space = relationship("Space", back_populates="reservations")
-    user = relationship("User")

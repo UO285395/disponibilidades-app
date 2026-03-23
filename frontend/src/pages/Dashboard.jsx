@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Title, Button, Box, Text, Divider, Group, Tabs, Card } from "@mantine/core";
+import { Title, Button, Box, Text, Divider, Group } from "@mantine/core";
 import { userAPI, getToken, clearToken } from "../api/api.js";
 import WeekCalendar from "../components/WeekCalendar.jsx";
 import EventsSection from "../components/EventsSection.jsx";
-import SpaceReservations from "../components/SpaceReservations.jsx";
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);
@@ -67,68 +66,60 @@ export default function Dashboard() {
 
       <Divider my="md" />
 
-      <Box>
-        <Title order={3} mb="md">
-          Panel de usuario
-        </Title>
+      {/* ================= CONTENIDO ================= */}
+      <Box
+        mt="md"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "2fr 1fr",
+          gap: "1.5rem",
+        }}
+      >
+        {/* ===== Calendario ===== */}
+        <Box
+          style={{
+            border: "1px solid #e0e0e0",
+            borderRadius: 8,
+            padding: "1rem",
+            backgroundColor: "white",
+          }}
+        >
+          <Group mb="md">
+            <Title order={3}>Disponibilidad</Title>
 
-        <Tabs defaultValue="availability">
-          <Tabs.List>
-            <Tabs.Tab value="availability">Disponibilidad</Tabs.Tab>
-            <Tabs.Tab value="events">Eventos</Tabs.Tab>
-            <Tabs.Tab value="reservations">Reserva espacios</Tabs.Tab>
-          </Tabs.List>
-
-          <Tabs.Panel value="availability" pt="md">
-            <Card
-              style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: "1rem" }}
-              mb="md"
+             <Button
+              size="xs"
+              variant={offsetWeeks === 0 ? "filled" : "outline"}
+              onClick={() => setOffsetWeeks(0)}
             >
-              <Group mb="md">
-                <Title order={4}>Disponibilidad</Title>
-
-                <Button
-                  size="xs"
-                  variant={offsetWeeks === 0 ? "filled" : "outline"}
-                  onClick={() => setOffsetWeeks(0)}
-                >
-                  Semana actual
-                </Button>
-                <Button
-                  size="xs"
-                  variant={offsetWeeks === 1 ? "filled" : "outline"}
-                  onClick={() => setOffsetWeeks(1)}
-                >
-                  Semana siguiente
-                </Button>
-              </Group>
-
-              <Text size="sm" c="dimmed" mb="md">
-                Haz clic en las celdas para marcar o desmarcar tu disponibilidad por horas.
-              </Text>
-
-              <WeekCalendar offsetWeeks={offsetWeeks} />
-            </Card>
-          </Tabs.Panel>
-
-          <Tabs.Panel value="events" pt="md">
-            <Card
-              style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: "1rem" }}
-              mb="md"
+              Semana actual
+            </Button>
+            <Button
+              size="xs"
+              variant={offsetWeeks === 1 ? "filled" : "outline"}
+              onClick={() => setOffsetWeeks(1)}
             >
-              <EventsSection />
-            </Card>
-          </Tabs.Panel>
+              Semana siguiente
+            </Button>
+          </Group>
 
-          <Tabs.Panel value="reservations" pt="md">
-            <Card
-              style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: "1rem" }}
-              mb="md"
-            >
-              <SpaceReservations />
-            </Card>
-          </Tabs.Panel>
-        </Tabs>
+          <Text size="sm" c="dimmed" mb="md">
+            Haz clic en las celdas para marcar o desmarcar tu disponibilidad por horas.</Text>
+
+          <WeekCalendar offsetWeeks={offsetWeeks} />
+        </Box>
+
+        {/* ===== Eventos ===== */}
+        <Box
+          style={{
+            border: "1px solid #e0e0e0",
+            borderRadius: 8,
+            padding: "1rem",
+            backgroundColor: "white"
+          }}
+        >
+          <EventsSection />
+        </Box>
       </Box>
     </Box>
   );

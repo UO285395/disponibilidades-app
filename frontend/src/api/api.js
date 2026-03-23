@@ -88,36 +88,6 @@ export const eventsAPI = {
 };
 
 
-// ------------------- ESPACIOS (usuario) -------------------
-
-export const spacesAPI = {
-  list() {
-    return request("/spaces");
-  }
-};
-
-// ------------------- RESERVATIONS (usuario) -------------------
-
-export const reservationsAPI = {
-  list() {
-    return request("/reservations");
-  },
-
-  create(space_id, date, start_time, end_time, reason) {
-    return request("/reservations", "POST", {
-      space_id,
-      date,
-      start_time,
-      end_time,
-      reason,
-    });
-  },
-
-  delete(id) {
-    return request(`/reservations/${id}`, "DELETE");
-  },
-};
-
 // ------------------- AVAILABILITY (usuario) -------------------
 
 export const availabilityAPI = {

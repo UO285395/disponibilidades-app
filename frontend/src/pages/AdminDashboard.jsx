@@ -6,7 +6,6 @@ import AdminUsers from "../components/AdminUsers.jsx";
 import AdminEvents from "../components/AdminEvents.jsx";
 import AdminAvailabilities from "../components/AdminAvailabilities.jsx";
 import AdminAvailabilitiesCalendar from "../components/AdminAvailabilitiesCalendar.jsx";
-import AdminSpaces from "../components/AdminSpaces.jsx";
 
 export default function AdminDashboard() {
   const [user, setUser] = useState(null);
@@ -53,7 +52,6 @@ export default function AdminDashboard() {
         <Tabs.List>
           <Tabs.Tab value="events">Eventos</Tabs.Tab>
           <Tabs.Tab value="availabilities-calendar">Calendario de disponibilidad</Tabs.Tab>
-          <Tabs.Tab value="spaces">Espacios</Tabs.Tab>
           <Tabs.Tab value="users">Usuarios</Tabs.Tab>
         </Tabs.List>
 
@@ -63,10 +61,6 @@ export default function AdminDashboard() {
 
         <Tabs.Panel value="events" pt="xl">
           <AdminEvents />
-        </Tabs.Panel>
-
-        <Tabs.Panel value="spaces" pt="xl">
-          <AdminSpaces />
         </Tabs.Panel>
 
         <Tabs.Panel value="availabilities-calendar" pt="xl">

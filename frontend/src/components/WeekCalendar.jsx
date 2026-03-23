@@ -27,7 +27,6 @@ function formatISO(d) {
 
 export default function WeekCalendar({ offsetWeeks = 0 }) {
   const [availabilities, setAvailabilities] = useState([]);
-  const [pendingKeys, setPendingKeys] = useState(new Set());
 
   const baseWeekStart = startOfWeek(new Date());
   const weekStart = addDays(baseWeekStart, offsetWeeks * 7);
@@ -58,150 +57,117 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
     });
   }
 
-  async function toggleCell(date, hour) {
-    const h = parseInt(hour, 10);
-    const key = `${date}-${h}`;
+async function toggleCell(date, hour) {
+  const h = parseInt(hour);
 
-    if (pendingKeys.has(key)) return;
+  const exist = availabilities.find((a) => {
+    const start = parseInt(a.start_time.slice(0, 2));
+    const end = parseInt(a.end_time.slice(0, 2));
+    return a.date === date && h >= start && h < end;
+  });
 
-    const exist = availabilities.find((a) => {
-      const start = parseInt(a.start_time.slice(0, 2), 10);
-      const end = parseInt(a.end_time.slice(0, 2), 10);
-      return a.date === date && h >= start && h < end;
-    });
+  // --- UI Optimista ---
+  if (exist) {
+    // Quitar visualmente SIN esperar API
+    setAvailabilities((prev) => prev.filter((a) => a.id !== exist.id));
 
-    if (exist) {
-      // Optimistic remove
-      setAvailabilities((prev) => prev.filter((a) => a.id !== exist.id));
-      setPendingKeys((prev) => new Set(prev).add(key));
-
-      try {
-        await availabilityAPI.delete(exist.id);
-      } catch (err) {
-        console.error(err);
-        // Revert on failure
-        setAvailabilities((prev) => [...prev, exist]);
-      } finally {
-        setPendingKeys((prev) => {
-          const next = new Set(prev);
-          next.delete(key);
-          return next;
-        });
-      }
-      return;
+    // Luego eliminar en backend
+    try {
+      await availabilityAPI.delete(exist.id);
+    } catch (err) {
+      console.error(err);
+      // revertir si falla
+      await loadAvailability();
     }
+  } else {
+    // Añadir visualmente SIN esperar API
+   const tmpId = "tmp_" + crypto.randomUUID();
 
-    const tempId = `tmp-${key}`;
-    const tempEntry = {
-      id: tempId,
-      user_id: null,
+    const newEntry = {
+      id: tmpId,
       date,
       start_time: `${pad2(hour)}:00:00`,
       end_time: `${pad2(hour + 1)}:00:00`,
     };
 
-    setAvailabilities((prev) => [...prev, tempEntry]);
-    setPendingKeys((prev) => new Set(prev).add(key));
+    setAvailabilities((prev) => [...prev, newEntry]);
 
+    // Crear en backend
     try {
-      const created = await availabilityAPI.create(
+      const saved = await availabilityAPI.create(
         date,
-        `${pad2(hour)}:00:00`,
-        `${pad2(hour + 1)}:00:00`
+        newEntry.start_time,
+        newEntry.end_time
       );
 
+      // Reemplazar el temporal con la versión real del backend
       setAvailabilities((prev) =>
-        prev.map((a) => (a.id === tempId ? created : a))
+        prev.map((a) => (a.id === tmpId ? saved : a))
       );
     } catch (err) {
       console.error(err);
-      setAvailabilities((prev) => prev.filter((a) => a.id !== tempId));
-    } finally {
-      setPendingKeys((prev) => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
+      // revertir si falla
+      await loadAvailability();
     }
   }
+}
+
+async function loadAvailability() {
+  const data = await availabilityAPI.listMine();
+  setAvailabilities(data);
+}
 
 
 
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-  const hours = Array.from({ length: 15 }, (_, h) => h + 8);
 
   return (
     <Card shadow="md" p="lg" radius="md">
-      <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-        <Table striped highlightOnHover withColumnBorders style={{ minWidth: 900 }}>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th
-                style={{
-                  position: "sticky",
-                  left: 0,
-                  background: "white",
-                  zIndex: 3,
-                  width: "5.5rem",
-                  minWidth: "5.5rem",
-                  maxWidth: "5.5rem",
-                  padding: "6px 8px",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                Hora
-              </Table.Th>
-              {days.map((d, i) => (
-                <Table.Th key={i}>
-                  {d.toLocaleDateString("es-ES", {
-                    weekday: "short",
-                    day: "2-digit",
-                  })}
-                </Table.Th>
-              ))}
-            </Table.Tr>
-          </Table.Thead>
-
-          <Table.Tbody>
-            {hours.map((hour) => (
-              <Table.Tr key={hour}>
-                <Table.Td
-                  style={{
-                    position: "sticky",
-                    left: 0,
-                    background: "white",
-                    zIndex: 4,
-                    cursor: "default",
-                  }}
-                >
-                  {pad2(hour)}:00 - {pad2(hour + 1)}:00
-                </Table.Td>
-                {days.map((d, idx) => {
-                  const date = formatISO(d);
-                  const active = isAvailable(date, hour);
-                  const key = `${date}-${hour}`;
-                  const pending = pendingKeys.has(key);
-                  return (
-                    <Table.Td
-                      key={idx}
-                      onClick={() => !pending && toggleCell(date, hour)}
-                      style={{
-                        cursor: pending ? "not-allowed" : "pointer",
-                        background: pending
-                          ? "#ffeaa7"
-                          : active
-                          ? "#abf5d1"
-                          : undefined,
-                        opacity: pending ? 0.7 : 1,
-                      }}
-                    />
-                  );
-                })}
-              </Table.Tr>
+      <Table striped highlightOnHover withColumnBorders>
+        <Table.Thead>
+          <Table.Tr>
+            <Table.Th
+  style={{
+    position: "sticky",
+    left: 0,
+    background: "white",
+    zIndex: 3,
+  }}
+>
+  Hora
+</Table.Th>
+            {days.map((d, i) => (
+              <Table.Th key={i}>{d.toLocaleDateString("es-ES", {
+  weekday: "short",
+  day: "2-digit",
+})}
+</Table.Th>
             ))}
-          </Table.Tbody>
-        </Table>
-      </div>
+          </Table.Tr>
+        </Table.Thead>
+
+        <Table.Tbody>
+          {Array.from({ length: 15 }, (_, h) => h + 8).map((hour) => (
+            <Table.Tr key={hour}>
+              <Table.Td>{pad2(hour)}:00 - {pad2(hour + 1)}:00</Table.Td>
+              {days.map((d, idx) => {
+                const date = formatISO(d);
+                const active = isAvailable(date, hour);
+                return (
+                  <Table.Td
+                    key={idx}
+                    onClick={() => toggleCell(date, hour)}
+                    style={{
+                      cursor: "pointer",
+                      background: active ? "#abf5d1" : undefined
+                    }}
+                  />
+                );
+              })}
+            </Table.Tr>
+          ))}
+        </Table.Tbody>
+      </Table>
     </Card>
   );
 }

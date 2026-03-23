@@ -7,8 +7,7 @@ export default function AdminEvents() {
   const [events, setEvents] = useState([]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [date, setDate] = useState(null);
-  const [startTime, setStartTime] = useState("");
+  const [date, setDate] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -40,20 +39,18 @@ export default function AdminEvents() {
   async function createEvent() {
     if (!title || !date) return;
 
-    const isoDate = typeof date === "string" ? date : date instanceof Date ? date.toISOString().slice(0, 10) : "";
-
     try {
       await adminAPI.createEvent({
         title,
         description: description || null,
-        date: isoDate,
-        start_time: startTime || null
+        date,
+        start_time: null,
+        end_time: null
       });
 
       setTitle("");
       setDescription("");
-      setDate(null);
-      setStartTime("");
+      setDate("");
       await reload();
     } catch (e) {
       console.error("Error creando evento", e);
@@ -93,15 +90,8 @@ export default function AdminEvents() {
         <TextInput
           type="date"
           label="Fecha"
-          value={date || ""}
+          value={date}
           onChange={(e) => setDate(e.target.value)}
-          mb="sm"
-        />
-        <TextInput
-          type="time"
-          label="Hora inicio"
-          value={startTime}
-          onChange={(e) => setStartTime(e.target.value)}
           mb="sm"
         />
 

@@ -137,21 +137,11 @@ class EventCreate(BaseModel):
     description: str | None
     date: str
     start_time: str | None
+    end_time: str | None
 
 class EventResponseCreate(BaseModel):
     answer: str
     justification: str | None
-
-class SpaceCreate(BaseModel):
-    name: str
-    description: str | None
-
-class SpaceReservationCreate(BaseModel):
-    space_id: int
-    date: str
-    start_time: str | None
-    end_time: str | None
-    reason: str | None
 
 
 # =========================================================
@@ -295,6 +285,7 @@ def create_event(
         description=data.description,
         date=data.date,
         start_time=data.start_time,
+        end_time=data.end_time,
         created_by=admin.id
     )
     db.add(ev)
@@ -335,6 +326,7 @@ def list_events(db: Session = Depends(get_db)):
                 "description": e.description,
                 "date": e.date,
                 "start_time": e.start_time,
+                "end_time": e.end_time,
                 "yes_count": yes_count,
                 "no_count": no_count,
             }
@@ -550,216 +542,4 @@ def admin_all_availability(
             "end_time": a.end_time,
         }
         for a in items
-    ]
-
-
-# =========================================================
-# ESPACIOS Y RESERVAS
-# =========================================================
-
-def _get_domain(email: str):
-    return (email.split("@")[-1] if "@" in email else "").lower()
-
-
-@app.get("/spaces")
-def list_spaces(db: Session = Depends(get_db)):
-    return [
-        {
-            "id": s.id,
-            "name": s.name,
-            "description": s.description,
-        }
-        for s in db.query(models.Space).all()
-    ]
-
-
-@app.post("/spaces")
-def create_space(
-    data: SpaceCreate,
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    admin = get_user_from_token(cred.credentials, db)
-    if admin.role != "admin":
-        raise HTTPException(403, "Solo admin")
-
-    if db.query(models.Space).filter(models.Space.name == data.name).first():
-        raise HTTPException(400, "Ya existe un espacio con ese nombre")
-
-    s = models.Space(
-        name=data.name,
-        description=data.description,
-        created_by=admin.id
-    )
-    db.add(s)
-    db.commit()
-    db.refresh(s)
-
-    return {
-        "id": s.id,
-        "name": s.name,
-        "description": s.description,
-    }
-
-
-@app.delete("/spaces/{space_id}")
-def delete_space(
-    space_id: int,
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    admin = get_user_from_token(cred.credentials, db)
-    if admin.role != "admin":
-        raise HTTPException(403, "Solo admin")
-
-    s = db.query(models.Space).filter(models.Space.id == space_id).first()
-    if not s:
-        raise HTTPException(404, "Espacio no encontrado")
-
-    db.query(models.SpaceReservation).filter(models.SpaceReservation.space_id == space_id).delete()
-    db.delete(s)
-    db.commit()
-
-    return {"ok": True}
-
-
-@app.get("/reservations")
-def list_reservations(
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    user = get_user_from_token(cred.credentials, db)
-    user_domain = _get_domain(user.email)
-
-    reservations = db.query(models.SpaceReservation).join(models.Space).join(models.User).all()
-
-    output = []
-    for r in reservations:
-        creator_domain = _get_domain(r.user.email)
-        show_reason = creator_domain == user_domain
-
-        output.append({
-            "id": r.id,
-            "space_id": r.space_id,
-            "space_name": r.space.name,
-            "creator_name": r.user.full_name,
-            "creator_email": r.user.email,
-            "date": r.date,
-            "start_time": r.start_time,
-            "end_time": r.end_time,
-            "reason": r.reason if show_reason else None,
-            "visible_reason": show_reason,
-        })
-
-    return output
-
-
-@app.post("/reservations")
-def create_reservation(
-    data: SpaceReservationCreate,
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    user = get_user_from_token(cred.credentials, db)
-
-    space = db.query(models.Space).filter(models.Space.id == data.space_id).first()
-    if not space:
-        raise HTTPException(404, "Espacio no encontrado")
-
-    raw_start = (data.start_time or "").strip()
-    raw_end = (data.end_time or "").strip()
-
-    def parse_time(value):
-        if value is None or str(value).strip() == "":
-            return None
-        t = str(value).strip()
-
-        if len(t) == 4 and t[1] == ":":
-            t = "0" + t
-        if len(t) == 5 and t.count(":") == 1:
-            t = t + ":00"
-
-        from datetime import datetime
-        try:
-            return datetime.strptime(t, "%H:%M:%S").time()
-        except ValueError:
-            raise HTTPException(400, "Formato de time inválido, use HH:MM o HH:MM:SS")
-
-    start_dt = parse_time(raw_start) or parse_time("00:00")
-    end_dt = parse_time(raw_end) or parse_time("23:59")
-
-    if start_dt >= end_dt:
-        raise HTTPException(400, "start_time debe ser anterior a end_time")
-
-    start_time = start_dt.strftime("%H:%M:%S")
-    end_time = end_dt.strftime("%H:%M:%S")
-
-    # No forzar validación de colisiones en sprint inicial, se asume allowed.
-    r = models.SpaceReservation(
-        space_id=data.space_id,
-        user_id=user.id,
-        date=data.date,
-        start_time=start_time,
-        end_time=end_time,
-        reason=data.reason,
-    )
-    db.add(r)
-    db.commit()
-    db.refresh(r)
-
-    return {
-        "id": r.id,
-        "space_id": r.space_id,
-        "date": r.date,
-        "start_time": r.start_time,
-        "end_time": r.end_time,
-        "reason": r.reason,
-    }
-
-
-@app.delete("/reservations/{reservation_id}")
-def delete_reservation(
-    reservation_id: int,
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    user = get_user_from_token(cred.credentials, db)
-
-    r = db.query(models.SpaceReservation).filter(models.SpaceReservation.id == reservation_id).first()
-    if not r:
-        raise HTTPException(404, "Reserva no encontrada")
-
-    if user.role != "admin" and r.user_id != user.id:
-        raise HTTPException(403, "No autorizado")
-
-    db.delete(r)
-    db.commit()
-    return {"ok": True}
-
-
-@app.get("/admin/reservations")
-def admin_list_reservations(
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    admin = get_user_from_token(cred.credentials, db)
-    if admin.role != "admin":
-        raise HTTPException(403, "No autorizado")
-
-    items = db.query(models.SpaceReservation).join(models.Space).join(models.User).all()
-
-    return [
-        {
-            "id": r.id,
-            "space_id": r.space_id,
-            "space_name": r.space.name,
-            "user_id": r.user_id,
-            "user_name": r.user.full_name,
-            "user_email": r.user.email,
-            "date": r.date,
-            "start_time": r.start_time,
-            "end_time": r.end_time,
-            "reason": r.reason,
-        }
-        for r in items
     ]

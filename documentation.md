@@ -92,6 +92,7 @@ El objetivo de este documento es **centralizar toda la definición funcional, el
   - `description`: string, opcional.
   - `date`: string, obligatorio (fecha del evento).
   - `start_time`: string opcional (hora inicio).
+  - `end_time`: string opcional (hora fin).
   - `created_by`: FK a `users.id`.
   - Relaciones:
     - `creator`: usuario que creó el evento.
@@ -184,17 +185,17 @@ El objetivo de este documento es **centralizar toda la definición funcional, el
 - **POST `/events`**
   - Crea un nuevo evento.
   - Solo para usuarios admin.
-  - Guarda: título, descripción, fecha, `start_time` y `created_by`.
+  - Guarda: título, descripción, fecha, `start_time`, `end_time` y `created_by`.
   - Respuesta: el objeto `Event` recién creado.
   - **Uso front**:
     - `AdminEvents.jsx` (función `createEvent`):
-      - Envía `title`, `description`, `date` y, opcionalmente, `start_time` a partir del campo de hora de inicio en el formulario.
+      - Envía `title`, `description`, `date`, `start_time: null`, `end_time: null`.
       - Tras crear recarga la lista.
 
 - **GET `/events`**
   - Lista todos los eventos sin filtrado.
   - Respuesta: array de objetos con:
-    - `id`, `title`, `description`, `date`, `start_time`.
+    - `id`, `title`, `description`, `date`, `start_time`, `end_time`.
     - `yes_count`, `no_count`: número de respuestas “sí” / “no” para ese evento (derivadas de `EventResponse`).
   - **Uso front**:
     - `EventsSection.jsx` carga lista para usuarios (ignora los campos de resumen).
@@ -298,60 +299,6 @@ El objetivo de este documento es **centralizar toda la definición funcional, el
     - Devuelve todas las disponibilidades restantes con:
       - `id`, `user` (nombre), `email`, `date`, `start_time`, `end_time`.
   - **Uso front**:
-    - `AdminAvailabilitiesCalendar.jsx`.
-
----
-
-#### 4.6 Gestión de espacios y reservas
-
-**Modelos Pydantic:**
-
-- `SpaceCreate`: `name`, `description?`.
-- `SpaceReservationCreate`: `space_id`, `date`, `start_time?`, `end_time?`, `reason?`.
-
-**Endpoints (usuario estándar):**
-
-- **GET `/spaces`**
-  - Lista todos los espacios disponibles.
-  - **Uso front**:
-    - `SpaceReservations.jsx` carga para poblar select.
-
-- **GET `/reservations`**
-  - Devuelve todas las reservas de espacios (de todos los usuarios).
-  - Para cada reserva incluye:
-    - `id`, `space_id`, `space_name`, `creator_name`, `creator_email`, `date`, `start_time`, `end_time`, `reason`, `visible_reason`.
-  - `reason` solo se muestra si el dominio (@...) del creador coincide con el dominio del usuario solicitante.
-  - **Uso front**:
-    - `SpaceReservations.jsx` muestra tabla con motivo condicional.
-
-- **POST `/reservations`**
-  - Crea reserva para usuario autenticado.
-  - Si `start_time` no está presente, se usa `00:00:00`.
-  - Si `end_time` no está presente, se usa `23:59:59`.
-  - Valida `start_time < end_time`.
-  - **Uso front**:
-    - `SpaceReservations.jsx` formulario de creación.
-
-**Endpoints (admin):**
-
-- **GET `/admin/reservations`**
-  - Lista todas las reservas con datos completos (motivo visible siempre).
-  - **Uso front**: pendiente de incorporación (próximos sprints si se requiere). 
-
-- **GET `/spaces`**
-  - Lista todos los espacios (mismo endpoint que usuario).
-
-- **POST `/spaces`**
-  - Crea un nuevo espacio (admin).
-  - **Uso front**:
-    - `AdminSpaces.jsx` formulario de creación.
-
-- **DELETE `/spaces/{space_id}`**
-  - Elimina espacio y sus reservas asociadas (admin).
-  - **Uso front**:
-    - `AdminSpaces.jsx`.
-
-
     - `AdminAvailabilitiesCalendar.jsx`:
       - Construye un mapa `cellMap` de `date-hour → [usuarios]`.
       - Permite filtrar por dominio de email.
@@ -500,14 +447,7 @@ Esta sección recoge **desajustes entre la intención funcional y la implementac
 - **Acciones propuestas**:
   - Sustituir `alert` por componentes de notificación de la librería UI (Mantine).
   - Añadir mensajes de validación de formularios (campos obligatorios, formato de email, etc.).
-- **Bug corregido en calendario de disponibilidad**:
-  - `WeekCalendar.jsx` volvió a la tabla semanal clásica con 7 días y 15 franjas horarias.
-  - Anterior vista "card per day" fue eliminada por problema de filtrado nativo de días.
-  - `toggleCell` ahora es optimista: actualiza el estado local de inmediato y gestiona revert on error.
 
-- **Bug corregido en formulario de eventos admin**:
-  - `AdminEvents.jsx` usa `DatePicker` de Mantine en vez de `type="date"` (evita flechas extrañas y hace usable la selección de mes/día).
-  - Fecha se guarda en formato ISO `YYYY-MM-DD`.
 ---
 
 ### 7. Plan de actualización y mejora
@@ -558,19 +498,6 @@ Los siguientes sprints se centrarán en **nuevas funcionalidades** (definición 
 - **Calidad de vida y UX**
   - Mejoras visuales en el calendario (resaltado de hoy, tooltips, etc.).
   - Recordatorios o notificaciones (email / push, según alcance del proyecto).
-
-- **Bugfix de calendario de disponibilidad**
-  - `WeekCalendar.jsx` usa ahora columna `Hora` sticky y `z-index` alto para evitar solaparse con días cuando se desliza.
-  - Se implementó `pendingKeys` para gestionar clics rápido y evitar la condición de carrera de toggle rápido.
-
-- **Bugfix de selector de fecha en eventos y reservas**
-  - `AdminEvents.jsx` y `SpaceReservations.jsx` usan input nativo `type="date"` para garantizar compatibilidad y comportamiento simple.
-
-- **Bugfix y mejora en reservas de espacios**
-  - `SpaceReservations.jsx` valida el formato `HH:MM` o `HH:MM:SS` para hora inicio y fin.
-  - `backend/main.py` normaliza y valida correctamente las horas. End sin hora -> 23:59:59.
-  - Nuevo endpoint `DELETE /reservations/{id}` para cancelar reserva.
-  - En la interfaz de reservas ahora hay botón `Cancelar` y no se muestra permanentemente `visible_reason`.
 
 Cada sprint deberá:
 
