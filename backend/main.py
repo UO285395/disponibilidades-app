@@ -2,6 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
@@ -540,7 +541,7 @@ def list_events(
             db.query(EventResponse)
             .filter(
                 EventResponse.event_id == e.id,
-                EventResponse.answer.in_(["yes", "si"]),
+                func.lower(EventResponse.answer).in_(["yes", "si"]),
             )
             .count()
         )
@@ -549,7 +550,7 @@ def list_events(
             db.query(EventResponse)
             .filter(
                 EventResponse.event_id == e.id,
-                EventResponse.answer == "no",
+                func.lower(EventResponse.answer) == "no",
             )
             .count()
         )
@@ -561,7 +562,8 @@ def list_events(
                 "description": e.description,
                 "date": e.date,
                 "start_time": e.start_time,
-                "end_time": e.end_time,
+                # `Event` no tiene `end_time` en el modelo actual; mantenemos el campo para compatibilidad.
+                "end_time": None,
                 "allowed_domain": e.allowed_domain,
                 "yes_count": yes_count,
                 "no_count": no_count,
@@ -590,7 +592,8 @@ def get_event(
         "description": ev.description,
         "date": ev.date,
         "start_time": ev.start_time,
-        "end_time": ev.end_time
+        # `Event` no tiene `end_time` en el modelo actual; mantenemos el campo para compatibilidad.
+        "end_time": None
     }
 
 
@@ -634,6 +637,7 @@ def event_responses(
                 continue
 
         results.append({
+            "user_id": u.id,
             "user_full_name": u.full_name,
             "answer": r.answer,
             "justification": r.justification,
@@ -663,10 +667,18 @@ def respond_event(
     if existing:
         raise HTTPException(400, "Ya has votado en este evento")
 
+    raw_answer = str(data.answer).strip().lower()
+    if raw_answer in ["si", "sí", "yes"]:
+        normalized_answer = "si"
+    elif raw_answer == "no":
+        normalized_answer = "no"
+    else:
+        raise HTTPException(400, "answer inválida (usa 'si' o 'no')")
+
     db.add(EventResponse(
         event_id=event_id,
         user_id=user.id,
-        answer=data.answer,
+        answer=normalized_answer,
         justification=data.justification
     ))
     db.commit()
