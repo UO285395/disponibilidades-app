@@ -63,7 +63,7 @@ export default function AdminEvents() {
       await reload();
     } catch (e) {
       console.error("Error creando evento", e);
-      alert("Error creando evento");
+      alert(e?.message || "Error creando evento");
     }
   }
 

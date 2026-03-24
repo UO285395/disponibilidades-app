@@ -102,8 +102,7 @@ Modelos en `backend/models.py`:
   - Lookup optimizado por mapa (`availabilityByCell`) para reducir coste por render.
 - Admin:
   - `GET /admin/availability`
-  - Filtrado por dominio para admin normal.
-  - `superadmin` ve todo.
+  - `admin` y `superadmin` ven todas las disponibilidades (incluidas las propias).
 - Calendario admin (`AdminAvailabilitiesCalendar.jsx`):
   - Refresco automático (intervalo + focus/visibility).
   - Filtro por dominio + “mejores franjas”.
@@ -190,6 +189,9 @@ Criterio MVP: “flujo principal usable de extremo a extremo por módulo”.
 - Conflictos de superadmin en módulo de espacios corregidos (propagación de rol en checks).
 - Admin de un dominio ya no puede operar eventos de otro dominio por acceso directo a ID.
 - Re-voto en frontend tras refresco/login ya no genera bucle de intento: evento se bloquea al detectar respuesta existente.
+- Dashboard admin de disponibilidades: `admin` y `superadmin` ahora ven todos los votos de disponibilidad.
+- Creación de eventos robustecida ante BDs legacy sin `events.allowed_domain`:
+  - En arranque backend se añade automáticamente la columna faltante si no existe.
 
 ---
 

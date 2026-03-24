@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, inspect, text
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
@@ -17,6 +17,24 @@ from database import SessionLocal, engine
 # =========================================================
 print("🔧 Migrando esquema...")
 models.Base.metadata.create_all(bind=engine)
+
+
+def ensure_legacy_schema_compatibility():
+    try:
+        inspector = inspect(engine)
+        table_names = set(inspector.get_table_names())
+
+        if "events" in table_names:
+            event_columns = {column["name"] for column in inspector.get_columns("events")}
+            if "allowed_domain" not in event_columns:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN allowed_domain VARCHAR"))
+                print("✅ Columna events.allowed_domain añadida para compatibilidad")
+    except Exception as exc:
+        print(f"⚠️ No se pudo verificar compatibilidad de esquema: {exc}")
+
+
+ensure_legacy_schema_compatibility()
 
 
 # =========================================================
@@ -798,11 +816,7 @@ def admin_all_availability(
 
     db.commit()
 
-    admin_domain = _get_domain(admin.email)
-    if admin.role == "superadmin":
-        items = db.query(Availability).all()
-    else:
-        items = [a for a in db.query(Availability).all() if _get_domain(a.user.email) == admin_domain]
+    items = db.query(Availability).all()
 
     return [
         {
