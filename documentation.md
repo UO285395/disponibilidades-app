@@ -88,8 +88,12 @@ Modelos en `backend/models.py`:
   - `DELETE /events/{id}`
 - Voto único por usuario/evento en backend:
   - `POST /events/{id}/responses` rechaza duplicados con 400 (`Ya has votado...`).
-- Frontend (`EventsSection.jsx`) carga `GET /events/my-responses` y deshabilita botón desde inicio.
+- Frontend (`EventsSection.jsx`) carga `GET /my-event-responses` y deshabilita botón desde inicio.
 - Si backend devuelve “ya votado”, el frontend marca ese evento como votado en sesión actual.
+
+Nota técnica:
+
+- Se usa `/my-event-responses` para evitar colisión con la ruta dinámica `/events/{event_id}` que podía provocar que no se recuperaran correctamente los votos previos tras recargar o volver a iniciar sesión.
 
 ### 4.3 Disponibilidades
 

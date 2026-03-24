@@ -83,7 +83,7 @@ export const eventsAPI = {
   },
 
   myResponses() {
-    return request("/events/my-responses");
+    return request("/my-event-responses");
   }
 };
 

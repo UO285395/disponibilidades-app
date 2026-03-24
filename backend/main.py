@@ -701,7 +701,7 @@ def respond_event(
     return {"ok": True}
 
 
-@app.get("/events/my-responses")
+@app.get("/my-event-responses")
 def my_event_responses(
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
     db: Session = Depends(get_db)
