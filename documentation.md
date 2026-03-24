@@ -72,8 +72,10 @@ Modelos en `backend/models.py`:
 - `require_admin` permite `admin` y `superadmin`.
 - `superadmin` tiene bypass en flags de políticas de dominio.
 - Se permiten múltiples `admin` y múltiples `superadmin`.
+- Registro público deshabilitado: los usuarios se crean desde administración.
 - Gestión de usuarios por dominio:
-  - `admin` normal solo opera usuarios de su dominio.
+  - `admin` normal puede crear usuarios solo de su dominio.
+  - `admin` normal no puede eliminar usuarios.
   - `superadmin` sin restricción.
 
 ### 4.2 Eventos
@@ -114,6 +116,8 @@ Nota técnica:
 ### 4.4 Usuarios y roles
 
 - `GET /admin/users`
+- `POST /admin/users`
+- `DELETE /admin/users/{id}` (solo superadmin)
 - `POST /admin/make_admin/{id}`
 - `POST /admin/remove_admin/{id}`
 - `POST /admin/become_admin`
@@ -121,6 +125,7 @@ Nota técnica:
 
 Notas:
 
+- `GET /admin/users` devuelve todos los usuarios ordenados por email.
 - No hay endpoint explícito para “degradar superadmin a admin” (solo se puede poner a `user` con `remove_admin`).
 
 ### 4.5 Espacios y reservas
@@ -147,6 +152,10 @@ Notas:
   - `PUT /admin/domain-policies/{id}`
   - `DELETE /admin/domain-policies/{id}`
 - Flags aplican a módulos: eventos, disponibilidades, espacios.
+- Aplicación de flags por módulo:
+  - Usuario: visibilidad de tabs en `Dashboard` + validación backend.
+  - Admin: visibilidad de tabs en `AdminDashboard` + validación backend en endpoints admin de eventos/disponibilidades/espacios.
+  - Superadmin: bypass de flags (acceso completo).
 
 ---
 
@@ -196,6 +205,13 @@ Criterio MVP: “flujo principal usable de extremo a extremo por módulo”.
 - Dashboard admin de disponibilidades: `admin` y `superadmin` ahora ven todos los votos de disponibilidad.
 - Creación de eventos robustecida ante BDs legacy sin `events.allowed_domain`:
   - En arranque backend se añade automáticamente la columna faltante si no existe.
+- Integración bloque usuarios completada:
+  - Se eliminó el registro público.
+  - Creación de usuarios desde admin dashboard (restricción de dominio para admin).
+  - Borrado de usuarios solo superadmin.
+  - Visualización de todos los usuarios en admin dashboard.
+- Integración políticas por tabs reforzada:
+  - Se validan flags de dominio también en endpoints admin asociados a tabs (`/admin/availability`, `/admin/reservations`).
 
 ---
 

@@ -155,6 +155,12 @@ class Register(BaseModel):
     full_name: str
     password: str
 
+
+class AdminUserCreate(BaseModel):
+    email: str
+    full_name: str
+    password: str
+
 class Login(BaseModel):
     email: str
     password: str
@@ -198,17 +204,7 @@ class SpaceReservationCreate(BaseModel):
 # =========================================================
 @app.post("/register")
 def register(data: Register, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == data.email).first():
-        raise HTTPException(400, "Email ya registrado")
-
-    db.add(User(
-        email=data.email,
-        full_name=data.full_name,
-        hashed_password=hash_password(data.password),
-        role="user"
-    ))
-    db.commit()
-    return {"ok": True}
+    raise HTTPException(403, "Registro público deshabilitado. Un administrador debe crear el usuario.")
 
 
 @app.post("/login")
@@ -284,13 +280,7 @@ def admin_list_users(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    users_query = db.query(User)
-    if admin.role != "superadmin":
-        admin_domain = _get_domain(admin.email)
-        users_query = users_query.filter(User.email.contains("@"))
-        users = [u for u in users_query.all() if _get_domain(u.email) == admin_domain]
-    else:
-        users = users_query.all()
+    users = db.query(User).order_by(func.lower(User.email)).all()
 
     return [
         {
@@ -301,6 +291,89 @@ def admin_list_users(
         }
         for u in users
     ]
+
+
+@app.post("/admin/users")
+def admin_create_user(
+    data: AdminUserCreate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    require_admin(admin)
+
+    email = data.email.strip().lower()
+    full_name = data.full_name.strip()
+    password = data.password.strip()
+
+    if not email or "@" not in email:
+        raise HTTPException(400, "Email inválido")
+    if not full_name:
+        raise HTTPException(400, "Nombre obligatorio")
+    if not password:
+        raise HTTPException(400, "Contraseña obligatoria")
+
+    if db.query(User).filter(User.email == email).first():
+        raise HTTPException(400, "Email ya registrado")
+
+    if admin.role != "superadmin":
+        admin_domain = _get_domain(admin.email)
+        target_domain = _get_domain(email)
+        if admin_domain != target_domain:
+            raise HTTPException(403, "Solo puedes crear usuarios de tu dominio")
+
+    user = User(
+        email=email,
+        full_name=full_name,
+        hashed_password=hash_password(password),
+        role="user",
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "id": user.id,
+        "email": user.email,
+        "full_name": user.full_name,
+        "role": user.role,
+    }
+
+
+@app.delete("/admin/users/{user_id}")
+def admin_delete_user(
+    user_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    require_superadmin(admin)
+
+    if admin.id == user_id:
+        raise HTTPException(400, "No puedes eliminarte a ti mismo")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "Usuario no encontrado")
+
+    event_ids = [event.id for event in db.query(Event).filter(Event.created_by == user_id).all()]
+    if event_ids:
+        db.query(EventResponse).filter(EventResponse.event_id.in_(event_ids)).delete(synchronize_session=False)
+        db.query(Event).filter(Event.id.in_(event_ids)).delete(synchronize_session=False)
+
+    space_ids = [space.id for space in db.query(models.Space).filter(models.Space.created_by == user_id).all()]
+    if space_ids:
+        db.query(models.SpaceReservation).filter(models.SpaceReservation.space_id.in_(space_ids)).delete(synchronize_session=False)
+        db.query(models.Space).filter(models.Space.id.in_(space_ids)).delete(synchronize_session=False)
+
+    db.query(EventResponse).filter(EventResponse.user_id == user_id).delete(synchronize_session=False)
+    db.query(Availability).filter(Availability.user_id == user_id).delete(synchronize_session=False)
+    db.query(models.SpaceReservation).filter(models.SpaceReservation.user_id == user_id).delete(synchronize_session=False)
+
+    db.delete(user)
+    db.commit()
+
+    return {"ok": True}
 
 
 @app.post("/admin/remove_admin/{user_id}")
@@ -806,6 +879,9 @@ def admin_all_availability(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
+    if not _is_feature_enabled(db, _get_domain(admin.email), "availabilities", admin.role):
+        raise HTTPException(403, "Disponibilidades deshabilitadas para tu dominio")
+
     cleanup_expired_data(db)
 
     limit = (datetime.utcnow().date() - timedelta(days=14)).strftime("%Y-%m-%d")
@@ -1089,6 +1165,9 @@ def admin_list_reservations(
 ):
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
+
+    if not _is_feature_enabled(db, _get_domain(admin.email), "spaces", admin.role):
+        raise HTTPException(403, "Funcionalidad de espacios deshabilitada para tu dominio")
 
     all_items = db.query(models.SpaceReservation).join(models.Space).join(models.User).all()
 

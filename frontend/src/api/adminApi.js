@@ -5,6 +5,14 @@ export const adminAPI = {
     return request("/admin/users");
   },
 
+  createUser(payload) {
+    return request("/admin/users", "POST", payload);
+  },
+
+  deleteUser(userId) {
+    return request(`/admin/users/${userId}`, "DELETE");
+  },
+
   // endpoint secreto para ti
   becomeAdmin() {
     return request("/admin/become_admin", "POST");
