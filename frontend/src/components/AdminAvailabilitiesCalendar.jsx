@@ -55,14 +55,35 @@ export default function AdminAvailabilitiesCalendar() {
 
   // cargar disponibilidades
   useEffect(() => {
-    (async () => {
+    const loadAvailabilities = async () => {
       try {
         const data = await adminAPI.listAvailabilities();
         setRows(data);
       } catch (e) {
         console.error("Error cargando disponibilidades", e);
       }
-    })();
+    };
+
+    loadAvailabilities();
+
+    const intervalId = window.setInterval(() => {
+      loadAvailabilities();
+    }, 15000);
+
+    function handleVisibilityOrFocus() {
+      if (!document.hidden) {
+        loadAvailabilities();
+      }
+    }
+
+    window.addEventListener("focus", handleVisibilityOrFocus);
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+    };
   }, []);
 
   // filtrado por dominio

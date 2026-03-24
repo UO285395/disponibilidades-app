@@ -239,10 +239,6 @@ def become_admin(
 ):
     user = get_user_from_token(cred.credentials, db)
 
-    existing_admin = db.query(User).filter(User.role == "admin").first()
-    if existing_admin:
-        raise HTTPException(403, "Ya existe un admin")
-
     user.role = "admin"
     db.commit()
 
@@ -255,9 +251,6 @@ def become_superadmin(
     db: Session = Depends(get_db)
 ):
     user = get_user_from_token(cred.credentials, db)
-
-    if db.query(User).filter(User.role == "superadmin").first():
-        raise HTTPException(403, "Ya existe un superadmin")
 
     user.role = "superadmin"
     db.commit()
@@ -586,6 +579,8 @@ def get_event(
     if not ev:
         raise HTTPException(404, "Evento no encontrado")
 
+    _ensure_event_domain_access(admin, ev)
+
     return {
         "id": ev.id,
         "title": ev.title,
@@ -608,6 +603,8 @@ def event_responses(
     ev = db.query(Event).filter(Event.id == event_id).first()
     if not ev:
         raise HTTPException(404, "Evento no encontrado")
+
+    _ensure_event_domain_access(user, ev)
 
     user_domain = _get_domain(user.email)
 
@@ -712,6 +709,8 @@ def delete_event(
     ev = db.query(Event).filter(Event.id == event_id).first()
     if not ev:
         raise HTTPException(404, "Evento no encontrado")
+
+    _ensure_event_domain_access(admin, ev)
 
     # borrar primero respuestas asociadas
     db.query(EventResponse)\
@@ -858,6 +857,17 @@ def _same_domain_or_superadmin(user: User, target_user: User):
     return _get_domain(user.email) == _get_domain(target_user.email)
 
 
+def _ensure_event_domain_access(user: User, event: Event):
+    if user.role == "superadmin":
+        return
+
+    if event.allowed_domain:
+        event_domain = event.allowed_domain.strip().lower()
+        user_domain = _get_domain(user.email)
+        if event_domain != user_domain:
+            raise HTTPException(403, "No autorizado para operar eventos de otro dominio")
+
+
 @app.get("/spaces")
 def list_spaces(
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
@@ -870,7 +880,7 @@ def list_spaces(
         except HTTPException:
             user = None
 
-    if user and not _is_feature_enabled(db, _get_domain(user.email), "spaces"):
+    if user and not _is_feature_enabled(db, _get_domain(user.email), "spaces", user.role):
         raise HTTPException(403, "Funcionalidad de espacios deshabilitada para tu dominio")
 
     return [
@@ -892,7 +902,7 @@ def create_space(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "spaces"):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "spaces", admin.role):
         raise HTTPException(403, "Funcionalidad de espacios deshabilitada para tu dominio")
 
     if db.query(models.Space).filter(models.Space.name == data.name).first():
@@ -923,7 +933,7 @@ def delete_space(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "spaces"):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "spaces", admin.role):
         raise HTTPException(403, "Funcionalidad de espacios deshabilitada para tu dominio")
 
     s = db.query(models.Space).filter(models.Space.id == space_id).first()
@@ -945,7 +955,7 @@ def list_reservations(
     user = get_user_from_token(cred.credentials, db)
     user_domain = _get_domain(user.email)
 
-    if not _is_feature_enabled(db, user_domain, "spaces"):
+    if not _is_feature_enabled(db, user_domain, "spaces", user.role):
         raise HTTPException(403, "Funcionalidad de espacios deshabilitada para tu dominio")
 
     all_reservations = db.query(models.SpaceReservation).join(models.Space).join(models.User).all()

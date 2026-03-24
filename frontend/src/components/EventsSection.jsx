@@ -13,27 +13,28 @@ export default function EventsSection() {
 
     (async () => {
       try {
-        // 1️⃣ Cargar eventos
-        const eventsData = await eventsAPI.list();
-        if (cancelled) return;
-        setEvents(eventsData);
+        const [eventsResult, votesResult] = await Promise.allSettled([
+          eventsAPI.list(),
+          eventsAPI.myResponses(),
+        ]);
 
-        // 2️⃣ Cargar eventos ya votados desde API
-        const votedIdsFromApi = await eventsAPI.myResponses();
         if (cancelled) return;
 
-        // 3️⃣ Combinar con lo guardado en localStorage (persistencia entre recargas)
-        const storedRaw = localStorage.getItem("voted_events");
-        const storedIds = storedRaw ? JSON.parse(storedRaw) : [];
+        if (eventsResult.status === "fulfilled") {
+          setEvents(eventsResult.value);
+        } else {
+          console.error("Error cargando eventos", eventsResult.reason);
+          setEvents([]);
+        }
 
-        const mergedIds = Array.from(
-          new Set([...votedIdsFromApi, ...storedIds])
-        );
-
-        // 🔒 Marcar como votados desde el inicio
-        setVotedEvents(new Set(mergedIds));
-      } catch (e) {
-        console.error("Error cargando eventos o votos", e);
+        if (votesResult.status === "fulfilled") {
+          const normalized = votesResult.value
+            .map((id) => Number(id))
+            .filter((id) => Number.isFinite(id));
+          setVotedEvents(new Set(normalized));
+        } else {
+          console.error("Error cargando votos del usuario", votesResult.reason);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -45,38 +46,30 @@ export default function EventsSection() {
   }, []);
 
   async function respond(id, answer) {
-    if (votedEvents.has(id) || sending === id) return;
+    const eventId = Number(id);
+    if (votedEvents.has(eventId) || sending === eventId) return;
 
-    const justification =
-      document.getElementById("just_" + id)?.value.trim() || "";
+    const justification = document.getElementById("just_" + eventId)?.value.trim() || "";
 
     try {
-      setSending(id);
-      await eventsAPI.respond(id, answer, justification);
+      setSending(eventId);
+      await eventsAPI.respond(eventId, answer, justification);
 
-      // 🔒 Persistir estado tras votar
       setVotedEvents((prev) => {
         const next = new Set(prev);
-        next.add(id);
+        next.add(eventId);
         return next;
       });
-
-      // Guardar también en localStorage para que siga deshabilitado tras recargar
-      try {
-        const raw = localStorage.getItem("voted_events");
-        const current = raw ? JSON.parse(raw) : [];
-        if (!current.includes(id)) {
-          current.push(id);
-        }
-        localStorage.setItem("voted_events", JSON.stringify(current));
-      } catch {
-        // si localStorage falla, simplemente lo ignoramos
-      }
     } catch (e) {
       console.error("Error enviando respuesta", e);
 
       const message = e?.message || "";
       if (message.includes("Ya has votado en este evento")) {
+        setVotedEvents((prev) => {
+          const next = new Set(prev);
+          next.add(eventId);
+          return next;
+        });
         alert("Ya has votado en este evento.");
       } else {
         alert(message || "Error enviando respuesta");
@@ -109,8 +102,9 @@ export default function EventsSection() {
       )}
 
       {events.map((ev) => {
-        const voted = votedEvents.has(ev.id);
-        const disabled = voted || sending === ev.id;
+        const eventId = Number(ev.id);
+        const voted = votedEvents.has(eventId);
+        const disabled = voted || sending === eventId;
 
         return (
           <Card key={ev.id} shadow="sm" p="md" radius="md" mb="md">
@@ -141,7 +135,7 @@ export default function EventsSection() {
               mt="sm"
               mr="sm"
               disabled={disabled}
-              onClick={() => respond(ev.id, "si")}
+              onClick={() => respond(eventId, "si")}
             >
               Sí
             </Button>
@@ -157,7 +151,7 @@ export default function EventsSection() {
               mt="sm"
               color="red"
               disabled={disabled}
-              onClick={() => respond(ev.id, "no")}
+              onClick={() => respond(eventId, "no")}
             >
               No
             </Button>

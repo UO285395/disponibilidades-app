@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, Table } from "@mantine/core";
 import { availabilityAPI } from "../api/api.js";
 
@@ -49,13 +49,35 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
     };
   }, []);
 
+  const availabilityByCell = useMemo(() => {
+    const map = new Map();
+
+    for (const availability of availabilities) {
+      const start = parseInt(availability.start_time.slice(0, 2), 10);
+      const end = parseInt(availability.end_time.slice(0, 2), 10);
+
+      for (let hour = start; hour < end; hour += 1) {
+        map.set(`${availability.date}-${hour}`, availability);
+      }
+    }
+
+    return map;
+  }, [availabilities]);
+
+  function keysForAvailability(availability) {
+    const start = parseInt(availability.start_time.slice(0, 2), 10);
+    const end = parseInt(availability.end_time.slice(0, 2), 10);
+    const keys = [];
+
+    for (let hour = start; hour < end; hour += 1) {
+      keys.push(`${availability.date}-${hour}`);
+    }
+
+    return keys;
+  }
+
   function isAvailable(date, hour) {
-    return availabilities.some((a) => {
-      const h = Number(hour);
-      const start = Number(a.start_time.slice(0, 2));
-      const end = Number(a.end_time.slice(0, 2));
-      return a.date === date && h >= start && h < end;
-    });
+    return availabilityByCell.has(`${date}-${hour}`);
   }
 
   async function toggleCell(date, hour) {
@@ -64,16 +86,18 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
 
     if (pendingKeys.has(key)) return;
 
-    const exist = availabilities.find((a) => {
-      const start = parseInt(a.start_time.slice(0, 2), 10);
-      const end = parseInt(a.end_time.slice(0, 2), 10);
-      return a.date === date && h >= start && h < end;
-    });
+    const exist = availabilityByCell.get(key);
 
     if (exist) {
+      const reservedKeys = keysForAvailability(exist);
+
       // Optimistic remove
       setAvailabilities((prev) => prev.filter((a) => a.id !== exist.id));
-      setPendingKeys((prev) => new Set(prev).add(key));
+      setPendingKeys((prev) => {
+        const next = new Set(prev);
+        reservedKeys.forEach((reservedKey) => next.add(reservedKey));
+        return next;
+      });
 
       try {
         await availabilityAPI.delete(exist.id);
@@ -84,7 +108,7 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
       } finally {
         setPendingKeys((prev) => {
           const next = new Set(prev);
-          next.delete(key);
+          reservedKeys.forEach((reservedKey) => next.delete(reservedKey));
           return next;
         });
       }
