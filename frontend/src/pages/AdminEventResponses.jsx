@@ -92,7 +92,7 @@ export default function AdminEventResponses() {
       </Title>
 
       <TextInput
-        placeholder="Filtrar por colectivo (código del email)"
+        placeholder="Filtrar por colectivo"
         value={filterDomain}
         onChange={(e) => setFilterDomain(e.target.value)}
         mb="lg"
@@ -116,7 +116,7 @@ export default function AdminEventResponses() {
         <Card key={r.user_id ?? idx} mt="md" shadow="sm" p="lg">
           <Text fw={600}>{r.user_full_name}</Text>
           <Text c="dimmed" size="sm">
-            Dominio: {r.user_domain || "-"}
+            Colectivo: {r.user_domain || "-"}
           </Text>
           <Text>
             <b>Respuesta:</b> {formatRespuesta(r.answer)}

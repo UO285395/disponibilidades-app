@@ -232,9 +232,9 @@ const weekStart = useMemo(() => {
         Disponibilidades (Semana actual y siguiente)
       </Title>
 
-      {/* Filtro por dominio */}
+      {/* Filtro por colectivo */}
       <TextInput
-        placeholder="Filtrar por dominio (ej: gmail.com)"
+        placeholder="Filtrar por colectivo"
         value={filterCode}
         onChange={(e) => setFilterCode(e.target.value)}
         mb="lg"
@@ -370,7 +370,7 @@ const weekStart = useMemo(() => {
           <List spacing="xs" size="sm">
             {modalUsers.map((u, i) => (
               <List.Item key={i}>
-                <b>{u.user}</b> — {u.email}
+                <b>{u.user}</b>
               </List.Item>
             ))}
           </List>

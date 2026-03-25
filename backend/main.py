@@ -796,11 +796,12 @@ def event_responses(
             .scalar()
         ) or 0
 
+        display_domain = u.email.split("@")[-1].strip() if "@" in u.email else ""
+
         results.append({
             "user_id": u.id,
             "user_full_name": u.full_name,
-            "user_email": u.email,
-            "user_domain": responder_domain,
+            "user_domain": display_domain,
             "answer": r.answer,
             "justification": r.justification,
             "companions_count": companion_count,

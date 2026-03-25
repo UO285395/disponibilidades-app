@@ -65,7 +65,7 @@ export default function AdminDomainPolicies() {
       const normalizedDomain = domain.trim().toLowerCase();
 
       if (!normalizedDomain) {
-        setError("Dominio requerido");
+        setError("Colectivo requerido");
         return;
       }
 
@@ -116,7 +116,7 @@ export default function AdminDomainPolicies() {
   return (
     <div>
       <Title order={3} mb="md">
-        Políticas de dominio
+        Políticas de colectivo
       </Title>
 
       <Card shadow="sm" p="md" mb="md">
@@ -124,11 +124,11 @@ export default function AdminDomainPolicies() {
         {success && <Notification color="green">{success}</Notification>}
 
         <Text size="sm" c="dimmed" mb="sm">
-          Define qué módulos puede usar cada dominio. Ejemplo: un dominio invitado puede tener solo eventos habilitados.
+          Define qué módulos puede usar cada colectivo. Ejemplo: un colectivo invitado puede tener solo eventos habilitados.
         </Text>
 
         <TextInput
-          label="Dominio"
+          label="Colectivo"
           value={domain}
           onChange={(e) => setDomain(e.target.value)}
           mb="sm"
@@ -157,7 +157,7 @@ export default function AdminDomainPolicies() {
             onChange={(event) => setUsersEnabled(event.currentTarget.checked)}
           />
           <Checkbox
-            label="Políticas de dominio"
+            label="Políticas de colectivo"
             checked={domainPoliciesEnabled}
             onChange={(event) => setDomainPoliciesEnabled(event.currentTarget.checked)}
           />
@@ -188,7 +188,7 @@ export default function AdminDomainPolicies() {
       <Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>
-            <Table.Th>Dominio</Table.Th>
+            <Table.Th>Colectivo</Table.Th>
             <Table.Th>Eventos</Table.Th>
             <Table.Th>Disponibilidades</Table.Th>
             <Table.Th>Espacios</Table.Th>
