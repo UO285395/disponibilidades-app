@@ -620,11 +620,7 @@ def list_events(
         filtered.append(e)
 
     result = []
-    today = datetime.utcnow().date()
     for e in filtered:
-        event_date = datetime.strptime(e.date, "%Y-%m-%d").date()
-        is_expired = event_date < today
-
         yes_count = (
             db.query(EventResponse)
             .filter(
@@ -655,7 +651,6 @@ def list_events(
                 "allowed_domain": e.allowed_domain,
                 "yes_count": yes_count,
                 "no_count": no_count,
-                "is_expired": is_expired,
             }
         )
 
@@ -747,15 +742,6 @@ def respond_event(
     db: Session = Depends(get_db)
 ):
     user = get_user_from_token(cred.credentials, db)
-
-    event = db.query(Event).filter(Event.id == event_id).first()
-    if not event:
-        raise HTTPException(404, "Evento no encontrado")
-
-    today = datetime.utcnow().date()
-    event_date = datetime.strptime(event.date, "%Y-%m-%d").date()
-    if event_date < today:
-        raise HTTPException(410, "Este evento ha expirado")
 
     existing = (
         db.query(EventResponse)
@@ -851,6 +837,11 @@ def create_my_availability(
     user = get_user_from_token(cred.credentials, db)
     if not _is_feature_enabled(db, _get_domain(user.email), "availabilities", user.role):
         raise HTTPException(403, "Disponibilidades deshabilitadas para tu dominio")
+
+    today = datetime.utcnow().date()
+    availability_date = datetime.strptime(data.date, "%Y-%m-%d").date()
+    if availability_date < today:
+        raise HTTPException(410, "No puedes votar disponibilidades en días pasados")
 
     a = Availability(
         user_id=user.id,

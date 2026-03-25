@@ -403,8 +403,8 @@ Criterio MVP: “flujo principal usable de extremo a extremo por módulo”.
 **✅ Resueltos en última sesión**:
 
 - Rango horario usuario: ampliado de 8-22 a 8-23 horas.
-- Votación en días pasados: validación backend + UI con badge "Expirado".
-- Dashboard admin: indicador de que eventos expirados no muestran votos.
+- Calendario de disponibilidades: bloqueo de votos en días pasados para usuario.
+- Dashboard admin de disponibilidades: los días pasados se marcan como vencidos y no computan en la vista agregada.
 
 Prioridad alta (P1):
 

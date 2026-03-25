@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { adminAPI } from "../api/adminApi.js";
 import {
+  Alert,
   Card,
   Title,
   Text,
@@ -37,6 +38,11 @@ function formatDay(d) {
   const dt = new Date(d);
   if (Number.isNaN(dt.getTime())) return d;
   return dt.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" });
+}
+
+function parseISODate(value) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
 }
 
 // ============================================
@@ -100,6 +106,10 @@ export default function AdminAvailabilitiesCalendar() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  function isPastDate(date) {
+    return parseISODate(date) < today;
+  }
+
   const baseWeekStart = startOfWeek(today);
 const weekStart = useMemo(() => {
   const d = new Date(baseWeekStart);
@@ -121,6 +131,7 @@ const weekStart = useMemo(() => {
   const weekRows = useMemo(() => {
     return filteredByEmail.filter((r) => {
       if (!r.date) return false;
+      if (isPastDate(r.date)) return false;
       const d = new Date(r.date);
       d.setHours(0, 0, 0, 0);
       return d >= weekStart && d < weekEnd;
@@ -134,7 +145,7 @@ const weekStart = useMemo(() => {
     return d;
   });
 
-  const hours = Array.from({ length: 14 }, (_, i) => i + 8); // 08 a 21
+  const hours = Array.from({ length: 16 }, (_, i) => i + 8); // 08 a 23
 
   // ============================================
   // MAPA CELDA (date-hour → lista usuarios)
@@ -245,6 +256,10 @@ const weekStart = useMemo(() => {
         </Button>
       </Group>
 
+      <Alert color="blue" mb="md">
+        Los días anteriores a hoy se consideran vencidos: no se incluyen en los conteos y se muestran bloqueados en gris.
+      </Alert>
+
       {/* Mejor coincidencia */}
       {bestMatches.length > 0 && (
         <Card shadow="md" p="md" mb="lg" style={{ background: "#e8f7e4" }}>
@@ -284,14 +299,19 @@ const weekStart = useMemo(() => {
   Hora
 </Table.Th>
 
-              {days.map((d) => (
-                <Table.Th key={d.toISOString()}>
+              {days.map((d) => {
+                const date = formatISO(d);
+                const expired = isPastDate(date);
+
+                return (
+                <Table.Th key={d.toISOString()} style={{ opacity: expired ? 0.6 : 1 }}>
                  {d.toLocaleDateString("es-ES", {
   weekday: "short",
   day: "2-digit",
 })}
+                  {expired ? " · vencido" : ""}
                 </Table.Th>
-              ))}
+              );})}
             </Table.Tr>
           </Table.Thead>
 
@@ -304,6 +324,7 @@ const weekStart = useMemo(() => {
 
                 {days.map((d) => {
                   const date = formatISO(d);
+                  const expired = isPastDate(date);
                   const key = `${date}-${h}`;
                   const count = cellMap[key]?.length || 0;
                   const isBest = bestMatchKeys.has(key);
@@ -311,19 +332,22 @@ const weekStart = useMemo(() => {
                   return (
                     <Table.Td
                       key={key}
-                      onClick={() => count > 0 && openSlotUsers(date, h)}
+                      onClick={() => !expired && count > 0 && openSlotUsers(date, h)}
                       style={{
-                        cursor: count > 0 ? "pointer" : "default",
-                        background: isBest
+                        cursor: !expired && count > 0 ? "pointer" : "default",
+                        background: expired
+                          ? "#f1f3f5"
+                          : isBest
                           ? "#ffb3b3"
                           : count > 0
                           ? "#d3f5ff"
                           : undefined,
+                        color: expired ? "#868e96" : undefined,
                         textAlign: "center",
                         fontWeight: 600,
                       }}
                     >
-                      {count > 0 ? count : ""}
+                      {expired ? "Vencido" : count > 0 ? count : ""}
                     </Table.Td>
                   );
                 })}

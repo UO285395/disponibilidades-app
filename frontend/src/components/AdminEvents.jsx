@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Card, Button, TextInput, Title, Textarea, Text, Badge, Alert } from "@mantine/core";
+import { Card, Button, TextInput, Title, Textarea, Text } from "@mantine/core";
 import { adminAPI } from "../api/adminApi.js";
 import { useNavigate } from "react-router-dom";
 
@@ -125,11 +125,6 @@ export default function AdminEvents() {
         Eventos existentes
       </Title>
 
-      <Alert color="blue" mb="md">
-        <strong>Nota:</strong> Los eventos expirados (fecha anterior a hoy) no muestran votos en el resumen. 
-        Los usuarios no pueden votar en eventos expirados.
-      </Alert>
-
       {events.length === 0 && (
         <Text size="sm" c="dimmed">
           No hay eventos.
@@ -137,13 +132,9 @@ export default function AdminEvents() {
       )}
 
       {events.map((ev) => {
-        const isExpired = ev.is_expired === true;
         return (
           <Card key={ev.id} shadow="sm" p="md" mb="md">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
-              <div><b>{ev.title}</b> — {ev.date}</div>
-              {isExpired && <Badge color="red">Expirado</Badge>}
-            </div>
+            <div><b>{ev.title}</b> — {ev.date}</div>
             {ev.allowed_domain && (
               <p style={{ margin: '4px 0', color: '#555' }}>
                 Dominio asignado: <strong>{ev.allowed_domain}</strong>

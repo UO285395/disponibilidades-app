@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Card, Table } from "@mantine/core";
+import { Card, Table, Text } from "@mantine/core";
 import { availabilityAPI } from "../api/api.js";
 
 function startOfWeek(date) {
@@ -25,12 +25,22 @@ function formatISO(d) {
   return d.toISOString().slice(0, 10);
 }
 
+function parseISODate(value) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
 export default function WeekCalendar({ offsetWeeks = 0 }) {
   const [availabilities, setAvailabilities] = useState([]);
   const [pendingKeys, setPendingKeys] = useState(new Set());
 
   const baseWeekStart = startOfWeek(new Date());
   const weekStart = addDays(baseWeekStart, offsetWeeks * 7);
+  const today = useMemo(() => {
+    const value = new Date();
+    value.setHours(0, 0, 0, 0);
+    return value;
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,7 +90,13 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
     return availabilityByCell.has(`${date}-${hour}`);
   }
 
+  function isPastDate(date) {
+    return parseISODate(date) < today;
+  }
+
   async function toggleCell(date, hour) {
+    if (isPastDate(date)) return;
+
     const h = parseInt(hour, 10);
     const key = `${date}-${h}`;
 
@@ -156,6 +172,10 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
 
   return (
     <Card shadow="md" p="lg" radius="md">
+      <Text size="sm" c="dimmed" mb="sm">
+        Los días anteriores a hoy aparecen bloqueados y no admiten votos de disponibilidad.
+      </Text>
+
       <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
         <Table striped highlightOnHover withColumnBorders style={{ minWidth: 900 }}>
           <Table.Thead>
@@ -175,14 +195,19 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
               >
                 Hora
               </Table.Th>
-              {days.map((d, i) => (
-                <Table.Th key={i}>
+              {days.map((d, i) => {
+                const date = formatISO(d);
+                const expired = isPastDate(date);
+
+                return (
+                <Table.Th key={i} style={{ opacity: expired ? 0.6 : 1 }}>
                   {d.toLocaleDateString("es-ES", {
                     weekday: "short",
                     day: "2-digit",
                   })}
+                  {expired ? " · vencido" : ""}
                 </Table.Th>
-              ))}
+              );})}
             </Table.Tr>
           </Table.Thead>
 
@@ -202,23 +227,29 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
                 </Table.Td>
                 {days.map((d, idx) => {
                   const date = formatISO(d);
+                  const expired = isPastDate(date);
                   const active = isAvailable(date, hour);
                   const key = `${date}-${hour}`;
                   const pending = pendingKeys.has(key);
                   return (
                     <Table.Td
                       key={idx}
-                      onClick={() => !pending && toggleCell(date, hour)}
+                      onClick={() => !pending && !expired && toggleCell(date, hour)}
                       style={{
-                        cursor: pending ? "not-allowed" : "pointer",
-                        background: pending
+                        cursor: pending || expired ? "not-allowed" : "pointer",
+                        background: expired
+                          ? "#f1f3f5"
+                          : pending
                           ? "#ffeaa7"
                           : active
                           ? "#abf5d1"
                           : undefined,
+                        color: expired ? "#868e96" : undefined,
                         opacity: pending ? 0.7 : 1,
                       }}
-                    />
+                    >
+                      {expired ? "Vencido" : ""}
+                    </Table.Td>
                   );
                 })}
               </Table.Tr>
