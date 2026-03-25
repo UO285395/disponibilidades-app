@@ -1,0 +1,81 @@
+PROMPT INICIO
+
+Estoy trabajando en el repo disponibilidades (FastAPI + React + Mantine) y necesito que continúes exactamente desde este estado, sin rehacer lo ya hecho.
+
+Objetivo inmediato:
+
+Dejar el módulo de censo funcionando end-to-end en deploy.
+Diagnosticar y corregir definitivamente el envío de correo SMTP.
+Confirmar que cualquier usuario (sin importar rol, incluso sin login) puede rellenar el censo por URL pública.
+Contexto funcional ya implementado:
+
+Existe configuración de censo en admin (solo superadmin) con campos dinámicos y email destino.
+Existe URL pública de censo con token.
+El frontend de censo público envía sin auth.
+Se añadió botón de prueba de email en admin censo.
+Se añadió endpoint backend de test de email.
+Se añadió lógica SMTP con TLS/SSL configurable y envío asíncrono para que no se quede colgado.
+Problema actual reportado:
+
+En pruebas ha aparecido Failed to fetch, 503 y Method Not Allowed en distintos momentos.
+En Railway se configuraron variables en minúsculas (smtp_host, smtp_user, etc.) y deben ser en mayúsculas.
+El correo sigue sin llegar.
+Lo que tienes que hacer ahora (en orden):
+
+Revisar código actual en backend y frontend para confirmar que los endpoints y métodos HTTP coinciden:
+POST /admin/census/test-email
+GET /admin/census
+PUT /admin/census
+POST /admin/census/regenerate-token
+GET /censo/{token}/fields
+POST /censo/{token}
+Verificar que los endpoints admin de censo manejan ausencia de token con 401 limpio (no 500).
+
+Verificar en frontend que:
+
+El botón Enviar email de prueba llama POST /admin/census/test-email con token.
+El formulario público /censo/:token llama GET fields y POST submit sin auth.
+La API base URL apunta al backend correcto de Railway.
+Añadir, si falta, logs útiles de diagnóstico SMTP en backend (sin exponer secretos):
+host, port, tls/ssl mode (solo valores de config, no password)
+resultado de login/send
+error exacto del proveedor SMTP
+Validar compatibilidad SMTP en Railway:
+variables correctas en MAYÚSCULAS:
+SMTP_HOST
+SMTP_PORT
+SMTP_USER
+SMTP_PASSWORD
+SMTP_FROM (opcional recomendado)
+SMTP_USE_TLS (true/false)
+SMTP_USE_SSL (true/false)
+Hacer pruebas controladas:
+test-email desde admin con superadmin autenticado.
+submit público de censo por URL token.
+confirmar respuesta HTTP y revisar logs backend en cada caso.
+Si detectas causa raíz, aplicar fix directamente en código y dejarlo deploy-ready.
+
+Actualizar documentación con:
+
+configuración SMTP final recomendada
+checklist de diagnóstico rápido
+errores comunes (405 por método incorrecto, 401 por token ausente, 503 por deploy caído/desincronizado).
+Criterios de aceptación:
+
+El botón Enviar email de prueba devuelve éxito cuando SMTP está bien configurado.
+El submit público de censo responde rápido y no se queda cargando.
+El correo de censo llega con CSV adjunto al destino configurado.
+El censo público funciona para cualquier usuario independientemente de su rol.
+No hay regresiones en módulos admin/eventos/disponibilidades.
+Forma de trabajar:
+
+No me pidas plan teórico largo: ejecuta cambios, valida y reporta.
+Si algo falla, trae diagnóstico concreto con causa probable y fix aplicado.
+Resume al final:
+archivos modificados
+pruebas realizadas
+estado final (OK o pendiente)
+siguientes pasos mínimos.
+PROMPT FIN
+
+Si quieres, también te preparo una versión corta de este prompt solo para diagnóstico de Railway y SMTP en 5 minutos.
