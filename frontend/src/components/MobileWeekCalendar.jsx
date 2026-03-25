@@ -236,7 +236,7 @@ export default function MobileWeekCalendar({ offsetWeeks = 0 }) {
                           fontWeight: 600,
                         }}
                       >
-                        {pad2(hour)}
+                        {hour}-{hour + 1}
                       </button>
                     );
                   })}
