@@ -101,4 +101,8 @@ export const adminAPI = {
   regenerateCensusToken() {
     return request("/admin/census/regenerate-token", "POST");
   },
+
+  testCensusEmail() {
+    return request("/admin/census/test-email", "POST");
+  },
 };

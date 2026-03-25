@@ -1119,18 +1119,29 @@ def _census_config_to_dict(config: CensusConfig) -> dict:
     }
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ["1", "true", "yes", "on"]
+
+
 def _send_census_email(email_to: str, csv_content: str):
     smtp_host = os.getenv("SMTP_HOST", "")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
     smtp_user = os.getenv("SMTP_USER", "")
     smtp_password = os.getenv("SMTP_PASSWORD", "")
+    smtp_from = os.getenv("SMTP_FROM", smtp_user)
+    smtp_use_ssl = _env_bool("SMTP_USE_SSL", False)
+    smtp_use_tls = _env_bool("SMTP_USE_TLS", True)
 
-    if not smtp_host or not smtp_user:
-        print(f"⚠️ SMTP no configurado. CSV no enviado a {email_to}.")
-        return
+    if not smtp_host or not smtp_user or not smtp_password:
+        msg = "SMTP no configurado completamente (HOST/USER/PASSWORD)."
+        print(f"⚠️ {msg} CSV no enviado a {email_to}.")
+        return False, msg
 
     msg = MIMEMultipart()
-    msg["From"] = smtp_user
+    msg["From"] = smtp_from
     msg["To"] = email_to
     msg["Subject"] = "Nueva respuesta de censo"
     msg.attach(MIMEText("Adjunto se incluye una nueva respuesta del formulario de censo.", "plain"))
@@ -1144,13 +1155,31 @@ def _send_census_email(email_to: str, csv_content: str):
     msg.attach(attachment)
 
     try:
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(smtp_user, smtp_password)
-            server.send_message(msg)
+        if smtp_use_ssl:
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15) as server:
+                server.login(smtp_user, smtp_password)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+                server.ehlo()
+                if smtp_use_tls:
+                    server.starttls()
+                    server.ehlo()
+                server.login(smtp_user, smtp_password)
+                server.send_message(msg)
+
+        print(f"✅ Email de censo enviado a {email_to}")
+        return True, "ok"
     except Exception as e:
-        print(f"⚠️ Error enviando email de censo: {e}")
+        error = f"Error enviando email de censo: {e}"
+        print(f"⚠️ {error}")
+        return False, error
+
+
+def _send_census_email_async(email_to: str, csv_content: str):
+    ok, msg = _send_census_email(email_to, csv_content)
+    if not ok:
+        print(f"⚠️ Envío async fallido: {msg}")
 
 
 @app.get("/admin/census")
@@ -1219,6 +1248,30 @@ def regenerate_census_token(
     return {"url_token": config.url_token}
 
 
+@app.post("/admin/census/test-email")
+def test_census_email(
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    require_superadmin(admin)
+
+    config = db.query(CensusConfig).first()
+    if not config:
+        raise HTTPException(404, "No hay configuración de censo")
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Prueba", "Fecha"])
+    writer.writerow(["Test SMTP", datetime.utcnow().isoformat()])
+
+    ok, message = _send_census_email(config.email_to, output.getvalue())
+    if not ok:
+        raise HTTPException(500, message)
+
+    return {"ok": True, "message": "Email de prueba enviado"}
+
+
 @app.get("/censo/{token}/fields")
 def get_census_fields(token: str, db: Session = Depends(get_db)):
     config = db.query(CensusConfig).filter(CensusConfig.url_token == token).first()
@@ -1258,7 +1311,7 @@ def submit_census(
 
     # El envío de email se ejecuta en background para no bloquear la respuesta HTTP.
     threading.Thread(
-        target=_send_census_email,
+        target=_send_census_email_async,
         args=(config.email_to, output.getvalue()),
         daemon=True,
     ).start()

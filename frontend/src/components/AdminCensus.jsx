@@ -26,6 +26,8 @@ export default function AdminCensus() {
   const [fields, setFields] = useState([emptyField()]);
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [testingEmail, setTestingEmail] = useState(false);
+  const [testMessage, setTestMessage] = useState("");
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -116,6 +118,20 @@ export default function AdminCensus() {
     }
   }
 
+  async function testEmail() {
+    try {
+      setTestingEmail(true);
+      setTestMessage("");
+      await adminAPI.testCensusEmail();
+      setTestMessage("Email de prueba enviado correctamente.");
+    } catch (e) {
+      console.error("Error enviando email de prueba", e);
+      setTestMessage(`Error al enviar email de prueba: ${e?.message || "desconocido"}`);
+    } finally {
+      setTestingEmail(false);
+    }
+  }
+
   if (!loaded) return null;
 
   const censusUrl = config
@@ -178,6 +194,17 @@ export default function AdminCensus() {
         onChange={(e) => setEmailTo(e.target.value)}
         mb="lg"
       />
+
+      <Group mb="lg">
+        <Button variant="light" onClick={testEmail} loading={testingEmail}>
+          Enviar email de prueba
+        </Button>
+        {testMessage && (
+          <Text size="sm" c={testMessage.startsWith("Error") ? "red" : "green"}>
+            {testMessage}
+          </Text>
+        )}
+      </Group>
 
       <Divider mb="lg" label="Campos del formulario" labelPosition="left" />
 
