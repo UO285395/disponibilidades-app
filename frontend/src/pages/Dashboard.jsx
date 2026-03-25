@@ -93,9 +93,8 @@ export default function Dashboard() {
                 style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: "1rem" }}
                 mb="md"
               >
+                <Title order={4} mb="xs">Disponibilidad</Title>
                 <Group mb="md">
-                  <Title order={4}>Disponibilidad</Title>
-
                   <Button
                     size="xs"
                     variant={offsetWeeks === 0 ? "filled" : "outline"}

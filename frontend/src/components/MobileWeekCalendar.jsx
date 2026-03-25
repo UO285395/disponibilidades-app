@@ -166,10 +166,6 @@ export default function MobileWeekCalendar({ offsetWeeks = 0 }) {
 
   return (
     <Card shadow="md" p="lg" radius="md">
-      <Text size="sm" c="dimmed" mb="md">
-        Pulsa una franja para marcar o desmarcar disponibilidad. Los días anteriores a hoy aparecen bloqueados.
-      </Text>
-
       <SimpleGrid cols={{ base: 1, sm: 2, xl: 3 }} spacing="md">
         {days.map((day) => {
           const date = formatISO(day);

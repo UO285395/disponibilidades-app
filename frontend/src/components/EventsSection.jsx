@@ -134,6 +134,7 @@ export default function EventsSection() {
             <Button
               mt="sm"
               mr="sm"
+              fullWidth
               disabled={disabled}
               onClick={() => respond(eventId, "si")}
             >
@@ -150,6 +151,7 @@ export default function EventsSection() {
             <Button
               mt="sm"
               color="red"
+              fullWidth
               disabled={disabled}
               onClick={() => respond(eventId, "no")}
             >

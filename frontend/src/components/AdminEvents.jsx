@@ -149,21 +149,22 @@ export default function AdminEvents() {
               <div>No: {ev.no_count ?? 0}</div>
             </div>
 
-            <Button
-              mt="sm"
-              onClick={() => navigate(`/admin/event/${ev.id}`)}
-            >
-              Ver respuestas
-            </Button>
+            <Group mt="sm">
+              <Button
+                w={130}
+                onClick={() => navigate(`/admin/event/${ev.id}`)}
+              >
+                Ver respuestas
+              </Button>
 
-            <Button
-              mt="sm"
-              ml="sm"
-              color="red"
-              onClick={() => deleteEvent(ev.id)}
-            >
-              Eliminar
-            </Button>
+              <Button
+                w={130}
+                color="red"
+                onClick={() => deleteEvent(ev.id)}
+              >
+                Eliminar
+              </Button>
+            </Group>
           </Card>
         );
       })}
