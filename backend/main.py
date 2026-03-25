@@ -945,7 +945,7 @@ def delete_event(
     _ensure_event_domain_access(admin, ev)
 
     # borrar primero respuestas asociadas
-        db.query(EventCompanion)\
+    db.query(EventCompanion)\
             .filter(EventCompanion.event_id == event_id)\
             .delete(synchronize_session=False)
 
