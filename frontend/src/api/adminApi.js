@@ -77,22 +77,12 @@ export const adminAPI = {
     return request("/admin/domain-policies");
   },
 
-  createDomainPolicy(domain, eventsEnabled, availabilitiesEnabled, spacesEnabled) {
-    return request("/admin/domain-policies", "POST", {
-      domain,
-      events_enabled: eventsEnabled,
-      availabilities_enabled: availabilitiesEnabled,
-      spaces_enabled: spacesEnabled,
-    });
+  createDomainPolicy(payload) {
+    return request("/admin/domain-policies", "POST", payload);
   },
 
-  updateDomainPolicy(id, domain, eventsEnabled, availabilitiesEnabled, spacesEnabled) {
-    return request(`/admin/domain-policies/${id}`, "PUT", {
-      domain,
-      events_enabled: eventsEnabled,
-      availabilities_enabled: availabilitiesEnabled,
-      spaces_enabled: spacesEnabled,
-    });
+  updateDomainPolicy(id, payload) {
+    return request(`/admin/domain-policies/${id}`, "PUT", payload);
   },
 
   deleteDomainPolicy(id) {

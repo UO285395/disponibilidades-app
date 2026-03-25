@@ -30,6 +30,16 @@ def ensure_legacy_schema_compatibility():
                 with engine.begin() as conn:
                     conn.execute(text("ALTER TABLE events ADD COLUMN allowed_domain VARCHAR"))
                 print("✅ Columna events.allowed_domain añadida para compatibilidad")
+
+        if "domain_policies" in table_names:
+            policy_columns = {column["name"] for column in inspector.get_columns("domain_policies")}
+            with engine.begin() as conn:
+                if "users_enabled" not in policy_columns:
+                    conn.execute(text("ALTER TABLE domain_policies ADD COLUMN users_enabled INTEGER DEFAULT 1"))
+                    print("✅ Columna domain_policies.users_enabled añadida para compatibilidad")
+                if "domain_policies_enabled" not in policy_columns:
+                    conn.execute(text("ALTER TABLE domain_policies ADD COLUMN domain_policies_enabled INTEGER DEFAULT 0"))
+                    print("✅ Columna domain_policies.domain_policies_enabled añadida para compatibilidad")
     except Exception as exc:
         print(f"⚠️ No se pudo verificar compatibilidad de esquema: {exc}")
 
@@ -186,6 +196,8 @@ class DomainPolicyCreate(BaseModel):
     events_enabled: bool = True
     availabilities_enabled: bool = True
     spaces_enabled: bool = True
+    users_enabled: bool = True
+    domain_policies_enabled: bool = False
 
 class SpaceCreate(BaseModel):
     name: str
@@ -229,11 +241,19 @@ def me(
     events_enabled = True
     availabilities_enabled = True
     spaces_enabled = True
+    users_enabled = True
+    domain_policies_enabled = False
 
     if user.role != "superadmin" and policy:
         events_enabled = bool(policy.events_enabled)
         availabilities_enabled = bool(policy.availabilities_enabled)
         spaces_enabled = bool(policy.spaces_enabled)
+        users_enabled = bool(policy.users_enabled)
+        domain_policies_enabled = bool(policy.domain_policies_enabled)
+
+    if user.role == "superadmin":
+        users_enabled = True
+        domain_policies_enabled = True
 
     return {
         "id": user.id,
@@ -244,6 +264,8 @@ def me(
         "events_enabled": events_enabled,
         "availabilities_enabled": availabilities_enabled,
         "spaces_enabled": spaces_enabled,
+        "users_enabled": users_enabled,
+        "domain_policies_enabled": domain_policies_enabled,
     }
 
 @app.post("/admin/become_admin")
@@ -280,6 +302,9 @@ def admin_list_users(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role):
+        raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
+
     users = db.query(User).order_by(func.lower(User.email)).all()
 
     return [
@@ -301,6 +326,9 @@ def admin_create_user(
 ):
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
+
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role):
+        raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
     email = data.email.strip().lower()
     full_name = data.full_name.strip()
@@ -385,6 +413,9 @@ def remove_admin(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role):
+        raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
+
     if admin.id == user_id:
         raise HTTPException(400, "No puedes quitarte el rol a ti mismo")
 
@@ -412,6 +443,9 @@ def make_admin(
 ):
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
+
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role):
+        raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -444,6 +478,8 @@ def admin_list_domain_policies(
             "events_enabled": bool(p.events_enabled),
             "availabilities_enabled": bool(p.availabilities_enabled),
             "spaces_enabled": bool(p.spaces_enabled),
+            "users_enabled": bool(p.users_enabled),
+            "domain_policies_enabled": bool(p.domain_policies_enabled),
         }
         for p in db.query(models.DomainPolicy).all()
     ]
@@ -469,7 +505,9 @@ def create_domain_policy(
         domain=domain,
         events_enabled=1 if data.events_enabled else 0,
         availabilities_enabled=1 if data.availabilities_enabled else 0,
-        spaces_enabled=1 if data.spaces_enabled else 0
+        spaces_enabled=1 if data.spaces_enabled else 0,
+        users_enabled=1 if data.users_enabled else 0,
+        domain_policies_enabled=1 if data.domain_policies_enabled else 0,
     )
     db.add(policy)
     db.commit()
@@ -481,6 +519,8 @@ def create_domain_policy(
         "events_enabled": bool(policy.events_enabled),
         "availabilities_enabled": bool(policy.availabilities_enabled),
         "spaces_enabled": bool(policy.spaces_enabled),
+        "users_enabled": bool(policy.users_enabled),
+        "domain_policies_enabled": bool(policy.domain_policies_enabled),
     }
 
 
@@ -509,6 +549,8 @@ def update_domain_policy(
     policy.events_enabled = 1 if data.events_enabled else 0
     policy.availabilities_enabled = 1 if data.availabilities_enabled else 0
     policy.spaces_enabled = 1 if data.spaces_enabled else 0
+    policy.users_enabled = 1 if data.users_enabled else 0
+    policy.domain_policies_enabled = 1 if data.domain_policies_enabled else 0
     db.commit()
 
     return {
@@ -517,6 +559,8 @@ def update_domain_policy(
         "events_enabled": bool(policy.events_enabled),
         "availabilities_enabled": bool(policy.availabilities_enabled),
         "spaces_enabled": bool(policy.spaces_enabled),
+        "users_enabled": bool(policy.users_enabled),
+        "domain_policies_enabled": bool(policy.domain_policies_enabled),
     }
 
 
@@ -941,6 +985,10 @@ def _is_feature_enabled(db: Session, domain: str, feature: str, role: str = "use
         return bool(policy.availabilities_enabled)
     if feature == "spaces":
         return bool(policy.spaces_enabled)
+    if feature == "users":
+        return bool(policy.users_enabled)
+    if feature == "domain_policies":
+        return bool(policy.domain_policies_enabled)
     return True
 
 

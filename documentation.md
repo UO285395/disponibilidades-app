@@ -334,10 +334,10 @@ Notas:
   - `POST /admin/domain-policies`
   - `PUT /admin/domain-policies/{id}`
   - `DELETE /admin/domain-policies/{id}`
-- Flags aplican a módulos: eventos, disponibilidades, espacios.
+- Flags aplican a módulos: eventos, disponibilidades, espacios y usuarios.
 - Aplicación de flags por módulo:
   - Usuario: visibilidad de tabs en `Dashboard` + validación backend.
-  - Admin: visibilidad de tabs en `AdminDashboard` + validación backend en endpoints admin de eventos/disponibilidades/espacios.
+  - Admin: visibilidad de tabs en `AdminDashboard` + validación backend en endpoints admin de eventos/disponibilidades/espacios/usuarios.
   - Superadmin: bypass de flags (acceso completo).
 
 ---
@@ -374,7 +374,7 @@ Criterio MVP: “flujo principal usable de extremo a extremo por módulo”.
   - Observación: no hay control de solapamientos de reservas (funcionalidad pendiente).
 
 - **Políticas de dominio: FUNCIONAL (MVP OK)**
-  - CRUD desde superadmin y consumo en `/me` + checks de módulos.
+  - CRUD desde superadmin, edición en UI, consumo en `/me` y checks de módulos/tabs por dominio.
   - Observación: falta trazabilidad/auditoría de cambios de políticas.
 
 ---
@@ -517,7 +517,7 @@ Políticas de dominio:
 
 ## 11) Sprint: Políticas de dominio (granular por módulo)
 
-**Estado**: Siguiente sprint tras hardening MVP (Sprints A y B).
+**Estado**: Implementado en backend y frontend. Pendiente únicamente validación funcional completa en entorno desplegado.
 
 **Objetivo**: Permitir que el superadmin controle qué **usuarios de dominios específicos** ven exclusivamente determinadas **tabs del dashboard**.
 
@@ -608,11 +608,11 @@ class DomainPolicy(Base):
 
 ### Criterios de aceptación
 
-- [ ] `DomainPolicy` tiene 5 flags (events, availabilities, spaces, users, domain_policies).
-- [ ] Superadmin UI permite editar cada flag por dominio.
-- [ ] Frontend oculta tabs según flags del usuario logueado.
-- [ ] Backend rechaza acceso 403 a endpoints no autorizados por dominio.
-- [ ] Ningún cambio de API incompatible: nuevos campos son opcionales (default).
+- [x] `DomainPolicy` tiene 5 flags (events, availabilities, spaces, users, domain_policies).
+- [x] Superadmin UI permite editar cada flag por dominio.
+- [x] Frontend oculta tabs según flags del usuario logueado.
+- [x] Backend rechaza acceso 403 a endpoints no autorizados por dominio.
+- [x] Ningún cambio de API incompatible: nuevos campos son opcionales (default).
 - [ ] Checklist de regresión pasa: múltiples dominios, superadmin bypass, filtrados correctos.
 
 ### Estimación

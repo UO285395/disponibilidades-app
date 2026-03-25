@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Title, Tabs, Box, Button, Group } from "@mantine/core";
+import { Title, Tabs, Box, Button, Group, Text } from "@mantine/core";
 import { userAPI, clearToken } from "../api/api.js";
 import AdminUsers from "../components/AdminUsers.jsx";
 import AdminEvents from "../components/AdminEvents.jsx";
-import AdminAvailabilities from "../components/AdminAvailabilities.jsx";
 import AdminAvailabilitiesCalendar from "../components/AdminAvailabilitiesCalendar.jsx";
 import AdminSpaces from "../components/AdminSpaces.jsx";
 import AdminDomainPolicies from "../components/AdminDomainPolicies.jsx";
@@ -39,6 +38,8 @@ export default function AdminDashboard() {
   const canEvents = user.role === "superadmin" || user.events_enabled;
   const canAvailabilities = user.role === "superadmin" || user.availabilities_enabled;
   const canSpaces = user.role === "superadmin" || user.spaces_enabled;
+  const canUsers = user.role === "superadmin" || user.users_enabled;
+  const canDomainPolicies = user.role === "superadmin" || user.domain_policies_enabled;
 
   const defaultTab = canEvents
     ? "events"
@@ -46,7 +47,11 @@ export default function AdminDashboard() {
     ? "availabilities-calendar"
     : canSpaces
     ? "spaces"
-    : "users";
+    : canUsers
+    ? "users"
+    : canDomainPolicies
+    ? "domain-policies"
+    : null;
 
   return (
     <Box p="lg">
@@ -62,20 +67,22 @@ export default function AdminDashboard() {
         </Group>
       </Group>
 
-      <Tabs mt="lg" defaultValue={defaultTab}>
+      <Tabs mt="lg" defaultValue={defaultTab ?? undefined}>
         <Tabs.List>
           {canEvents && <Tabs.Tab value="events">Eventos</Tabs.Tab>}
           {canAvailabilities && <Tabs.Tab value="availabilities-calendar">Calendario de disponibilidad</Tabs.Tab>}
           {canSpaces && <Tabs.Tab value="spaces">Espacios</Tabs.Tab>}
-          <Tabs.Tab value="users">Usuarios</Tabs.Tab>
-          {user.role === "superadmin" && (
+          {canUsers && <Tabs.Tab value="users">Usuarios</Tabs.Tab>}
+          {canDomainPolicies && (
             <Tabs.Tab value="domain-policies">Políticas de dominio</Tabs.Tab>
           )}
         </Tabs.List>
 
-        <Tabs.Panel value="users" pt="xl">
-          <AdminUsers />
-        </Tabs.Panel>
+        {canUsers && (
+          <Tabs.Panel value="users" pt="xl">
+            <AdminUsers />
+          </Tabs.Panel>
+        )}
 
         {canEvents && (
           <Tabs.Panel value="events" pt="xl">
@@ -95,12 +102,18 @@ export default function AdminDashboard() {
           </Tabs.Panel>
         )}
 
-        {user.role === "superadmin" && (
+        {canDomainPolicies && (
           <Tabs.Panel value="domain-policies" pt="xl">
             <AdminDomainPolicies />
           </Tabs.Panel>
         )}
       </Tabs>
+
+      {!defaultTab && (
+        <Box mt="xl">
+          <Text c="dimmed">Tu dominio no tiene módulos de administración habilitados.</Text>
+        </Box>
+      )}
     </Box>
   );
 }

@@ -55,6 +55,8 @@ class DomainPolicy(Base):
     events_enabled = Column(Integer, default=1)
     availabilities_enabled = Column(Integer, default=1)
     spaces_enabled = Column(Integer, default=1)
+    users_enabled = Column(Integer, default=1)
+    domain_policies_enabled = Column(Integer, default=0)
 
 
 
