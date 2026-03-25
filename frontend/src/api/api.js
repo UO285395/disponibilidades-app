@@ -16,7 +16,7 @@ export function clearToken() {
 
 // ------------------- REQUEST WRAPPER -------------------
 
-export async function request(endpoint, method = "GET", body = null) {
+export async function request(endpoint, method = "GET", body = null, includeAuth = true) {
   const opts = {
     method,
     headers: {
@@ -25,7 +25,7 @@ export async function request(endpoint, method = "GET", body = null) {
   };
 
   const token = getToken();
-  if (token) {
+  if (includeAuth && token) {
     opts.headers["Authorization"] = "Bearer " + token;
   }
 

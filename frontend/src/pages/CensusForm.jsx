@@ -14,7 +14,7 @@ export default function CensusForm() {
   useEffect(() => {
     (async () => {
       try {
-        const data = await request(`/censo/${token}/fields`);
+        const data = await request(`/censo/${token}/fields`, "GET", null, false);
         setFields(data.fields || []);
         const init = {};
         (data.fields || []).forEach((f) => {
@@ -44,7 +44,7 @@ export default function CensusForm() {
 
     try {
       setSubmitting(true);
-      await request(`/censo/${token}`, "POST", values);
+      await request(`/censo/${token}`, "POST", values, false);
       setDone(true);
     } catch (e) {
       alert(e?.message || "Error enviando el formulario. Inténtalo de nuevo.");

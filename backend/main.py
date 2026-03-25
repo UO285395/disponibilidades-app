@@ -13,6 +13,7 @@ import json
 import os
 import secrets
 import smtplib
+import threading
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -1143,7 +1144,7 @@ def _send_census_email(email_to: str, csv_content: str):
     msg.attach(attachment)
 
     try:
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
             server.ehlo()
             server.starttls()
             server.login(smtp_user, smtp_password)
@@ -1255,7 +1256,12 @@ def submit_census(
     writer.writerow([f.label for f in fields_sorted])
     writer.writerow([str(data.get(str(f.id), "")) for f in fields_sorted])
 
-    _send_census_email(config.email_to, output.getvalue())
+    # El envío de email se ejecuta en background para no bloquear la respuesta HTTP.
+    threading.Thread(
+        target=_send_census_email,
+        args=(config.email_to, output.getvalue()),
+        daemon=True,
+    ).start()
     return {"ok": True}
 
 
