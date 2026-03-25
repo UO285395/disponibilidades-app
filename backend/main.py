@@ -1187,6 +1187,9 @@ def get_census_config(
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
     db: Session = Depends(get_db)
 ):
+    if not cred or not cred.credentials:
+        raise HTTPException(401, "Token inválido")
+
     admin = get_user_from_token(cred.credentials, db)
     require_superadmin(admin)
 
@@ -1202,6 +1205,9 @@ def upsert_census_config(
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
     db: Session = Depends(get_db)
 ):
+    if not cred or not cred.credentials:
+        raise HTTPException(401, "Token inválido")
+
     admin = get_user_from_token(cred.credentials, db)
     require_superadmin(admin)
 
@@ -1236,6 +1242,9 @@ def regenerate_census_token(
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
     db: Session = Depends(get_db)
 ):
+    if not cred or not cred.credentials:
+        raise HTTPException(401, "Token inválido")
+
     admin = get_user_from_token(cred.credentials, db)
     require_superadmin(admin)
 
@@ -1253,6 +1262,9 @@ def test_census_email(
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
     db: Session = Depends(get_db)
 ):
+    if not cred or not cred.credentials:
+        raise HTTPException(401, "Token inválido")
+
     admin = get_user_from_token(cred.credentials, db)
     require_superadmin(admin)
 
