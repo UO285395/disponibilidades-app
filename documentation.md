@@ -6,7 +6,7 @@ Políticas de dominio:
 
 ---
 
-## 11) Censo y SMTP (estado deploy-ready)
+## 11) Censo y envío de email (estado deploy-ready)
 
 ### Endpoints del módulo de censo
 
@@ -24,9 +24,36 @@ Políticas de dominio:
 - Los endpoints admin de censo devuelven `401` limpio si falta token.
 - La ruta pública de censo no requiere autenticación.
 - El submit público responde rápido porque el envío email se lanza en hilo background.
-- El backend acepta variables SMTP en MAYÚSCULAS y, por compatibilidad Railway, también en minúsculas.
+- El backend acepta variables en MAYÚSCULAS y, por compatibilidad Railway, también en minúsculas.
+- El backend soporta dos transportes para el email del censo:
+  - `Resend` por HTTPS (**preferente en Railway**).
+  - `SMTP` como fallback legacy.
 
-### Configuración SMTP recomendada en Railway
+### Configuración recomendada en Railway
+
+#### Opción A — Resend (recomendada)
+
+Variables:
+
+- `CENSUS_EMAIL_PROVIDER=resend`
+- `RESEND_API_KEY`
+- `RESEND_FROM`
+- `RESEND_API_URL` (opcional, default `https://api.resend.com/emails`)
+
+Comportamiento implementado:
+
+- Si `CENSUS_EMAIL_PROVIDER=resend`, el backend usa siempre Resend.
+- Si no se define `CENSUS_EMAIL_PROVIDER` pero existe `RESEND_API_KEY`, el backend autodetecta Resend.
+- El CSV se adjunta en base64 al email enviado por API HTTPS.
+- Los logs muestran:
+  - `api_url`
+  - `from`
+  - si existe API key (`has_api_key`)
+  - destinatario
+
+Esta opción evita el problema observado con Railway: resolución correcta de Gmail pero `timeout` en `587/TLS` y `465/SSL`.
+
+#### Opción B — SMTP (fallback legacy)
 
 Usar preferentemente estas variables en MAYÚSCULAS:
 
@@ -51,6 +78,17 @@ Compatibilidad implementada:
 
 Sin exponer secretos, backend registra:
 
+- transporte seleccionado (`resend` / `smtp`)
+
+Si se usa Resend:
+
+- `api_url`
+- `from`
+- `has_api_key`
+- respuesta HTTP resumida
+
+Si se usa SMTP:
+
 - `host`
 - `port`
 - modo `SSL/TLS`
@@ -69,15 +107,13 @@ Sin exponer secretos, backend registra:
    - `POST /censo/{token}`
    ambos sin auth.
 3. Confirmar que `API_URL` apunta al backend Railway correcto.
-4. Revisar logs backend para estos datos SMTP:
-   - host/port
-   - `use_ssl`
-   - `use_tls`
-   - login correcto o error exacto.
+4. Revisar logs backend para el transporte real usado:
+  - si es Resend: `api_url`, `from`, `has_api_key`, código HTTP
+  - si es SMTP: host/port, `use_ssl`, `use_tls`, login correcto o error exacto.
 5. Si no llega correo:
-   - comprobar credenciales SMTP reales,
-   - comprobar puerto correcto,
-   - comprobar si el proveedor requiere SSL directo o STARTTLS.
+  - con Resend: comprobar `RESEND_API_KEY` y que `RESEND_FROM` esté verificado,
+  - con SMTP: comprobar credenciales reales, puerto correcto y modo SSL/STARTTLS,
+  - en Railway, preferir siempre Resend antes que SMTP.
 
 ### Errores comunes
 
@@ -96,12 +132,19 @@ Sin exponer secretos, backend registra:
 - `Failed to fetch`
   - Causa típica: backend no accesible, CORS, URL de API incorrecta o fallo de red entre frontend y backend.
 
+- `Error enviando email por Resend: HTTP 401`
+  - Causa típica: `RESEND_API_KEY` incorrecta o caducada.
+
+- `Error enviando email por Resend: HTTP 403`
+  - Causa típica: `RESEND_FROM` no verificado en la cuenta/proyecto de Resend.
+
 - `Error enviando email de censo: [Errno 101] Network is unreachable`
   - Causa probable: el contenedor no tiene salida válida hacia la ruta SMTP resuelta (muy frecuente con resolución IPv6 en entornos cloud).
   - Fix aplicado en código:
     - resolución SMTP con preferencia/fuerza IPv4 mediante `SMTP_FORCE_IPV4=true`.
     - fallback automático entre `587/TLS` y `465/SSL` para Gmail.
   - Si persiste, la causa probable pasa a ser restricción de salida del proveedor o bloqueo de SMTP saliente.
+  - Fix operativo recomendado: mover el transporte a Resend y dejar SMTP solo como fallback.
 
 
 ---

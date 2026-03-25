@@ -7,6 +7,7 @@ from jose import jwt, JWTError
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 
+import base64
 import csv
 import io
 import json
@@ -15,6 +16,8 @@ import secrets
 import socket
 import smtplib
 import threading
+import urllib.error
+import urllib.request
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -1191,7 +1194,72 @@ def _smtp_attempt_send(smtp_host: str, smtp_port: int, smtp_user: str, smtp_pass
         server.send_message(msg)
 
 
-def _send_census_email(email_to: str, csv_content: str):
+def _send_census_email_via_resend(email_to: str, csv_content: str):
+    resend_api_key = _env_str("RESEND_API_KEY", "")
+    resend_from = _env_str("RESEND_FROM", _env_str("SMTP_FROM", ""))
+    resend_api_url = _env_str("RESEND_API_URL", "https://api.resend.com/emails")
+
+    print(
+        "ℹ️ RESEND config census:",
+        {
+            "api_url": resend_api_url or "<empty>",
+            "from": resend_from or "<empty>",
+            "has_api_key": bool(resend_api_key),
+            "email_to": email_to,
+        },
+    )
+
+    if not resend_api_key or not resend_from:
+        msg = "Resend no configurado completamente (API_KEY/FROM)."
+        print(f"⚠️ {msg}")
+        return False, msg
+
+    payload = {
+        "from": resend_from,
+        "to": [email_to],
+        "subject": "Nueva respuesta de censo",
+        "text": "Adjunto se incluye una nueva respuesta del formulario de censo.",
+        "attachments": [
+            {
+                "filename": "respuesta_censo.csv",
+                "content": base64.b64encode(csv_content.encode("utf-8")).decode("ascii"),
+            }
+        ],
+    }
+
+    request = urllib.request.Request(
+        resend_api_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {resend_api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            raw_body = response.read().decode("utf-8", errors="replace")
+            print(
+                "✅ Email de censo enviado por Resend",
+                {
+                    "status": response.status,
+                    "body": raw_body[:500] if raw_body else "<empty>",
+                },
+            )
+            return True, "ok"
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        error = f"Error enviando email por Resend: HTTP {exc.code} - {error_body}"
+        print(f"⚠️ {error}")
+        return False, error
+    except Exception as exc:
+        error = f"Error enviando email por Resend: {exc}"
+        print(f"⚠️ {error}")
+        return False, error
+
+
+def _send_census_email_via_smtp(email_to: str, csv_content: str):
     smtp_host = _env_str("SMTP_HOST", "")
     smtp_port_raw = _env_str("SMTP_PORT", "587")
     smtp_user = _env_str("SMTP_USER", "")
@@ -1297,6 +1365,26 @@ def _send_census_email(email_to: str, csv_content: str):
     error = f"Error enviando email de censo: {last_error}"
     print(f"⚠️ {error}")
     return False, error
+
+
+def _send_census_email(email_to: str, csv_content: str):
+    provider = _env_str("CENSUS_EMAIL_PROVIDER", "").strip().lower()
+    resend_api_key = _env_str("RESEND_API_KEY", "")
+
+    if provider in {"resend", "http", "api"}:
+        print("ℹ️ Censo email transport seleccionado: resend")
+        return _send_census_email_via_resend(email_to, csv_content)
+
+    if provider == "smtp":
+        print("ℹ️ Censo email transport seleccionado: smtp")
+        return _send_census_email_via_smtp(email_to, csv_content)
+
+    if resend_api_key:
+        print("ℹ️ Censo email transport autodetectado: resend")
+        return _send_census_email_via_resend(email_to, csv_content)
+
+    print("ℹ️ Censo email transport por defecto: smtp")
+    return _send_census_email_via_smtp(email_to, csv_content)
 
 
 def _send_census_email_async(email_to: str, csv_content: str):
