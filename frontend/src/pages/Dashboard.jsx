@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Title, Button, Box, Text, Divider, Group, Tabs, Card } from "@mantine/core";
 import { userAPI, getToken, clearToken } from "../api/api.js";
+import MobileWeekCalendar from "../components/MobileWeekCalendar.jsx";
 import WeekCalendar from "../components/WeekCalendar.jsx";
 import EventsSection from "../components/EventsSection.jsx";
 import SpaceReservations from "../components/SpaceReservations.jsx";
@@ -116,7 +117,11 @@ export default function Dashboard() {
                   Haz clic en las celdas para marcar o desmarcar tu disponibilidad por horas.
                 </Text>
 
-                <WeekCalendar offsetWeeks={offsetWeeks} />
+                {user.role === "user" ? (
+                  <MobileWeekCalendar offsetWeeks={offsetWeeks} />
+                ) : (
+                  <WeekCalendar offsetWeeks={offsetWeeks} />
+                )}
               </Card>
             </Tabs.Panel>
           )}

@@ -8,13 +8,19 @@ Políticas de dominio:
 
 ## 12) Sprint: Rediseño de calendario de disponibilidades para móvil
 
-**Estado**: Próximo sprint tras bug fixes actuales. Puede hacerse en paralelo con Sprint D (políticas de dominio).
+**Estado**: Implementado para usuario estándar. Admin y superadmin mantienen temporalmente el calendario tabular actual.
 
 **Problema actual**: 
 
 El calendario de disponibilidades (`WeekCalendar.jsx`) es una tabla 7 días x 16 horas que requiere scroll horizontal. En dispositivos móviles esto es incómodo y poco intuitivo. Se necesita una solución optimizada para pantallas pequeñas.
 
 **Objetivo**: Rediseñar el calendario para que sea naturalmente escalable a móvil con scroll vertical, manteniendo toda la funcionalidad.
+
+**Implementación actual**:
+
+- Usuario estándar: usa minicalendarios verticales por día.
+- Admin y superadmin en su dashboard de usuario: mantienen el calendario tabular existente.
+- Las restricciones de días vencidos se conservan en el nuevo calendario.
 
 ### Opciones de diseño propuestas
 
