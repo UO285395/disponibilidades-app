@@ -12,6 +12,7 @@ import io
 import json
 import os
 import secrets
+import socket
 import smtplib
 import threading
 from email.mime.multipart import MIMEMultipart
@@ -1137,6 +1138,36 @@ def _env_str(name: str, default: str = "") -> str:
     return str(value).strip()
 
 
+def _smtp_resolve_debug(host: str, port: int):
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        debug = []
+        for info in infos:
+            family, _, _, _, sockaddr = info
+            family_name = "IPv6" if family == socket.AF_INET6 else "IPv4" if family == socket.AF_INET else str(family)
+            debug.append({
+                "family": family_name,
+                "address": sockaddr[0],
+                "port": sockaddr[1],
+            })
+        return debug
+    except Exception as exc:
+        return [{"resolution_error": str(exc)}]
+
+
+def _with_forced_ipv4_resolution(callback):
+    original_getaddrinfo = socket.getaddrinfo
+
+    def ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        return original_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+
+    socket.getaddrinfo = ipv4_only_getaddrinfo
+    try:
+        return callback()
+    finally:
+        socket.getaddrinfo = original_getaddrinfo
+
+
 def _send_census_email(email_to: str, csv_content: str):
     smtp_host = _env_str("SMTP_HOST", "")
     smtp_port_raw = _env_str("SMTP_PORT", "587")
@@ -1145,6 +1176,7 @@ def _send_census_email(email_to: str, csv_content: str):
     smtp_from = _env_str("SMTP_FROM", smtp_user)
     smtp_use_ssl = _env_bool("SMTP_USE_SSL", False)
     smtp_use_tls = _env_bool("SMTP_USE_TLS", True)
+    smtp_force_ipv4 = _env_bool("SMTP_FORCE_IPV4", True)
 
     try:
         smtp_port = int(smtp_port_raw)
@@ -1164,12 +1196,14 @@ def _send_census_email(email_to: str, csv_content: str):
             "port": smtp_port,
             "use_ssl": smtp_use_ssl,
             "use_tls": smtp_use_tls,
+            "force_ipv4": smtp_force_ipv4,
             "from": smtp_from or "<empty>",
             "has_user": bool(smtp_user),
             "has_password": bool(smtp_password),
             "email_to": email_to,
         },
     )
+    print("ℹ️ SMTP resolved addresses:", _smtp_resolve_debug(smtp_host, smtp_port))
 
     if not smtp_host or not smtp_user or not smtp_password:
         msg = "SMTP no configurado completamente (HOST/USER/PASSWORD)."
@@ -1190,7 +1224,7 @@ def _send_census_email(email_to: str, csv_content: str):
     )
     msg.attach(attachment)
 
-    try:
+    def do_send():
         if smtp_use_ssl:
             print(f"ℹ️ Conectando por SMTP_SSL a {smtp_host}:{smtp_port}")
             with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15) as server:
@@ -1210,6 +1244,12 @@ def _send_census_email(email_to: str, csv_content: str):
                 server.login(smtp_user, smtp_password)
                 print("ℹ️ SMTP login correcto, enviando mensaje")
                 server.send_message(msg)
+
+    try:
+        if smtp_force_ipv4:
+            _with_forced_ipv4_resolution(do_send)
+        else:
+            do_send()
 
         print(f"✅ Email de censo enviado a {email_to}")
         return True, "ok"
