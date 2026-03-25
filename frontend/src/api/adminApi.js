@@ -88,4 +88,17 @@ export const adminAPI = {
   deleteDomainPolicy(id) {
     return request(`/admin/domain-policies/${id}`, "DELETE");
   },
+
+  // Censo
+  getCensusConfig() {
+    return request("/admin/census");
+  },
+
+  upsertCensusConfig(payload) {
+    return request("/admin/census", "PUT", payload);
+  },
+
+  regenerateCensusToken() {
+    return request("/admin/census/regenerate-token", "POST");
+  },
 };

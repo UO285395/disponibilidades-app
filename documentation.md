@@ -668,7 +668,7 @@ class DomainPolicy(Base):
 
 ### 13.2 Censo por URL oculta y envío CSV por correo
 
-**Estado**: Definición aprobada, pendiente de implementación.
+**Estado**: Implementado en backend y frontend.
 
 **Objetivo funcional**:
 
@@ -677,9 +677,33 @@ class DomainPolicy(Base):
 - Envío por correo en CSV a una dirección configurable por superadmin.
 - Respuestas del censo **no persistidas** en base de datos.
 
-**Alcance previsto**:
+**Implementado actualmente**:
 
-- Nueva pestaña "Censo" en panel de superadmin para:
-  - Definir campos del formulario dinámico.
-  - Definir correo destinatario de envíos.
-- Endpoint de envío que valida, genera CSV en memoria y envía email.
+- Backend:
+  - Modelos `CensusConfig` y `CensusField` (tablas `census_configs` y `census_fields`).
+  - `GET /admin/census` — superadmin: obtener configuración actual.
+  - `PUT /admin/census` — superadmin: crear o reemplazar configuración + campos.
+  - `POST /admin/census/regenerate-token` — superadmin: generar nueva URL (token).
+  - `GET /censo/{token}/fields` — público, sin auth: obtener campos del formulario.
+  - `POST /censo/{token}` — público, sin auth: enviar respuestas; genera CSV en memoria y envía por email.
+  - Email via `smtplib` (SMTP configurado por variables de entorno: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`). Si no están configuradas, la respuesta se registra en log pero no se envía.
+- Frontend:
+  - Tab "Censo" en panel de administración (solo visible para superadmin).
+  - Componente `AdminCensus.jsx`: builder de campos, email destino, URL copiable, regenerar URL.
+  - Página `CensusForm.jsx` en ruta pública `/censo/:token`: formulario dinámico, validación de obligatorios, mensaje de éxito.
+
+**Variables de entorno requeridas en backend para envío de email**:
+
+```
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=correo@example.com
+SMTP_PASSWORD=contraseña_o_app_password
+```
+
+**Tipos de campo soportados**: texto corto (`text`), texto largo (`textarea`), número (`number`), selección (`select` con opciones configurables).
+
+**Pendiente para cierre**:
+
+- Pruebas funcionales con SMTP real en entorno desplegado.
+- Validación de que el token es suficientemente opaco para la seguridad requerida.

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
@@ -7,8 +7,19 @@ from jose import jwt, JWTError
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 
+import csv
+import io
+import json
+import os
+import secrets
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+
 import models
-from models import User, Availability, Event, EventResponse, EventCompanion
+from models import User, Availability, Event, EventResponse, EventCompanion, CensusConfig, CensusField
 from database import SessionLocal, engine
 
 
@@ -194,6 +205,17 @@ class EventResponseCreate(BaseModel):
 
 class EventCompanionUpdate(BaseModel):
     count: int
+
+class CensusFieldCreate(BaseModel):
+    label: str
+    field_type: str = "text"
+    required: bool = True
+    order_index: int = 0
+    options: list[str] | None = None
+
+class CensusConfigCreate(BaseModel):
+    email_to: str
+    fields: list[CensusFieldCreate]
 
 class DomainPolicyCreate(BaseModel):
     domain: str
@@ -1071,6 +1093,170 @@ def admin_all_availability(
         }
         for a in items
     ]
+
+
+# =========================================================
+# CENSO
+# =========================================================
+
+def _census_config_to_dict(config: CensusConfig) -> dict:
+    return {
+        "id": config.id,
+        "email_to": config.email_to,
+        "url_token": config.url_token,
+        "fields": [
+            {
+                "id": f.id,
+                "label": f.label,
+                "field_type": f.field_type,
+                "required": bool(f.required),
+                "order_index": f.order_index,
+                "options": json.loads(f.options) if f.options else [],
+            }
+            for f in config.fields
+        ],
+    }
+
+
+def _send_census_email(email_to: str, csv_content: str):
+    smtp_host = os.getenv("SMTP_HOST", "")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user = os.getenv("SMTP_USER", "")
+    smtp_password = os.getenv("SMTP_PASSWORD", "")
+
+    if not smtp_host or not smtp_user:
+        print(f"⚠️ SMTP no configurado. CSV no enviado a {email_to}.")
+        return
+
+    msg = MIMEMultipart()
+    msg["From"] = smtp_user
+    msg["To"] = email_to
+    msg["Subject"] = "Nueva respuesta de censo"
+    msg.attach(MIMEText("Adjunto se incluye una nueva respuesta del formulario de censo.", "plain"))
+
+    attachment = MIMEBase("application", "octet-stream")
+    attachment.set_payload(csv_content.encode("utf-8"))
+    encoders.encode_base64(attachment)
+    attachment.add_header(
+        "Content-Disposition", "attachment", filename="respuesta_censo.csv"
+    )
+    msg.attach(attachment)
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+    except Exception as e:
+        print(f"⚠️ Error enviando email de censo: {e}")
+
+
+@app.get("/admin/census")
+def get_census_config(
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    require_superadmin(admin)
+
+    config = db.query(CensusConfig).first()
+    if not config:
+        return None
+    return _census_config_to_dict(config)
+
+
+@app.put("/admin/census")
+def upsert_census_config(
+    data: CensusConfigCreate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    require_superadmin(admin)
+
+    existing = db.query(CensusConfig).first()
+    token = existing.url_token if existing else secrets.token_urlsafe(16)
+
+    if existing:
+        db.delete(existing)
+        db.commit()
+
+    config = CensusConfig(email_to=data.email_to, url_token=token)
+    db.add(config)
+    db.flush()
+
+    for i, f in enumerate(data.fields):
+        db.add(CensusField(
+            config_id=config.id,
+            label=f.label,
+            field_type=f.field_type,
+            required=1 if f.required else 0,
+            order_index=f.order_index if f.order_index is not None else i,
+            options=json.dumps(f.options) if f.options else None,
+        ))
+
+    db.commit()
+    db.refresh(config)
+    return _census_config_to_dict(config)
+
+
+@app.post("/admin/census/regenerate-token")
+def regenerate_census_token(
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    require_superadmin(admin)
+
+    config = db.query(CensusConfig).first()
+    if not config:
+        raise HTTPException(404, "No hay configuración de censo")
+
+    config.url_token = secrets.token_urlsafe(16)
+    db.commit()
+    return {"url_token": config.url_token}
+
+
+@app.get("/censo/{token}/fields")
+def get_census_fields(token: str, db: Session = Depends(get_db)):
+    config = db.query(CensusConfig).filter(CensusConfig.url_token == token).first()
+    if not config:
+        raise HTTPException(404, "Formulario no encontrado")
+
+    return {
+        "fields": [
+            {
+                "id": f.id,
+                "label": f.label,
+                "field_type": f.field_type,
+                "required": bool(f.required),
+                "order_index": f.order_index,
+                "options": json.loads(f.options) if f.options else [],
+            }
+            for f in config.fields
+        ]
+    }
+
+
+@app.post("/censo/{token}")
+def submit_census(
+    token: str,
+    data: dict = Body(...),
+    db: Session = Depends(get_db)
+):
+    config = db.query(CensusConfig).filter(CensusConfig.url_token == token).first()
+    if not config:
+        raise HTTPException(404, "Formulario no encontrado")
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    fields_sorted = sorted(config.fields, key=lambda f: f.order_index)
+    writer.writerow([f.label for f in fields_sorted])
+    writer.writerow([str(data.get(str(f.id), "")) for f in fields_sorted])
+
+    _send_census_email(config.email_to, output.getvalue())
+    return {"ok": True}
 
 
 # =========================================================

@@ -111,3 +111,32 @@ class SpaceReservation(Base):
 
     space = relationship("Space", back_populates="reservations")
     user = relationship("User")
+
+
+class CensusConfig(Base):
+    __tablename__ = "census_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email_to = Column(String, nullable=False)
+    url_token = Column(String, unique=True, nullable=False)
+
+    fields = relationship(
+        "CensusField",
+        back_populates="config",
+        order_by="CensusField.order_index",
+        cascade="all, delete-orphan",
+    )
+
+
+class CensusField(Base):
+    __tablename__ = "census_fields"
+
+    id = Column(Integer, primary_key=True, index=True)
+    config_id = Column(Integer, ForeignKey("census_configs.id"), nullable=False)
+    label = Column(String, nullable=False)
+    field_type = Column(String, nullable=False, default="text")  # text, textarea, number, select
+    required = Column(Integer, default=1)
+    order_index = Column(Integer, default=0)
+    options = Column(String, nullable=True)  # JSON-encoded list for 'select' type
+
+    config = relationship("CensusConfig", back_populates="fields")
