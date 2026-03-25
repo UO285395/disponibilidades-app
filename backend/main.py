@@ -746,6 +746,7 @@ def get_event(
 @app.get("/events/{event_id}/responses")
 def event_responses(
     event_id: int,
+    domain: str | None = None,
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
     db: Session = Depends(get_db)
 ):
@@ -774,6 +775,8 @@ def event_responses(
     results = []
     for r, u in resp:
         responder_domain = _get_domain(u.email)
+        if domain and responder_domain != domain.strip().lower():
+            continue
 
         if user.role == "superadmin":
             pass
@@ -784,11 +787,23 @@ def event_responses(
             if responder_domain != user_domain:
                 continue
 
+        companion_count = (
+            db.query(EventCompanion.count)
+            .filter(
+                EventCompanion.event_id == event_id,
+                EventCompanion.user_id == u.id,
+            )
+            .scalar()
+        ) or 0
+
         results.append({
             "user_id": u.id,
             "user_full_name": u.full_name,
+            "user_email": u.email,
+            "user_domain": responder_domain,
             "answer": r.answer,
             "justification": r.justification,
+            "companions_count": companion_count,
         })
 
     return results

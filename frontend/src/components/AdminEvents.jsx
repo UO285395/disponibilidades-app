@@ -147,6 +147,8 @@ export default function AdminEvents() {
               <b>Resumen de votos:</b>
               <div>Sí: {ev.yes_count ?? 0}</div>
               <div>No: {ev.no_count ?? 0}</div>
+              <div>+ Simpas: {ev.companions_total ?? 0}</div>
+              <div>Asistencia total: {(ev.yes_count ?? 0) + (ev.companions_total ?? 0)}</div>
             </div>
 
             <Group mt="sm">

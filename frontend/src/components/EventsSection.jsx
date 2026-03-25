@@ -191,10 +191,6 @@ export default function EventsSection() {
               </Text>
             )}
 
-            <Text size="sm" mt="xs" c="dimmed">
-              Asistentes totales: {ev.attendees_total ?? ev.yes_count ?? 0}
-            </Text>
-
             {voted && (
               <Text size="sm" c="green" mt="sm">
                 ✔ Ya has votado en este evento
