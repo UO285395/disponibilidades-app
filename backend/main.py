@@ -1122,18 +1122,54 @@ def _census_config_to_dict(config: CensusConfig) -> dict:
 def _env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:
+        value = os.getenv(name.lower())
+    if value is None:
         return default
     return value.strip().lower() in ["1", "true", "yes", "on"]
 
 
+def _env_str(name: str, default: str = "") -> str:
+    value = os.getenv(name)
+    if value is None:
+        value = os.getenv(name.lower())
+    if value is None:
+        return default
+    return str(value).strip()
+
+
 def _send_census_email(email_to: str, csv_content: str):
-    smtp_host = os.getenv("SMTP_HOST", "")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_user = os.getenv("SMTP_USER", "")
-    smtp_password = os.getenv("SMTP_PASSWORD", "")
-    smtp_from = os.getenv("SMTP_FROM", smtp_user)
+    smtp_host = _env_str("SMTP_HOST", "")
+    smtp_port_raw = _env_str("SMTP_PORT", "587")
+    smtp_user = _env_str("SMTP_USER", "")
+    smtp_password = _env_str("SMTP_PASSWORD", "")
+    smtp_from = _env_str("SMTP_FROM", smtp_user)
     smtp_use_ssl = _env_bool("SMTP_USE_SSL", False)
     smtp_use_tls = _env_bool("SMTP_USE_TLS", True)
+
+    try:
+        smtp_port = int(smtp_port_raw)
+    except ValueError:
+        msg = f"SMTP_PORT inválido: {smtp_port_raw}"
+        print(f"⚠️ {msg}")
+        return False, msg
+
+    if smtp_use_ssl and smtp_use_tls:
+        print("ℹ️ SMTP_USE_SSL y SMTP_USE_TLS activos a la vez; se prioriza SSL y se desactiva TLS.")
+        smtp_use_tls = False
+
+    print(
+        "ℹ️ SMTP config census:",
+        {
+            "host": smtp_host or "<empty>",
+            "port": smtp_port,
+            "use_ssl": smtp_use_ssl,
+            "use_tls": smtp_use_tls,
+            "from": smtp_from or "<empty>",
+            "has_user": bool(smtp_user),
+            "has_password": bool(smtp_password),
+            "email_to": email_to,
+        },
+    )
 
     if not smtp_host or not smtp_user or not smtp_password:
         msg = "SMTP no configurado completamente (HOST/USER/PASSWORD)."
@@ -1156,16 +1192,23 @@ def _send_census_email(email_to: str, csv_content: str):
 
     try:
         if smtp_use_ssl:
+            print(f"ℹ️ Conectando por SMTP_SSL a {smtp_host}:{smtp_port}")
             with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15) as server:
+                print("ℹ️ SMTP login iniciado (SSL)")
                 server.login(smtp_user, smtp_password)
+                print("ℹ️ SMTP login correcto (SSL), enviando mensaje")
                 server.send_message(msg)
         else:
+            print(f"ℹ️ Conectando por SMTP a {smtp_host}:{smtp_port}")
             with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
                 server.ehlo()
                 if smtp_use_tls:
+                    print("ℹ️ Iniciando STARTTLS")
                     server.starttls()
                     server.ehlo()
+                print("ℹ️ SMTP login iniciado")
                 server.login(smtp_user, smtp_password)
+                print("ℹ️ SMTP login correcto, enviando mensaje")
                 server.send_message(msg)
 
         print(f"✅ Email de censo enviado a {email_to}")

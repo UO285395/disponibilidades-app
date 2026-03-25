@@ -6,6 +6,94 @@ Políticas de dominio:
 
 ---
 
+## 11) Censo y SMTP (estado deploy-ready)
+
+### Endpoints del módulo de censo
+
+- Admin (solo superadmin):
+  - `GET /admin/census`
+  - `PUT /admin/census`
+  - `POST /admin/census/regenerate-token`
+  - `POST /admin/census/test-email`
+- Público (sin login):
+  - `GET /censo/{token}/fields`
+  - `POST /censo/{token}`
+
+### Reglas implementadas
+
+- Los endpoints admin de censo devuelven `401` limpio si falta token.
+- La ruta pública de censo no requiere autenticación.
+- El submit público responde rápido porque el envío email se lanza en hilo background.
+- El backend acepta variables SMTP en MAYÚSCULAS y, por compatibilidad Railway, también en minúsculas.
+
+### Configuración SMTP recomendada en Railway
+
+Usar preferentemente estas variables en MAYÚSCULAS:
+
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USER`
+- `SMTP_PASSWORD`
+- `SMTP_FROM` (opcional, recomendado)
+- `SMTP_USE_TLS` (`true` / `false`)
+- `SMTP_USE_SSL` (`true` / `false`)
+
+Compatibilidad implementada:
+
+- Si Railway quedó configurado con `smtp_host`, `smtp_user`, etc., el backend también las leerá.
+
+### Logs diagnósticos SMTP que deben aparecer
+
+Sin exponer secretos, backend registra:
+
+- `host`
+- `port`
+- modo `SSL/TLS`
+- `from`
+- si existe usuario/password (`has_user`, `has_password`)
+- inicio de login SMTP
+- éxito de login
+- envío del mensaje
+- error exacto del proveedor SMTP
+
+### Checklist de diagnóstico rápido
+
+1. Verificar que frontend admin llama `POST /admin/census/test-email` con token.
+2. Verificar que frontend público usa:
+   - `GET /censo/{token}/fields`
+   - `POST /censo/{token}`
+   ambos sin auth.
+3. Confirmar que `API_URL` apunta al backend Railway correcto.
+4. Revisar logs backend para estos datos SMTP:
+   - host/port
+   - `use_ssl`
+   - `use_tls`
+   - login correcto o error exacto.
+5. Si no llega correo:
+   - comprobar credenciales SMTP reales,
+   - comprobar puerto correcto,
+   - comprobar si el proveedor requiere SSL directo o STARTTLS.
+
+### Errores comunes
+
+- `405 Method Not Allowed`
+  - Causa típica: frontend llama con método incorrecto a un endpoint de censo.
+  - Verificar especialmente `POST /admin/census/test-email` y `PUT /admin/census`.
+
+- `401 Token inválido`
+  - Causa típica: botón admin sin token o sesión expirada.
+  - Debe ocurrir solo en endpoints admin, nunca en `/censo/{token}` público.
+
+- `503 Service Unavailable`
+  - Causa típica: deploy caído, backend arrancando o frontend desincronizado con la versión desplegada.
+  - Revisar salud del backend Railway y logs del deploy.
+
+- `Failed to fetch`
+  - Causa típica: backend no accesible, CORS, URL de API incorrecta o fallo de red entre frontend y backend.
+
+
+---
+
 ## 12) Sprint: Rediseño de calendario de disponibilidades para móvil
 
 **Estado**: Implementado para todos los usuarios.
