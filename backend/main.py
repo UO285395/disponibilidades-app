@@ -620,7 +620,11 @@ def list_events(
         filtered.append(e)
 
     result = []
+    today = datetime.utcnow().date()
     for e in filtered:
+        event_date = datetime.strptime(e.date, "%Y-%m-%d").date()
+        is_expired = event_date < today
+
         yes_count = (
             db.query(EventResponse)
             .filter(
@@ -651,6 +655,7 @@ def list_events(
                 "allowed_domain": e.allowed_domain,
                 "yes_count": yes_count,
                 "no_count": no_count,
+                "is_expired": is_expired,
             }
         )
 
@@ -742,6 +747,15 @@ def respond_event(
     db: Session = Depends(get_db)
 ):
     user = get_user_from_token(cred.credentials, db)
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(404, "Evento no encontrado")
+
+    today = datetime.utcnow().date()
+    event_date = datetime.strptime(event.date, "%Y-%m-%d").date()
+    if event_date < today:
+        raise HTTPException(410, "Este evento ha expirado")
 
     existing = (
         db.query(EventResponse)

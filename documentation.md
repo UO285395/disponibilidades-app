@@ -217,6 +217,12 @@ Criterio MVP: “flujo principal usable de extremo a extremo por módulo”.
 
 ## 7) Deuda técnica y gaps actuales
 
+**✅ Resueltos en última sesión**:
+
+- Rango horario usuario: ampliado de 8-22 a 8-23 horas.
+- Votación en días pasados: validación backend + UI con badge "Expirado".
+- Dashboard admin: indicador de que eventos expirados no muestran votos.
+
 Prioridad alta (P1):
 
 1. Seguridad:
@@ -271,6 +277,14 @@ Objetivo: escalabilidad y mantenimiento.
 - Auditoría mínima de acciones críticas (roles, domain policies, borrados).
 - Pruebas automáticas de regresión en flujos críticos (voto único, dominio, reservas).
 
+### Sprint D (políticas de dominio granular)
+
+Objetivo: control fino del acceso por dominio a módulos específicos.
+
+- Ver sección "11) Sprint: Políticas de dominio (granular por módulo)" para requerimientos completos.
+- Estimación: 5-8 horas.
+- Prerequisito: Sprints A, B, C completados.
+
 ---
 
 ## 9) Checklist de regresión mínima (obligatorio en cambios)
@@ -308,3 +322,113 @@ Políticas de dominio:
 - Cada cambio funcional o de permisos debe actualizar este archivo en el mismo PR/commit.
 - Si cambia contrato de API, incluir sección “Cambio de contrato” en esta documentación.
 - Si un módulo deja de ser MVP, marcar explícitamente su estado como `DEGRADADO` hasta corregir.
+---
+
+## 11) Sprint: Políticas de dominio (granular por módulo)
+
+**Estado**: Siguiente sprint tras hardening MVP (Sprints A y B).
+
+**Objetivo**: Permitir que el superadmin controle qué **usuarios de dominios específicos** ven exclusivamente determinadas **tabs del dashboard**.
+
+### Caso de uso motivador
+
+Existe un dominio "invitado" que solo debe ver la funcionalidad de **Eventos**, sin acceso a:
+- Disponibilidades
+- Espacios y reservas
+- Panel de usuarios
+- Políticas de dominio
+
+Actualmente, las políticas de dominio (`DomainPolicy`) controlan módulos a nivel global (todos los admins lo ven si está habilitado). Se necesita **granularidad por dominio**: un dominio puede tener eventos habilitados pero disponibilidades deshabilitadas.
+
+### Requerimientos funcionales
+
+1. **Modelo de datos** (cambio en `DomainPolicy`):
+   - Agregar 3 nuevas columnas booleanas:
+     - `users_enabled` (DEFAULT=False para dominios invitado; DEFAULT=True para otros)
+     - `domain_policies_enabled` (DEFAULT=False para no-superadmin)
+     - (Opcional) `events_enabled`, `availabilities_enabled`, `spaces_enabled` ya existen; reforzar aplicación
+
+2. **Control de acceso en frontend** (`AdminDashboard.jsx`):
+   - Evaluar en `/me` endpoint si el usuario tiene cada módulo habilitado.
+   - En sección de tabs, mostrar solo las que están habilitadas según su dominio.
+   - Si administrador (no superadmin) de dominio "invitado": solo ve "Eventos", ocultar resto.
+   - Superadmin siempre ve todo.
+
+3. **Validación en backend** (endpoints admin):
+   - `GET /admin/users`: solo si `users_enabled` para el dominio.
+   - `GET /admin/availability`: solo si `availabilities_enabled`.
+   - `GET /admin/reservations`: solo si `spaces_enabled`.
+   - `POST /admin/domain-policies`: solo si superadmin (no aplicable por roles).
+   - Devolver HTTP 403 si intenta acceder sin permiso.
+
+4. **UI en superadmin para gestionar políticas** (`AdminDomainPolicies.jsx`):
+   - Al crear/editar una `DomainPolicy`, permitir marcar quién accede a qué:
+     - ✓ Eventos (siempre True para dominios normales, configurable)
+     - ✓ Disponibilidades (default True, configurable)
+     - ✓ Espacios (default True, configurable)
+     - ✓ Usuarios (default False para invitado, True para otros)
+   - Mostrar un formulario de checkboxes claros por módulo.
+   - Indicar en la interfaz cuántos dominios usan cada configuración.
+
+### Cambios técnicos
+
+**Backend** (`models.py`):
+
+```python
+class DomainPolicy(Base):
+    # ... existing fields ...
+    users_enabled: bool = True
+    domain_policies_enabled: bool = False  # Solo superadmin
+    # events_enabled, availabilities_enabled, spaces_enabled ya existen
+```
+
+**Backend** (`main.py`):
+
+- Refactorizar `_is_feature_enabled(db, domain, feature, role)` para incluir nuevos flags.
+- Agregar checks en endpoints admin restringidos.
+- Endpoint PUT actualizar flags.
+
+**Frontend** (`api/api.js`):
+
+- Actualizar `userAPI.me()` para devolver flags adicionales de `DomainPolicy`.
+
+**Frontend** (`AdminDashboard.jsx`):
+
+- Condición de visibilidad de tab basada en flags del usuario.
+
+### Ejemplo de flujo
+
+1. Superadmin crea policy para dominio "invitado":
+   - events_enabled: **true**
+   - availabilities_enabled: **false**
+   - spaces_enabled: **false**
+   - users_enabled: **false**
+
+2. Admin del dominio "invitado" abre `/admin`:
+   - Ve solo la tab "Eventos"
+   - Botón "Volver al dashboard" disponible
+   - Resto de tabs (Calendario, Espacios, Usuarios, Políticas) ocultas
+   - Si intenta acceso directo a `GET /admin/users`, backend devuelve 403
+
+3. Usuario normal del dominio "invitado" en `/dashboard`:
+   - Ve solo la tab "Eventos"
+   - No ve disponibilidades ni espacios
+   - Los filtros de `GET /events`, `GET /availability/my` etc. validan deshde backend
+
+### Criterios de aceptación
+
+- [ ] `DomainPolicy` tiene 5 flags (events, availabilities, spaces, users, domain_policies).
+- [ ] Superadmin UI permite editar cada flag por dominio.
+- [ ] Frontend oculta tabs según flags del usuario logueado.
+- [ ] Backend rechaza acceso 403 a endpoints no autorizados por dominio.
+- [ ] Ningún cambio de API incompatible: nuevos campos son opcionales (default).
+- [ ] Checklist de regresión pasa: múltiples dominios, superadmin bypass, filtrados correctos.
+
+### Estimación
+
+- Backend: 2-3 horas (modelo, 5 endpoints, validaciones).
+- Frontend: 2-3 horas (AdminDomainPolicies form, tabs condicionales, me() sync).
+- Testing: 1-2 horas.
+- **Total: 5-8 horas**.
+
+**Prioridad recomendada**: Tras fijar hardening (Sprint A) y inconsistencias funcionales (Sprint B).

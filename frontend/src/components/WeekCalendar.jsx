@@ -152,7 +152,7 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
 
 
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-  const hours = Array.from({ length: 15 }, (_, h) => h + 8);
+  const hours = Array.from({ length: 16 }, (_, h) => h + 8);
 
   return (
     <Card shadow="md" p="lg" radius="md">

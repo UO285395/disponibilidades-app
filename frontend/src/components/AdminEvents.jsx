@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Card, Button, TextInput, Title, Textarea, Text } from "@mantine/core";
+import { Card, Button, TextInput, Title, Textarea, Text, Badge, Alert } from "@mantine/core";
 import { adminAPI } from "../api/adminApi.js";
 import { useNavigate } from "react-router-dom";
 
@@ -125,46 +125,54 @@ export default function AdminEvents() {
         Eventos existentes
       </Title>
 
+      <Alert color="blue" mb="md">
+        <strong>Nota:</strong> Los eventos expirados (fecha anterior a hoy) no muestran votos en el resumen. 
+        Los usuarios no pueden votar en eventos expirados.
+      </Alert>
+
       {events.length === 0 && (
         <Text size="sm" c="dimmed">
           No hay eventos.
         </Text>
       )}
 
-      {events.map((ev) => (
-        <Card key={ev.id} shadow="sm" p="md" mb="md">
-          <b>{ev.title}</b> — {ev.date}
-          {ev.allowed_domain && (
-            <p style={{ margin: '4px 0', color: '#555' }}>
-              Dominio asignado: <strong>{ev.allowed_domain}</strong>
-            </p>
-          )}
-          {ev.description && <p>{ev.description}</p>}
+      {events.map((ev) => {
+        const isExpired = ev.is_expired === true;
+        return (
+          <Card key={ev.id} shadow="sm" p="md" mb="md">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
+              <div><b>{ev.title}</b> — {ev.date}</div>
+              {isExpired && <Badge color="red">Expirado</Badge>}
+            </div>
+            {ev.allowed_domain && (
+              <p style={{ margin: '4px 0', color: '#555' }}>
+                Dominio asignado: <strong>{ev.allowed_domain}</strong>
+              </p>
+            )}
+            {ev.description && <p>{ev.description}</p>}
 
-          {/* Resumen de votos Sí / No */}
-          <div style={{ marginTop: "10px" }}>
-            <b>Resumen de votos:</b>
-            <div>Sí: {ev.yes_count ?? 0}</div>
-            <div>No: {ev.no_count ?? 0}</div>
-          </div>
+            {/* Resumen de votos Sí / No */}
+            <div style={{ marginTop: "10px" }}>
+              <b>Resumen de votos:</b>
+              <div>Sí: {ev.yes_count ?? 0}</div>
+              <div>No: {ev.no_count ?? 0}</div>
+            </div>
 
-          <Button
-            mt="sm"
-            onClick={() => navigate(`/admin/event/${ev.id}`)}
-          >
-            Ver respuestas
-          </Button>
+            <Button
+              mt="sm"
+              onClick={() => navigate(`/admin/event/${ev.id}`)}
+            >
+              Ver respuestas
+            </Button>
 
-          <Button
-            mt="sm"
-            ml="sm"
-            color="red"
-            onClick={() => deleteEvent(ev.id)}
-          >
-            Eliminar
-          </Button>
-        </Card>
-      ))}
-    </>
-  );
-}
+            <Button
+              mt="sm"
+              ml="sm"
+              color="red"
+              onClick={() => deleteEvent(ev.id)}
+            >
+              Eliminar
+            </Button>
+          </Card>
+        );
+      })}

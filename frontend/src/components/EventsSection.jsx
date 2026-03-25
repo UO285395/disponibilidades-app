@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Card, Button, TextInput, Title, Text } from "@mantine/core";
+import { Card, Button, TextInput, Title, Text, Badge } from "@mantine/core";
 import { eventsAPI } from "../api/api.js";
 
 export default function EventsSection() {
@@ -71,6 +71,8 @@ export default function EventsSection() {
           return next;
         });
         alert("Ya has votado en este evento.");
+      } else if (message.includes("ha expirado")) {
+        alert("Este evento ha expirado. Ya no puedes votar.");
       } else {
         alert(message || "Error enviando respuesta");
       }
@@ -104,11 +106,15 @@ export default function EventsSection() {
       {events.map((ev) => {
         const eventId = Number(ev.id);
         const voted = votedEvents.has(eventId);
-        const disabled = voted || sending === eventId;
+        const isExpired = ev.is_expired === true;
+        const disabled = voted || sending === eventId || isExpired;
 
         return (
           <Card key={ev.id} shadow="sm" p="md" radius="md" mb="md">
-            <Text fw={700}>{ev.title}</Text>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
+              <Text fw={700}>{ev.title}</Text>
+              {isExpired && <Badge color="red">Expirado</Badge>}
+            </div>
 
             {/* Fecha normal + hora en negrita */}
             <Text size="sm" c="dimmed">
@@ -128,6 +134,12 @@ export default function EventsSection() {
             {voted && (
               <Text size="sm" c="green" mt="sm">
                 ✔ Ya has votado en este evento
+              </Text>
+            )}
+
+            {isExpired && !voted && (
+              <Text size="sm" c="orange" mt="sm" fw={500}>
+                ⏰ Este evento ha expirado. Ya no puedes votar.
               </Text>
             )}
 
