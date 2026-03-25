@@ -8,6 +8,13 @@ Aplicación web para gestión de disponibilidades, eventos y reservas con contro
 - Mantine UI
 - API REST (FastAPI)
 
+## Versiones de entorno
+
+- Node.js: 20.19.0
+- Vite: 7.2.2
+
+Nota: Vite 7 requiere Node 20.19+ o 22.12+. Mantener estas versiones alineadas en `package.json`, `package-lock.json`, `.node-version` y `.tool-versions` para evitar fallos en despliegue.
+
 ## Flujo funcional
 
 ### Roles

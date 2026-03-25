@@ -176,3 +176,6 @@ export default function AdminEvents() {
           </Card>
         );
       })}
+    </>
+  );
+}

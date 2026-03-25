@@ -1,3 +1,186 @@
+
+Políticas de dominio:
+
+- Superadmin puede crear/editar/borrar políticas.
+- Flags impactan tabs y endpoints según rol/dominio.
+
+---
+
+## 12) Sprint: Rediseño de calendario de disponibilidades para móvil
+
+**Estado**: Próximo sprint tras bug fixes actuales. Puede hacerse en paralelo con Sprint D (políticas de dominio).
+
+**Problema actual**: 
+
+El calendario de disponibilidades (`WeekCalendar.jsx`) es una tabla 7 días x 16 horas que requiere scroll horizontal. En dispositivos móviles esto es incómodo y poco intuitivo. Se necesita una solución optimizada para pantallas pequeñas.
+
+**Objetivo**: Rediseñar el calendario para que sea naturalmente escalable a móvil con scroll vertical, manteniendo toda la funcionalidad.
+
+### Opciones de diseño propuestas
+
+#### **Opción A: Minicalendarios verticales por día (RECOMENDADA)**
+
+**Descripción**: Un card por cada día de la semana, stacked verticalmente. Cada card contiene un grid 1 columna x 16 horas.
+
+**Estructura**:
+
+```
+┌─────────────────────────┐
+│ Lunes 25 de marzo       │
+│ ───────────────────────  │
+│ [08:00 - 09:00]         │ ← clickable
+│ [09:00 - 10:00]         │ ← clickable
+│ ... (16 horas)          │
+└─────────────────────────┘
+
+┌─────────────────────────┐
+│ Martes 26 de marzo      │
+│ ───────────────────────  │
+│ [08:00 - 09:00]         │
+│ ... (16 horas)          │
+└─────────────────────────┘
+
+... (5 cards más)
+```
+
+**Ventajas**:
+- Scroll **vertical natural** en móvil (sin necesidad de scroll horizontal).
+- Todos los días **visibles a la vez** en desktop (contexto completo).
+- Cada día es un **bloque independiente** (fácil de escanear).
+- **Responsive**: en desktop pueden ser 2-3 cards por fila, en móvil 1 card por fila.
+- UI limpia y consistente con Mantine Card system.
+
+**Implementación**:
+
+- Reemplazar `<Table>` por grid CSS o `Grid` component de Mantine.
+- Cada día en un `<Card>` con título (día + fecha).
+- Dentro, una lista de clickable horas o pequeña tabla vertical.
+- Responsive: `grid-template-columns: repeat(auto-fit, minmax(350px, 1fr))` en CSS.
+
+---
+
+#### Opción B: Accordion por día (alternativa compacta)
+
+**Descripción**: Todos los días colapsados por defecto. Expandir el que necesites.
+
+**Ventajas**:
+- **Muy compacto** (importante para móvil).
+- Usuario solo ve lo que necesita.
+
+**Desventajas**:
+- No ve contexto de otros días (hay que expandir cada uno).
+- Requiere más clics.
+
+---
+
+#### Opción C: Tabs día por día (navegación)
+
+**Descripción**: Un calendario visible a la vez, botones prev/next para navegar días.
+
+**Ventajas**:
+- **Simple y limpio**.
+- No hay scroll.
+
+**Desventajas**:
+- No ve contexto de otros días.
+- Navegación tediosa para planificar semana completa.
+
+---
+
+**Recomendación: OPCIÓN A** — Es la mejor relación entre UX en móvil y desktop. Opción B como alternativa si se quiere más compactidad.
+
+### Requerimientos funcionales (Opción A)
+
+1. **Componente nuevo**: `components/MobileWeekCalendar.jsx`
+   - 7 cards (uno por día).
+   - Cada card es scrolleable verticalmente (16 horas).
+   - Misma lógica de toggleCell que WeekCalendar actual.
+   - Mismo estado `availabilities` y `pendingKeys`.
+
+2. **Responsive design**:
+   - Desktop (>1024px): grid 3 cards/fila, o 2 si ancho es ajustado.
+   - Tablet (768px-1024px): grid 2 cards/fila.
+   - Móvil (<768px): 1 card/fila, full width.
+   - Media queries en CSS o usar Mantine `Grid` con `xs`, `sm`, `md`, `lg` props.
+
+3. **Navegación entre semanas**:
+   - Mantener botones "Semana anterior / Siguiente" (igual que actual).
+   - `offsetWeeks` sigue siendo prop.
+
+4. **Indicadores visuales**:
+   - Color verde claro para horas marcadas (igual que actual).
+   - Color amarillo para pendiente (igual que actual).
+   - Hoy: badge o borde diferencial en el card del día de hoy (opcional).
+
+5. **Optimizations**:
+   - `useMemo` para availabilityByCell (reutilizar del code actual).
+   - Evitar re-renders innecesarios con `React.memo` en día individual si necesario.
+
+### Cambios técnicos
+
+**Frontend** (`src/components/`):
+
+- Crear `MobileWeekCalendar.jsx` (copy intelligente desde `WeekCalendar.jsx`).
+- Actualizar `Dashboard.jsx`: reemplazar `<WeekCalendar />` por `<MobileWeekCalendar />` o usar un condicional basado en viewport.
+- Mantener `WeekCalendar.jsx` viejo como fallback o deprecado.
+
+**CSS / Mantine**:
+
+```jsx
+<Container size="100%">
+  <Grid cols={{ xs: 1, sm: 2, md: 3, lg: 3 }} spacing="md">
+    {days.map((day) => (
+      <Grid.Col key={day}>
+        <Card shadow="sm" p="md">
+          <Text fw={700}>{day.toLocaleDateString('es-ES', ...)}</Text>
+          {/* Horas grid vertical */}
+          <Stack spacing="xs">
+            {hours.map((hour) => (
+              <DayHourCell key={hour} ... />
+            ))}
+          </Stack>
+        </Card>
+      </Grid.Col>
+    ))}
+  </Grid>
+</Container>
+```
+
+### Ejemplo de flujo
+
+1. Usuario abre `/dashboard` en móvil.
+2. Ve 1 card por fila (Lunes, Martes, ..., Domingo).
+3. Scrollea **verticalmente** para ver todas las horas del día.
+4. Cliquea un slot para togglear disponibilidad.
+5. en desktop: ve 2-3 cards por fila sin scroll horizontal.
+6. Botón "Semana anterior / Siguiente" funciona igual (offset weeks).
+
+### Criterios de aceptación
+
+- [ ] `MobileWeekCalendar` renderiza 7 cards (uno por día).
+- [ ] Cada card contiene 16 horas (8-23) clickeables.
+- [ ] En móvil (<768px) 1 card/fila, full width.
+- [ ] En tablet 2 cards/fila.
+- [ ] En desktop 3 cards/fila.
+- [ ] Scroll horizontal DESAPARECE.
+- [ ] Toggle de horas funciona igual que antes (optimistic update, backend sync).
+- [ ] Navegación de semanas (botones prev/next) funciona.
+- [ ] Performance: no hay lag en scroll o toggle.
+- [ ] Checklist de regresión pasa: crear, eliminar, refresco, dominio filters OK.
+
+### Estimación
+
+- Análisis + prototipo: 1-2 horas.
+- Implementar `MobileWeekCalendar.jsx`: 2-3 horas.
+- Responsive design (CSS/Grid): 1 hora.
+- Testing + ajustes: 1-2 horas.
+- **Total: 6-8 horas**.
+
+### Notas
+
+- Considerar mantener `WeekCalendar.jsx` viejo como fallback para compatibilidad o deprecarlo con warning.
+- Si hay commit viejo con minicalendario, revisar ese código como referencia (estructura, helpers útiles).
+- Considerar agregar swipe gesture para navegar semanas en móvil (mejora UX, no bloqueante para MVP).
 ## Disponibilidad App – Documentación funcional para IA (estado real)
 
 Última actualización: 2026-03-24
@@ -284,6 +467,14 @@ Objetivo: control fino del acceso por dominio a módulos específicos.
 - Ver sección "11) Sprint: Políticas de dominio (granular por módulo)" para requerimientos completos.
 - Estimación: 5-8 horas.
 - Prerequisito: Sprints A, B, C completados.
+
+### Sprint E (UX móvil: rediseño de calendario de disponibilidades)
+
+Objetivo: optimizar el calendario de disponibilidades para dispositivos móviles.
+
+- Ver sección "12) Sprint: Rediseño de calendario para móvil" para requerimientos completos.
+- Estimación: 6-8 horas.
+- Prerequisito: Ninguno (independiente, puede hacerse en paralelo).
 
 ---
 
