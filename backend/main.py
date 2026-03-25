@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import base64
 import csv
 import io
+import importlib
 import json
 import os
 import secrets
@@ -1214,6 +1215,41 @@ def _send_census_email_via_resend(email_to: str, csv_content: str):
         print(f"⚠️ {msg}")
         return False, msg
 
+    attachment_b64 = base64.b64encode(csv_content.encode("utf-8")).decode("ascii")
+
+    resend_module = None
+    try:
+        resend_module = importlib.import_module("resend")
+    except Exception:
+        resend_module = None
+
+    if resend_module is not None:
+        try:
+            resend_module.api_key = resend_api_key
+            payload = {
+                "from": resend_from,
+                "to": [email_to],
+                "subject": "Nueva respuesta de censo",
+                "html": "<p>Adjunto se incluye una nueva respuesta del formulario de censo.</p>",
+                "attachments": [
+                    {
+                        "filename": "respuesta_censo.csv",
+                        "content": attachment_b64,
+                    }
+                ],
+            }
+
+            response = resend_module.Emails.send(payload)
+            print(
+                "✅ Email de censo enviado por Resend SDK",
+                {
+                    "response": str(response)[:500],
+                },
+            )
+            return True, "ok"
+        except Exception as exc:
+            print(f"⚠️ Resend SDK falló, usando fallback HTTP: {exc}")
+
     payload = {
         "from": resend_from,
         "to": [email_to],
@@ -1222,7 +1258,7 @@ def _send_census_email_via_resend(email_to: str, csv_content: str):
         "attachments": [
             {
                 "filename": "respuesta_censo.csv",
-                "content": base64.b64encode(csv_content.encode("utf-8")).decode("ascii"),
+                "content": attachment_b64,
             }
         ],
     }

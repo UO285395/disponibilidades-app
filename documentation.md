@@ -42,6 +42,8 @@ Variables:
 
 Comportamiento implementado:
 
+- El backend usa el SDK oficial de Resend para Python (`import resend`) cuando está disponible.
+- Si el SDK falla por dependencia o error runtime, hace fallback automático a llamada HTTPS directa a la API de Resend.
 - Si `CENSUS_EMAIL_PROVIDER=resend`, el backend usa siempre Resend.
 - Si no se define `CENSUS_EMAIL_PROVIDER` pero existe `RESEND_API_KEY`, el backend autodetecta Resend.
 - El CSV se adjunta en base64 al email enviado por API HTTPS.
