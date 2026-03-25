@@ -223,6 +223,10 @@ class CensusConfigCreate(BaseModel):
     email_to: str
     fields: list[CensusFieldCreate]
 
+
+class CensusTestEmailRequest(BaseModel):
+    email_to: str | None = None
+
 class DomainPolicyCreate(BaseModel):
     domain: str
     events_enabled: bool = True
@@ -1506,6 +1510,7 @@ def regenerate_census_token(
 
 @app.post("/admin/census/test-email")
 def test_census_email(
+    data: CensusTestEmailRequest | None = Body(default=None),
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
     db: Session = Depends(get_db)
 ):
@@ -1519,16 +1524,20 @@ def test_census_email(
     if not config:
         raise HTTPException(404, "No hay configuración de censo")
 
+    target_email = (data.email_to.strip() if data and data.email_to else config.email_to.strip())
+    if not target_email:
+        raise HTTPException(400, "Email destino obligatorio")
+
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Prueba", "Fecha"])
     writer.writerow(["Test SMTP", datetime.utcnow().isoformat()])
 
-    ok, message = _send_census_email(config.email_to, output.getvalue())
+    ok, message = _send_census_email(target_email, output.getvalue())
     if not ok:
         raise HTTPException(500, message)
 
-    return {"ok": True, "message": "Email de prueba enviado"}
+    return {"ok": True, "message": "Email de prueba enviado", "email_to": target_email}
 
 
 @app.get("/censo/{token}/fields")

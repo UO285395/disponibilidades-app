@@ -119,11 +119,16 @@ export default function AdminCensus() {
   }
 
   async function testEmail() {
+    if (!emailTo.trim()) {
+      setTestMessage("Error al enviar email de prueba: indica un email destinatario.");
+      return;
+    }
+
     try {
       setTestingEmail(true);
       setTestMessage("");
-      await adminAPI.testCensusEmail();
-      setTestMessage("Email de prueba enviado correctamente.");
+      const result = await adminAPI.testCensusEmail({ email_to: emailTo.trim() });
+      setTestMessage(`Email de prueba enviado correctamente a ${result?.email_to || emailTo.trim()}.`);
     } catch (e) {
       console.error("Error enviando email de prueba", e);
       setTestMessage(`Error al enviar email de prueba: ${e?.message || "desconocido"}`);
