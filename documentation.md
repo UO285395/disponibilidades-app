@@ -628,3 +628,58 @@ class DomainPolicy(Base):
 - **Total: 5-8 horas**.
 
 **Prioridad recomendada**: Tras fijar hardening (Sprint A) y inconsistencias funcionales (Sprint B).
+
+---
+
+## 13) Nuevas funcionalidades (acompañantes y censo)
+
+### 13.1 Acompañantes por evento
+
+**Estado**: En integración (backend y dashboard usuario implementados).
+
+**Objetivo funcional**:
+
+- Cada evento del dashboard de usuario incluye un botón para gestionar acompañantes.
+- Los acompañantes se vinculan al par `usuario-evento`.
+- El cálculo de asistentes incluye votos `sí` + acompañantes.
+
+**Implementado actualmente**:
+
+- Backend:
+  - Modelo `EventCompanion` persistente.
+  - `GET /my-event-companions` para recuperar acompañantes del usuario.
+  - `PUT /events/{event_id}/companions/my` para crear/editar acompañantes.
+  - `GET /events` devuelve `companions_total` y `attendees_total`.
+  - Borrado en cascada lógica al eliminar evento o usuario.
+- Frontend:
+  - Botón "Acompañantes" en cada tarjeta de evento (`EventsSection`).
+  - Modal para definir cantidad (0-20).
+  - Visualización de asistentes totales por evento.
+
+**Reglas aplicadas**:
+
+- Solo se permiten acompañantes si el usuario votó `sí` en ese evento.
+- Rango permitido: `0..20` acompañantes por usuario/evento.
+
+**Pendiente para cierre de esta parte**:
+
+- Pruebas funcionales en entorno desplegado.
+- Ajuste de copy/UX en modal según feedback.
+
+### 13.2 Censo por URL oculta y envío CSV por correo
+
+**Estado**: Definición aprobada, pendiente de implementación.
+
+**Objetivo funcional**:
+
+- Ruta de censo accesible solo por URL directa (sin acceso desde navegación frontend).
+- Formulario dinámico configurable por superadmin.
+- Envío por correo en CSV a una dirección configurable por superadmin.
+- Respuestas del censo **no persistidas** en base de datos.
+
+**Alcance previsto**:
+
+- Nueva pestaña "Censo" en panel de superadmin para:
+  - Definir campos del formulario dinámico.
+  - Definir correo destinatario de envíos.
+- Endpoint de envío que valida, genera CSV en memoria y envía email.

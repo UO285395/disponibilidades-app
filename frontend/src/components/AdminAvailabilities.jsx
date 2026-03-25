@@ -91,7 +91,7 @@ export default function AdminAvailabilities() {
 
       {/* Filtro por código */}
       <TextInput
-        placeholder="Filtrar por colectivo (código del email)"
+        placeholder="Filtrar por colectivo"
         value={filterCode}
         onChange={(e) => setFilterCode(e.target.value)}
         mb="lg"
@@ -123,7 +123,7 @@ export default function AdminAvailabilities() {
 
       {filtered.map((r) => (
         <Card key={r.id} shadow="sm" p="md" mb="sm">
-          <b>{r.user}</b> ({r.email})
+          <b>{r.user}</b>
           <br />
           {r.date} — {r.start_time} a {r.end_time}
         </Card>

@@ -111,7 +111,7 @@ export default function AdminEvents() {
           mb="sm"
         />
         <TextInput
-          label="Colectivo permitido (parte después de @)"
+          label="Colectivo (parte después de @)"
           description="Dejar vacío o escribir 'Todos' para evento general."
           value={allowedDomain}
           onChange={(e) => setAllowedDomain(e.target.value)}
@@ -137,7 +137,7 @@ export default function AdminEvents() {
             <div><b>{ev.title}</b> — {ev.date}</div>
             {ev.allowed_domain && (
               <p style={{ margin: '4px 0', color: '#555' }}>
-                Dominio asignado: <strong>{ev.allowed_domain}</strong>
+                Colectivo: <strong>{ev.allowed_domain}</strong>
               </p>
             )}
             {ev.description && <p>{ev.description}</p>}
@@ -147,6 +147,8 @@ export default function AdminEvents() {
               <b>Resumen de votos:</b>
               <div>Sí: {ev.yes_count ?? 0}</div>
               <div>No: {ev.no_count ?? 0}</div>
+              <div>+ Simpas: {ev.companions_total ?? 0}</div>
+              <div>Asistencia total: {(ev.yes_count ?? 0) + (ev.companions_total ?? 0)}</div>
             </div>
 
             <Group mt="sm">

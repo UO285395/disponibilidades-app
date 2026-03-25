@@ -74,7 +74,7 @@ export default function AdminDashboard() {
           {canSpaces && <Tabs.Tab value="spaces">Espacios</Tabs.Tab>}
           {canUsers && <Tabs.Tab value="users">Usuarios</Tabs.Tab>}
           {canDomainPolicies && (
-            <Tabs.Tab value="domain-policies">Políticas de dominio</Tabs.Tab>
+            <Tabs.Tab value="domain-policies">Políticas de colectivo</Tabs.Tab>
           )}
         </Tabs.List>
 
@@ -111,7 +111,7 @@ export default function AdminDashboard() {
 
       {!defaultTab && (
         <Box mt="xl">
-          <Text c="dimmed">Tu dominio no tiene módulos de administración habilitados.</Text>
+          <Text c="dimmed">Tu colectivo no tiene módulos de administración habilitados.</Text>
         </Box>
       )}
     </Box>

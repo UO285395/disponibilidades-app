@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { adminAPI } from "../api/adminApi.js";
-import { Card, Title, Text, Button, Box } from "@mantine/core";
+import { Card, Title, Text, Button, Box, TextInput } from "@mantine/core";
 
 // ========================================
 // Función para resumen de votos
@@ -42,6 +42,7 @@ export default function AdminEventResponses() {
   const { id } = useParams();
   const [responses, setResponses] = useState([]);
   const [eventName, setEventName] = useState("");
+  const [filterDomain, setFilterDomain] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -67,7 +68,18 @@ export default function AdminEventResponses() {
     };
   }, [id]);
 
-  const { si, no } = resumirVotos(responses);
+  const filteredResponses = useMemo(() => {
+    const domainSearch = filterDomain.trim().toLowerCase();
+    if (!domainSearch) return responses;
+
+    return responses.filter((r) => {
+      const domain = String(r.user_domain || "").toLowerCase();
+      return domain.includes(domainSearch);
+    });
+  }, [responses, filterDomain]);
+
+  const { si, no } = resumirVotos(filteredResponses);
+  const simpas = filteredResponses.reduce((acc, r) => acc + Number(r.companions_count || 0), 0);
 
   return (
     <Box p="lg">
@@ -79,6 +91,13 @@ export default function AdminEventResponses() {
         Respuestas del evento {eventName || "(cargando...)"}
       </Title>
 
+      <TextInput
+        placeholder="Filtrar por colectivo"
+        value={filterDomain}
+        onChange={(e) => setFilterDomain(e.target.value)}
+        mb="lg"
+      />
+
       {/* ========================================
           RESUMEN DE VOTOS
          ======================================== */}
@@ -86,17 +105,24 @@ export default function AdminEventResponses() {
         <Title order={4} mb="sm">Resumen de votos</Title>
         <Text><b>Sí:</b> {si}</Text>
         <Text><b>No:</b> {no}</Text>
+        <Text><b>+ Simpas:</b> {simpas}</Text>
       </Card>
 
-      {responses.length === 0 && (
+      {filteredResponses.length === 0 && (
         <Text>No hay respuestas todavía.</Text>
       )}
 
-      {responses.map((r, idx) => (
+      {filteredResponses.map((r, idx) => (
         <Card key={r.user_id ?? idx} mt="md" shadow="sm" p="lg">
           <Text fw={600}>{r.user_full_name}</Text>
+          <Text c="dimmed" size="sm">
+            Colectivo: {r.user_domain || "-"}
+          </Text>
           <Text>
             <b>Respuesta:</b> {formatRespuesta(r.answer)}
+          </Text>
+          <Text>
+            <b>+ Simpas:</b> {r.companions_count ?? 0}
           </Text>
           {r.justification && (
             <Text>

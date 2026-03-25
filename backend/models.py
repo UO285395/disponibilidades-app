@@ -74,6 +74,18 @@ class EventResponse(Base):
     user = relationship("User", back_populates="responses")
 
 
+class EventCompanion(Base):
+    __tablename__ = "event_companions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    count = Column(Integer, nullable=False, default=0)
+
+    event = relationship("Event")
+    user = relationship("User")
+
+
 class Space(Base):
     __tablename__ = "spaces"
 

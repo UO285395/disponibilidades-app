@@ -8,7 +8,7 @@ from passlib.context import CryptContext
 from datetime import datetime, timedelta
 
 import models
-from models import User, Availability, Event, EventResponse
+from models import User, Availability, Event, EventResponse, EventCompanion
 from database import SessionLocal, engine
 
 
@@ -190,6 +190,10 @@ class EventCreate(BaseModel):
 class EventResponseCreate(BaseModel):
     answer: str
     justification: str | None
+
+
+class EventCompanionUpdate(BaseModel):
+    count: int
 
 class DomainPolicyCreate(BaseModel):
     domain: str
@@ -386,6 +390,7 @@ def admin_delete_user(
 
     event_ids = [event.id for event in db.query(Event).filter(Event.created_by == user_id).all()]
     if event_ids:
+        db.query(EventCompanion).filter(EventCompanion.event_id.in_(event_ids)).delete(synchronize_session=False)
         db.query(EventResponse).filter(EventResponse.event_id.in_(event_ids)).delete(synchronize_session=False)
         db.query(Event).filter(Event.id.in_(event_ids)).delete(synchronize_session=False)
 
@@ -395,6 +400,7 @@ def admin_delete_user(
         db.query(models.Space).filter(models.Space.id.in_(space_ids)).delete(synchronize_session=False)
 
     db.query(EventResponse).filter(EventResponse.user_id == user_id).delete(synchronize_session=False)
+    db.query(EventCompanion).filter(EventCompanion.user_id == user_id).delete(synchronize_session=False)
     db.query(Availability).filter(Availability.user_id == user_id).delete(synchronize_session=False)
     db.query(models.SpaceReservation).filter(models.SpaceReservation.user_id == user_id).delete(synchronize_session=False)
 
@@ -683,6 +689,14 @@ def list_events(
             .count()
         )
 
+        companions_total = (
+            db.query(func.coalesce(func.sum(EventCompanion.count), 0))
+            .filter(EventCompanion.event_id == e.id)
+            .scalar()
+        ) or 0
+
+        attendees_total = yes_count + companions_total
+
         result.append(
             {
                 "id": e.id,
@@ -695,6 +709,8 @@ def list_events(
                 "allowed_domain": e.allowed_domain,
                 "yes_count": yes_count,
                 "no_count": no_count,
+                "companions_total": companions_total,
+                "attendees_total": attendees_total,
             }
         )
 
@@ -730,6 +746,7 @@ def get_event(
 @app.get("/events/{event_id}/responses")
 def event_responses(
     event_id: int,
+    domain: str | None = None,
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
     db: Session = Depends(get_db)
 ):
@@ -758,6 +775,8 @@ def event_responses(
     results = []
     for r, u in resp:
         responder_domain = _get_domain(u.email)
+        if domain and responder_domain != domain.strip().lower():
+            continue
 
         if user.role == "superadmin":
             pass
@@ -768,11 +787,24 @@ def event_responses(
             if responder_domain != user_domain:
                 continue
 
+        companion_count = (
+            db.query(EventCompanion.count)
+            .filter(
+                EventCompanion.event_id == event_id,
+                EventCompanion.user_id == u.id,
+            )
+            .scalar()
+        ) or 0
+
+        display_domain = u.email.split("@")[-1].strip() if "@" in u.email else ""
+
         results.append({
             "user_id": u.id,
             "user_full_name": u.full_name,
+            "user_domain": display_domain,
             "answer": r.answer,
             "justification": r.justification,
+            "companions_count": companion_count,
         })
 
     return results
@@ -832,6 +864,87 @@ def my_event_responses(
                    .all()
     ]
 
+
+@app.get("/my-event-companions")
+def my_event_companions(
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    user = get_user_from_token(cred.credentials, db)
+
+    items = (
+        db.query(EventCompanion)
+        .filter(EventCompanion.user_id == user.id)
+        .all()
+    )
+
+    return [
+        {
+            "event_id": item.event_id,
+            "count": int(item.count or 0),
+        }
+        for item in items
+    ]
+
+
+@app.put("/events/{event_id}/companions/my")
+def update_my_event_companions(
+    event_id: int,
+    data: EventCompanionUpdate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    user = get_user_from_token(cred.credentials, db)
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(404, "Evento no encontrado")
+
+    _ensure_event_domain_access(user, event)
+
+    if data.count < 0:
+        raise HTTPException(400, "El número de acompañantes no puede ser negativo")
+    if data.count > 20:
+        raise HTTPException(400, "Máximo 20 acompañantes por usuario y evento")
+
+    response = (
+        db.query(EventResponse)
+        .filter(
+            EventResponse.event_id == event_id,
+            EventResponse.user_id == user.id,
+            func.lower(EventResponse.answer).in_(["si", "yes"]),
+        )
+        .first()
+    )
+
+    if not response:
+        raise HTTPException(400, "Debes votar 'Sí' antes de añadir acompañantes")
+
+    item = (
+        db.query(EventCompanion)
+        .filter(
+            EventCompanion.event_id == event_id,
+            EventCompanion.user_id == user.id,
+        )
+        .first()
+    )
+
+    if data.count == 0:
+        if item:
+            db.delete(item)
+            db.commit()
+        return {"ok": True, "event_id": event_id, "count": 0}
+
+    if item:
+        item.count = data.count
+    else:
+        item = EventCompanion(event_id=event_id, user_id=user.id, count=data.count)
+        db.add(item)
+
+    db.commit()
+
+    return {"ok": True, "event_id": event_id, "count": int(item.count)}
+
 @app.delete("/events/{event_id}")
 def delete_event(
     event_id: int,
@@ -848,6 +961,10 @@ def delete_event(
     _ensure_event_domain_access(admin, ev)
 
     # borrar primero respuestas asociadas
+    db.query(EventCompanion)\
+            .filter(EventCompanion.event_id == event_id)\
+            .delete(synchronize_session=False)
+
     db.query(EventResponse)\
       .filter(EventResponse.event_id == event_id)\
       .delete(synchronize_session=False)

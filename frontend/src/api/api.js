@@ -84,6 +84,14 @@ export const eventsAPI = {
 
   myResponses() {
     return request("/my-event-responses");
+  },
+
+  myCompanions() {
+    return request("/my-event-companions");
+  },
+
+  updateMyCompanions(event_id, count) {
+    return request(`/events/${event_id}/companions/my`, "PUT", { count });
   }
 };
 
