@@ -116,7 +116,12 @@ export default function Dashboard() {
                 <Text size="sm" c="dimmed" mb="md">
                   Haz clic en las celdas para marcar o desmarcar tu disponibilidad por horas.
                 </Text>
+
+                {user.role === "user" ? (
                   <MobileWeekCalendar offsetWeeks={offsetWeeks} />
+                ) : (
+                  <WeekCalendar offsetWeeks={offsetWeeks} />
+                )}
               </Card>
             </Tabs.Panel>
           )}

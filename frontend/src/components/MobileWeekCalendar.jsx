@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Badge, Card, Group, SimpleGrid, Stack, Text } from "@mantine/core";
+import { Badge, Card, Group, SimpleGrid, Text } from "@mantine/core";
 import { availabilityAPI } from "../api/api.js";
 
 function startOfWeek(date) {
@@ -167,7 +167,7 @@ export default function MobileWeekCalendar({ offsetWeeks = 0 }) {
   return (
     <Card shadow="md" p="lg" radius="md">
       <Text size="sm" c="dimmed" mb="md">
-        Los días anteriores a hoy aparecen bloqueados y no admiten votos de disponibilidad.
+        Pulsa una franja para marcar o desmarcar disponibilidad. Los días anteriores a hoy aparecen bloqueados.
       </Text>
 
       <SimpleGrid cols={{ base: 1, sm: 2, xl: 3 }} spacing="md">
@@ -196,63 +196,52 @@ export default function MobileWeekCalendar({ offsetWeeks = 0 }) {
                     })}
                   </Text>
                   <Text size="xs" c="dimmed">
-                    {expired ? "Día vencido" : "Selecciona tus franjas disponibles"}
+                    {expired ? "Día vencido" : "Selecciona franjas"}
                   </Text>
                 </div>
                 {expired && <Badge color="gray">Vencido</Badge>}
               </Group>
 
-              <Stack gap="xs">
-                {hours.map((hour) => {
-                  const key = `${date}-${hour}`;
-                  const active = isAvailable(date, hour);
-                  const pending = pendingKeys.has(key);
-                  const disabled = expired || pending;
+              {!expired && (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                    gap: 8,
+                  }}
+                >
+                  {hours.map((hour) => {
+                    const key = `${date}-${hour}`;
+                    const active = isAvailable(date, hour);
+                    const pending = pendingKeys.has(key);
+                    const disabled = pending;
 
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => !disabled && toggleCell(date, hour)}
-                      disabled={disabled}
-                      style={{
-                        width: "100%",
-                        border: "1px solid #d0d7de",
-                        borderRadius: 12,
-                        padding: "12px 14px",
-                        textAlign: "left",
-                        background: expired
-                          ? "#f1f3f5"
-                          : pending
-                          ? "#ffeaa7"
-                          : active
-                          ? "#abf5d1"
-                          : "#ffffff",
-                        color: expired ? "#868e96" : "#1f2328",
-                        cursor: disabled ? "not-allowed" : "pointer",
-                        opacity: pending ? 0.75 : 1,
-                      }}
-                    >
-                      <Group justify="space-between" wrap="nowrap">
-                        <div>
-                          <Text fw={600} size="sm">
-                            {pad2(hour)}:00 - {pad2(hour + 1)}:00
-                          </Text>
-                          <Text size="xs" c={expired ? "gray" : "dimmed"}>
-                            {expired
-                              ? "No disponible por fecha vencida"
-                              : active
-                              ? "Marcada como disponible"
-                              : "Pulsa para marcar disponibilidad"}
-                          </Text>
-                        </div>
-                        {!expired && active && <Badge color="green">Activa</Badge>}
-                        {!expired && pending && <Badge color="yellow">Guardando</Badge>}
-                      </Group>
-                    </button>
-                  );
-                })}
-              </Stack>
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => !disabled && toggleCell(date, hour)}
+                        disabled={disabled}
+                        style={{
+                          border: pending ? "1px solid #f08c00" : active ? "1px solid #2f9e44" : "1px solid #d0d7de",
+                          borderRadius: 10,
+                          minHeight: 48,
+                          padding: "8px 4px",
+                          textAlign: "center",
+                          background: pending ? "#ffeaa7" : active ? "#abf5d1" : "#ffffff",
+                          color: "#1f2328",
+                          cursor: disabled ? "not-allowed" : "pointer",
+                          opacity: pending ? 0.75 : 1,
+                          fontSize: 12,
+                          fontWeight: 600,
+                        }}
+                      >
+                        {pad2(hour)}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </Card>
           );
         })}

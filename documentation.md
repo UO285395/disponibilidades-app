@@ -8,7 +8,7 @@ Políticas de dominio:
 
 ## 12) Sprint: Rediseño de calendario de disponibilidades para móvil
 
-**Estado**: Implementado para usuario estándar. Admin y superadmin mantienen temporalmente el calendario tabular actual.
+**Estado**: Implementado para todos los usuarios.
 
 **Problema actual**: 
 
@@ -18,8 +18,7 @@ El calendario de disponibilidades (`WeekCalendar.jsx`) es una tabla 7 días x 16
 
 **Implementación actual**:
 
-- Usuario estándar: usa minicalendarios verticales por día.
-- Admin y superadmin en su dashboard de usuario: mantienen el calendario tabular existente.
+- Usuarios estándar, admin y superadmin: usan minicalendarios verticales por día.
 - Las restricciones de días vencidos se conservan en el nuevo calendario.
 
 ### Opciones de diseño propuestas
