@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Card, Button, TextInput, Title, Textarea, Text } from "@mantine/core";
+import { Card, Button, TextInput, Title, Textarea, Text, Group } from "@mantine/core";
 import { adminAPI } from "../api/adminApi.js";
 import { useNavigate } from "react-router-dom";
 
