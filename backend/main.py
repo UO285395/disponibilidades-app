@@ -1168,6 +1168,29 @@ def _with_forced_ipv4_resolution(callback):
         socket.getaddrinfo = original_getaddrinfo
 
 
+def _smtp_attempt_send(smtp_host: str, smtp_port: int, smtp_user: str, smtp_password: str, msg, use_ssl: bool, use_tls: bool):
+    if use_ssl:
+        print(f"ℹ️ Conectando por SMTP_SSL a {smtp_host}:{smtp_port}")
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15) as server:
+            print("ℹ️ SMTP login iniciado (SSL)")
+            server.login(smtp_user, smtp_password)
+            print("ℹ️ SMTP login correcto (SSL), enviando mensaje")
+            server.send_message(msg)
+        return
+
+    print(f"ℹ️ Conectando por SMTP a {smtp_host}:{smtp_port}")
+    with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+        server.ehlo()
+        if use_tls:
+            print("ℹ️ Iniciando STARTTLS")
+            server.starttls()
+            server.ehlo()
+        print("ℹ️ SMTP login iniciado")
+        server.login(smtp_user, smtp_password)
+        print("ℹ️ SMTP login correcto, enviando mensaje")
+        server.send_message(msg)
+
+
 def _send_census_email(email_to: str, csv_content: str):
     smtp_host = _env_str("SMTP_HOST", "")
     smtp_port_raw = _env_str("SMTP_PORT", "587")
@@ -1224,39 +1247,56 @@ def _send_census_email(email_to: str, csv_content: str):
     )
     msg.attach(attachment)
 
-    def do_send():
-        if smtp_use_ssl:
-            print(f"ℹ️ Conectando por SMTP_SSL a {smtp_host}:{smtp_port}")
-            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15) as server:
-                print("ℹ️ SMTP login iniciado (SSL)")
-                server.login(smtp_user, smtp_password)
-                print("ℹ️ SMTP login correcto (SSL), enviando mensaje")
-                server.send_message(msg)
-        else:
-            print(f"ℹ️ Conectando por SMTP a {smtp_host}:{smtp_port}")
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-                server.ehlo()
-                if smtp_use_tls:
-                    print("ℹ️ Iniciando STARTTLS")
-                    server.starttls()
-                    server.ehlo()
-                print("ℹ️ SMTP login iniciado")
-                server.login(smtp_user, smtp_password)
-                print("ℹ️ SMTP login correcto, enviando mensaje")
-                server.send_message(msg)
+    attempts = [
+        {
+            "port": smtp_port,
+            "use_ssl": smtp_use_ssl,
+            "use_tls": smtp_use_tls,
+            "label": "configured",
+        }
+    ]
 
-    try:
-        if smtp_force_ipv4:
-            _with_forced_ipv4_resolution(do_send)
-        else:
-            do_send()
+    is_gmail = smtp_host.strip().lower() in {"smtp.gmail.com", "smtp.googlemail.com"}
+    if is_gmail:
+        if smtp_port != 465 or not smtp_use_ssl:
+            attempts.append({"port": 465, "use_ssl": True, "use_tls": False, "label": "gmail-ssl-fallback"})
+        if smtp_port != 587 or smtp_use_ssl or not smtp_use_tls:
+            attempts.append({"port": 587, "use_ssl": False, "use_tls": True, "label": "gmail-starttls-fallback"})
 
-        print(f"✅ Email de censo enviado a {email_to}")
-        return True, "ok"
-    except Exception as e:
-        error = f"Error enviando email de censo: {e}"
-        print(f"⚠️ {error}")
-        return False, error
+    last_error = None
+    for attempt in attempts:
+        print("ℹ️ SMTP attempt:", attempt)
+
+        def do_send():
+            _smtp_attempt_send(
+                smtp_host=smtp_host,
+                smtp_port=attempt["port"],
+                smtp_user=smtp_user,
+                smtp_password=smtp_password,
+                msg=msg,
+                use_ssl=attempt["use_ssl"],
+                use_tls=attempt["use_tls"],
+            )
+
+        try:
+            if smtp_force_ipv4:
+                _with_forced_ipv4_resolution(do_send)
+            else:
+                do_send()
+
+            print(f"✅ Email de censo enviado a {email_to}")
+            return True, "ok"
+        except Exception as e:
+            last_error = e
+            print(f"⚠️ SMTP attempt failed ({attempt['label']}): {e}")
+
+            error_text = str(e).lower()
+            if "timed out" not in error_text and "network is unreachable" not in error_text:
+                break
+
+    error = f"Error enviando email de censo: {last_error}"
+    print(f"⚠️ {error}")
+    return False, error
 
 
 def _send_census_email_async(email_to: str, csv_content: str):

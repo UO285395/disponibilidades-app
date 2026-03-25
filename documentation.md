@@ -43,6 +43,9 @@ Compatibilidad implementada:
 
 - Si Railway quedó configurado con `smtp_host`, `smtp_user`, etc., el backend también las leerá.
 - El backend puede forzar resolución IPv4 para SMTP (`SMTP_FORCE_IPV4=true`) para evitar fallos de conectividad IPv6 en cloud.
+- Para Gmail, el backend intenta primero la configuración indicada y, si hay `timeout` o `network is unreachable`, prueba automáticamente el modo alternativo:
+  - `587 + STARTTLS`
+  - `465 + SSL`
 
 ### Logs diagnósticos SMTP que deben aparecer
 
@@ -97,6 +100,7 @@ Sin exponer secretos, backend registra:
   - Causa probable: el contenedor no tiene salida válida hacia la ruta SMTP resuelta (muy frecuente con resolución IPv6 en entornos cloud).
   - Fix aplicado en código:
     - resolución SMTP con preferencia/fuerza IPv4 mediante `SMTP_FORCE_IPV4=true`.
+    - fallback automático entre `587/TLS` y `465/SSL` para Gmail.
   - Si persiste, la causa probable pasa a ser restricción de salida del proveedor o bloqueo de SMTP saliente.
 
 
