@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   TextInput,
   PasswordInput,
@@ -11,13 +12,14 @@ import { authAPI } from "../api/api.js";
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const navigate = useNavigate();
 
   async function handleLogin(e) {
     e.preventDefault(); // evita recarga al pulsar Enter
 
     try {
       await authAPI.login(email, password);
-      window.location = "/dashboard";
+      navigate("/dashboard", { replace: true });
     } catch (e) {
       alert("Error: " + e.message);
     }
