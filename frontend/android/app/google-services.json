@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "28700623716",
+    "project_id": "disponibilidad-app-b4c60",
+    "storage_bucket": "disponibilidad-app-b4c60.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:28700623716:android:d391038856baa9d92e3071",
+        "android_client_info": {
+          "package_name": "com.uo285395.disponibilidad"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAcrtaLWVm6Rjmz_ZmQbtQPYnkPXd_U6Qs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
