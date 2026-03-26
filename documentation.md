@@ -1022,3 +1022,56 @@ Objetivo: validar recepción real de notificaciones en Android y envío desde ba
   - Revisar permiso de notificaciones del sistema Android para la app.
 4. Token cambia tras reinstalar:
   - Esperado; el backend ya actualiza token por registro.
+
+### 14.6 Guía corta para cada modificación (Railway + APK manual)
+
+Usar este flujo siempre que se cambie backend, frontend o ambos.
+
+#### 1) Cambios de backend (Railway)
+
+1. Subir rama y desplegar en Railway.
+2. Revisar variables de entorno nuevas/modificadas (por ejemplo `FCM_SERVER_KEY`).
+3. Validar salud del backend tras deploy:
+  - `/openapi.json` responde 200.
+  - Endpoints nuevos responden sin 5xx.
+
+#### 2) Cambios de frontend web
+
+1. En `frontend/`, instalar dependencias:
+  - En PowerShell de Windows usar `npm.cmd install`.
+2. Generar build web:
+  - `npm.cmd run build`
+3. Verificar navegación básica en navegador (login, dashboard, admin).
+
+#### 3) Cambios que afectan APK (Capacitor Android)
+
+Regla: si cambias cualquier archivo de `frontend/src` o dependencias del frontend, hay que regenerar APK.
+
+1. Compilar y sincronizar Android:
+  - `npm.cmd run build:mobile`
+  - `npm.cmd run cap:sync android`
+2. Abrir Android Studio:
+  - `npm.cmd run cap:open`
+3. Generar APK firmado y distribuir manualmente a usuarios.
+
+#### 4) Orden recomendado de publicación
+
+1. Primero desplegar backend en Railway.
+2. Después generar APK con el frontend actualizado.
+3. Distribuir APK y ejecutar smoke test en móvil real.
+
+#### 5) Conflicto de paquetes (resolución rápida)
+
+Si falla `npm install` o aparece conflicto de dependencias:
+
+1. Confirmar versión de Node compatible (`>=20.19.0`).
+2. En Windows PowerShell usar `npm.cmd` (evita bloqueo de `npm.ps1`).
+3. Limpiar e instalar de cero en `frontend/`:
+  - borrar `node_modules`
+  - borrar `package-lock.json` solo si el lock está corrupto o conflictivo
+  - `npm.cmd install`
+4. Verificar:
+  - `npm.cmd run build`
+  - `npm.cmd run cap:sync android`
+
+Nota: en este sprint se actualizó el lockfile de frontend y se validó build web + sync Android tras la actualización.
