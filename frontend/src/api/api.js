@@ -3,7 +3,8 @@ import { Capacitor } from "@capacitor/core";
 const API_URL = "https://backend-disponibilidad-production.up.railway.app";
 
 const TOKEN_KEY = "token";
-let cachedToken = localStorage.getItem(TOKEN_KEY);
+let cachedToken = null;
+try { cachedToken = localStorage.getItem(TOKEN_KEY); } catch (_) {}
 let preferencesPromise = null;
 
 async function getPreferences() {

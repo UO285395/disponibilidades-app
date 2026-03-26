@@ -27,7 +27,12 @@ export default function App() {
     })();
   }, []);
 
-  if (!ready) return null;
+  if (!ready) return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#fff" }}>
+      <div style={{ width: 40, height: 40, border: "4px solid #ddd", borderTop: "4px solid #339af0", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+      <style>{"@keyframes spin { to { transform: rotate(360deg); } }"}</style>
+    </div>
+  );
 
   return (
     <RouterComponent>
