@@ -2,7 +2,6 @@
   "engines": {
     "node": ">=20.19.0"
   },
-
   "name": "frontend",
   "private": true,
   "version": "0.0.0",
@@ -10,10 +9,17 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:mobile": "vite build && npx cap sync android",
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android",
+    "android": "npm run build:mobile && npm run cap:open",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/android": "^8.3.0",
+    "@capacitor/cli": "^8.3.0",
+    "@capacitor/core": "^8.3.0",
     "@mantine/core": "^8.3.8",
     "@mantine/dates": "^8.3.8",
     "@mantine/hooks": "^8.3.8",
