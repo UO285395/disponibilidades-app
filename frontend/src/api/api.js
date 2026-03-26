@@ -17,17 +17,22 @@ async function getPreferences() {
 }
 
 export async function initializeAuthStorage() {
-  const Preferences = await getPreferences();
-  if (!Preferences) {
-    cachedToken = localStorage.getItem(TOKEN_KEY);
-    return;
-  }
+  try {
+    const Preferences = await getPreferences();
+    if (!Preferences) {
+      cachedToken = localStorage.getItem(TOKEN_KEY);
+      return;
+    }
 
-  const stored = await Preferences.get({ key: TOKEN_KEY });
-  if (stored?.value) {
-    cachedToken = stored.value;
-    localStorage.setItem(TOKEN_KEY, stored.value);
-  } else {
+    const stored = await Preferences.get({ key: TOKEN_KEY });
+    if (stored?.value) {
+      cachedToken = stored.value;
+      localStorage.setItem(TOKEN_KEY, stored.value);
+    } else {
+      cachedToken = localStorage.getItem(TOKEN_KEY);
+    }
+  } catch (error) {
+    console.error("No se pudo inicializar almacenamiento de sesion", error);
     cachedToken = localStorage.getItem(TOKEN_KEY);
   }
 }
