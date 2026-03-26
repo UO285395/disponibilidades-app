@@ -852,3 +852,173 @@ SMTP_PASSWORD=contraseña_o_app_password
 
 - Pruebas funcionales con SMTP real en entorno desplegado.
 - Validación de que el token es suficientemente opaco para la seguridad requerida.
+
+---
+
+## 14) Planificación siguiente Sprint (Móvil: sesión persistente + notificaciones)
+
+**Estado**: En implementación activa en rama móvil. Núcleo backend/frontend integrado; pendiente validación en dispositivo físico y configuración FCM en entorno.
+
+### 14.1 Objetivo A: sesión persistente en app móvil
+
+**Meta funcional**:
+
+- Una vez iniciada sesión en el dispositivo, el usuario no debe autenticarse en cada apertura.
+- La sesión debe mantenerse de forma segura y permitir cierre manual (logout).
+
+**Alcance**:
+
+- Persistencia de token con almacenamiento nativo móvil (Capacitor Preferences).
+- Auto-login al arrancar la app si el token sigue siendo válido.
+- Preparar refresco de token si se implementa endpoint de renovación.
+
+**Tareas técnicas**:
+
+1. Frontend móvil:
+  - Instalar e integrar `@capacitor/preferences`.
+  - Refactorizar `api.js` para lectura/escritura de token desde almacenamiento nativo.
+  - Implementar bootstrap de sesión en `App.jsx`.
+2. Backend (recomendado):
+  - Añadir endpoint de refresh de token para renovar sesiones largas sin re-login.
+
+**Criterios de aceptación**:
+
+- [x] Reabrir app no muestra login si token válido (bootstrap desde almacenamiento nativo + redirección inicial).
+- [x] Logout elimina sesión persistida.
+- [x] Si token no válido, redirección a login sin bucles.
+
+**Estimación**: 1-2 días.
+
+### 14.2 Objetivo B: notificaciones push en móvil
+
+**Meta funcional**:
+
+- Notificar automáticamente cuando se publica un evento.
+- Permitir al superadmin enviar notificaciones personalizadas:
+  - a un usuario concreto,
+  - por colectivo,
+  - global a todos.
+
+**Alcance**:
+
+- Integración push en Android (FCM mediante Capacitor).
+- Registro de tokens de dispositivo por usuario.
+- Envío segmentado desde backend según alcance.
+- UI de administración para componer y enviar notificaciones manuales.
+
+**Tareas técnicas**:
+
+1. Backend:
+  - Crear modelo de tokens de dispositivo (`user_id`, `token`, `platform`, `active`, `updated_at`).
+  - Endpoint de registro/actualización de token desde app móvil.
+  - Endpoint admin para envío manual con `scope` (`user`, `colectivo`, `all`).
+  - Trigger de envío automático al crear evento.
+2. Frontend móvil:
+  - Solicitud de permisos push y registro de token en login/arranque.
+  - Listener para recepción de notificaciones.
+3. Frontend admin:
+  - Formulario de envío manual (título, cuerpo, alcance y destinatarios).
+
+**Reglas funcionales**:
+
+- Superadmin puede enviar a cualquier alcance (individual, colectivo, global).
+- Si el alcance es colectivo, se resuelve por parte después de `@` del usuario.
+- Evitar duplicados de token por usuario/dispositivo.
+
+**Criterios de aceptación**:
+
+- [x] Publicar evento dispara push al público objetivo (backend integrado).
+- [x] Superadmin puede enviar push individual, por colectivo y global.
+- [ ] La app recibe y muestra notificaciones en dispositivo Android real.
+- [x] Registro de tokens robusto ante reinstalaciones/cambios de token.
+
+**Estimación**: 3-5 días.
+
+### 14.3 Orden de implementación recomendado
+
+1. Sesión persistente (14.1).
+2. Registro de tokens push en app + backend.
+3. Notificación automática por creación de evento.
+4. Panel superadmin para envíos manuales segmentados.
+5. Pruebas en dispositivo físico + hardening de errores.
+
+### 14.4 Cambios implementados en este sprint
+
+Backend:
+
+- Endpoint `POST /auth/refresh` para renovar token autenticado.
+- Modelo `DeviceToken` para registrar tokens push por usuario/dispositivo.
+- Endpoint `POST /device-tokens/register` para registro/actualización de token móvil.
+- Endpoint `POST /admin/notifications/send` (solo superadmin) con alcance `all`, `colectivo` y `users`.
+- Trigger de notificación automática al crear evento (`POST /events`).
+
+Frontend:
+
+- Persistencia de sesión móvil en `api.js` con soporte `Capacitor Preferences`.
+- Bootstrap de sesión en `App.jsx` (auto-redirect a dashboard si hay sesión).
+- Refresh automático de token en `Dashboard` y `AdminDashboard` cuando `/me` falla por expiración.
+- Servicio móvil `mobileNotifications.js` para pedir permisos push y registrar token en backend.
+- Nuevo panel superadmin `AdminNotifications.jsx` para envíos manuales segmentados.
+
+Dependencias añadidas:
+
+- `@capacitor/preferences`
+- `@capacitor/push-notifications`
+
+### 14.5 Checklist operativa (15 min) para dejar FCM funcionando
+
+Objetivo: validar recepción real de notificaciones en Android y envío desde backend.
+
+#### A) Configuración Firebase / Android Studio
+
+1. En Firebase Console, crear proyecto (o usar uno existente).
+2. Añadir app Android con `applicationId` igual al `appId` de Capacitor:
+  - `com.uo285395.disponibilidad`
+3. Descargar `google-services.json`.
+4. Copiar `google-services.json` en:
+  - `frontend/android/app/google-services.json`
+5. Abrir `frontend/android` en Android Studio y sincronizar Gradle.
+6. Ejecutar app en dispositivo físico (no solo emulador) con Google Play Services.
+
+#### B) Configuración backend en Railway
+
+1. Definir variable:
+  - `FCM_SERVER_KEY=<legacy_server_key_de_firebase>`
+2. (Opcional) definir:
+  - `FCM_ENDPOINT=https://fcm.googleapis.com/fcm/send`
+3. Redeploy del backend.
+4. Verificar en logs que no aparezca:
+  - `FCM_SERVER_KEY no configurada`
+
+#### C) Configuración frontend móvil
+
+1. Desde `frontend/`:
+  - `npm install`
+  - `npm run cap:sync`
+2. Abrir Android Studio:
+  - `npm run cap:open`
+3. Instalar APK en dispositivo y abrir app.
+4. Iniciar sesión con usuario válido para disparar registro de token.
+
+#### D) Verificaciones funcionales (smoke test)
+
+1. Token registrado:
+  - Al abrir dashboard en móvil, backend recibe `POST /device-tokens/register`.
+2. Notificación automática por evento:
+  - Crear evento desde admin y verificar push en móvil.
+3. Notificación manual superadmin:
+  - En tab Notificaciones, probar `all`, `colectivo`, `users`.
+4. Validar recepción en bandeja Android:
+  - Con app en foreground y background.
+
+#### E) Troubleshooting rápido
+
+1. No llega ninguna push:
+  - Revisar `FCM_SERVER_KEY` en Railway.
+  - Confirmar que el móvil registró token (`/device-tokens/register`).
+2. Llega a algunos usuarios pero no a otros:
+  - Revisar alcance (`scope`) y colectivo enviado.
+3. Error de permisos en móvil:
+  - Revisar permiso de notificaciones del sistema Android para la app.
+4. Token cambia tras reinstalar:
+  - Esperado; el backend ya actualiza token por registro.

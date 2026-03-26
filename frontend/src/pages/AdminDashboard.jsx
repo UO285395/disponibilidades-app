@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Title, Tabs, Box, Button, Group, Text } from "@mantine/core";
-import { userAPI, clearToken } from "../api/api.js";
+import { userAPI, clearToken, authAPI } from "../api/api.js";
 import AdminUsers from "../components/AdminUsers.jsx";
 import AdminEvents from "../components/AdminEvents.jsx";
 import AdminAvailabilitiesCalendar from "../components/AdminAvailabilitiesCalendar.jsx";
 import AdminSpaces from "../components/AdminSpaces.jsx";
 import AdminDomainPolicies from "../components/AdminDomainPolicies.jsx";
 import AdminCensus from "../components/AdminCensus.jsx";
+import AdminNotifications from "../components/AdminNotifications.jsx";
 
 export default function AdminDashboard() {
   const [user, setUser] = useState(null);
@@ -23,8 +24,18 @@ export default function AdminDashboard() {
         }
         setUser(u);
       } catch {
-        clearToken();
-        navigate("/");
+        try {
+          await authAPI.refresh();
+          const u = await userAPI.me();
+          if (u.role !== "admin" && u.role !== "superadmin") {
+            navigate("/dashboard");
+            return;
+          }
+          setUser(u);
+        } catch {
+          clearToken();
+          navigate("/");
+        }
       }
     })();
   }, [navigate]);
@@ -42,6 +53,7 @@ export default function AdminDashboard() {
   const canUsers = user.role === "superadmin" || user.users_enabled;
   const canDomainPolicies = user.role === "superadmin" || user.domain_policies_enabled;
   const canCensus = user.role === "superadmin";
+  const canNotifications = user.role === "superadmin";
 
   const defaultTab = canEvents
     ? "events"
@@ -79,6 +91,7 @@ export default function AdminDashboard() {
             <Tabs.Tab value="domain-policies">Políticas de colectivo</Tabs.Tab>
           )}
           {canCensus && <Tabs.Tab value="censo">Censo</Tabs.Tab>}
+          {canNotifications && <Tabs.Tab value="notifications">Notificaciones</Tabs.Tab>}
         </Tabs.List>
 
         {canUsers && (
@@ -114,6 +127,12 @@ export default function AdminDashboard() {
         {canCensus && (
           <Tabs.Panel value="censo" pt="xl">
             <AdminCensus />
+          </Tabs.Panel>
+        )}
+
+        {canNotifications && (
+          <Tabs.Panel value="notifications" pt="xl">
+            <AdminNotifications />
           </Tabs.Panel>
         )}
       </Tabs>

@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Title, Button, Box, Text, Divider, Group, Tabs, Card } from "@mantine/core";
-import { userAPI, getToken, clearToken } from "../api/api.js";
+import { userAPI, getToken, clearToken, authAPI } from "../api/api.js";
 import MobileWeekCalendar from "../components/MobileWeekCalendar.jsx";
 import EventsSection from "../components/EventsSection.jsx";
 import SpaceReservations from "../components/SpaceReservations.jsx";
+import { initMobileNotifications } from "../services/mobileNotifications.js";
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);
@@ -22,11 +23,24 @@ export default function Dashboard() {
         const u = await userAPI.me();
         setUser(u);
       } catch {
-        clearToken();
-        navigate("/");
+        try {
+          await authAPI.refresh();
+          const u = await userAPI.me();
+          setUser(u);
+        } catch {
+          clearToken();
+          navigate("/");
+        }
       }
     })();
   }, [navigate]);
+
+  useEffect(() => {
+    if (!user) return;
+    initMobileNotifications().catch((e) => {
+      console.error("No se pudo inicializar push móvil", e);
+    });
+  }, [user]);
 
   function logout() {
     clearToken();

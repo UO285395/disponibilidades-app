@@ -105,4 +105,8 @@ export const adminAPI = {
   testCensusEmail(payload = {}) {
     return request("/admin/census/test-email", "POST", payload);
   },
+
+  sendNotification(payload) {
+    return request("/admin/notifications/send", "POST", payload);
+  },
 };

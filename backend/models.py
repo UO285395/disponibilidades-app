@@ -140,3 +140,35 @@ class CensusField(Base):
     options = Column(String, nullable=True)  # JSON-encoded list for 'select' type
 
     config = relationship("CensusConfig", back_populates="fields")
+
+
+class DeviceToken(Base):
+    __tablename__ = "device_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    token = Column(String, unique=True, nullable=False)
+    platform = Column(String, nullable=False, default="android")
+    device_id = Column(String, nullable=True)
+    collective = Column(String, nullable=True)
+    active = Column(Integer, nullable=False, default=1)
+    updated_at = Column(String, nullable=False)
+
+    user = relationship("User")
+
+
+class NotificationDispatch(Base):
+    __tablename__ = "notification_dispatches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    scope = Column(String, nullable=False)  # all | colectivo | users
+    title = Column(String, nullable=False)
+    body = Column(String, nullable=False)
+    target_collective = Column(String, nullable=True)
+    target_user_ids = Column(String, nullable=True)  # JSON-encoded list
+    sent_count = Column(Integer, nullable=False, default=0)
+    failed_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(String, nullable=False)
+
+    creator = relationship("User")

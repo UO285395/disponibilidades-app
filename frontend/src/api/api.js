@@ -1,17 +1,62 @@
+import { Capacitor } from "@capacitor/core";
+
 const API_URL = "https://backend-disponibilidad-production.up.railway.app";
+
+const TOKEN_KEY = "token";
+let cachedToken = localStorage.getItem(TOKEN_KEY);
+let preferencesPromise = null;
+
+async function getPreferences() {
+  if (!Capacitor.isNativePlatform()) return null;
+  if (!preferencesPromise) {
+    preferencesPromise = import("@capacitor/preferences")
+      .then((m) => m.Preferences)
+      .catch(() => null);
+  }
+  return preferencesPromise;
+}
+
+export async function initializeAuthStorage() {
+  const Preferences = await getPreferences();
+  if (!Preferences) {
+    cachedToken = localStorage.getItem(TOKEN_KEY);
+    return;
+  }
+
+  const stored = await Preferences.get({ key: TOKEN_KEY });
+  if (stored?.value) {
+    cachedToken = stored.value;
+    localStorage.setItem(TOKEN_KEY, stored.value);
+  } else {
+    cachedToken = localStorage.getItem(TOKEN_KEY);
+  }
+}
 
 // ------------------- TOKEN STORAGE -------------------
 
 export function getToken() {
-  return localStorage.getItem("token");
+  if (cachedToken) return cachedToken;
+  cachedToken = localStorage.getItem(TOKEN_KEY);
+  return cachedToken;
 }
 
-export function setToken(token) {
-  localStorage.setItem("token", token);
+export async function setToken(token) {
+  cachedToken = token;
+  localStorage.setItem(TOKEN_KEY, token);
+
+  const Preferences = await getPreferences();
+  if (Preferences) {
+    await Preferences.set({ key: TOKEN_KEY, value: token });
+  }
 }
 
 export function clearToken() {
-  localStorage.removeItem("token");
+  cachedToken = null;
+  localStorage.removeItem(TOKEN_KEY);
+
+  getPreferences()
+    .then((Preferences) => Preferences?.remove({ key: TOKEN_KEY }))
+    .catch(() => {});
 }
 
 // ------------------- REQUEST WRAPPER -------------------
@@ -49,7 +94,13 @@ export async function request(endpoint, method = "GET", body = null, includeAuth
 export const authAPI = {
   async login(email, password) {
     const data = await request("/login", "POST", { email, password });
-    setToken(data.access_token);
+    await setToken(data.access_token);
+    return data;
+  },
+
+  async refresh() {
+    const data = await request("/auth/refresh", "POST");
+    await setToken(data.access_token);
     return data;
   },
 
@@ -66,6 +117,16 @@ export const userAPI = {
   me() {
     return request("/me");
   }
+};
+
+export const deviceAPI = {
+  registerToken(token, platform = "android", deviceId = null) {
+    return request("/device-tokens/register", "POST", {
+      token,
+      platform,
+      device_id: deviceId,
+    });
+  },
 };
 
 // ------------------- EVENTS (usuario) -------------------

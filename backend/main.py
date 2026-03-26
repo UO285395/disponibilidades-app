@@ -25,7 +25,17 @@ from email.mime.base import MIMEBase
 from email import encoders
 
 import models
-from models import User, Availability, Event, EventResponse, EventCompanion, CensusConfig, CensusField
+from models import (
+    User,
+    Availability,
+    Event,
+    EventResponse,
+    EventCompanion,
+    CensusConfig,
+    CensusField,
+    DeviceToken,
+    NotificationDispatch,
+)
 from database import SessionLocal, engine
 
 
@@ -192,6 +202,20 @@ class Login(BaseModel):
     email: str
     password: str
 
+
+class DeviceTokenRegister(BaseModel):
+    token: str
+    platform: str = "android"
+    device_id: str | None = None
+
+
+class AdminNotificationSend(BaseModel):
+    scope: str  # all | colectivo | users
+    title: str
+    body: str
+    collective: str | None = None
+    user_ids: list[int] | None = None
+
 class AvailabilityCreate(BaseModel):
     date: str
     start_time: str
@@ -261,6 +285,16 @@ def login(data: Login, db: Session = Depends(get_db)):
     if not user or not verify_password(data.password, user.hashed_password):
         raise HTTPException(400, "Credenciales incorrectas")
 
+    token = create_token({"sub": str(user.id)})
+    return {"access_token": token, "token_type": "bearer"}
+
+
+@app.post("/auth/refresh")
+def refresh_auth_token(
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    user = get_user_from_token(cred.credentials if cred else None, db)
     token = create_token({"sub": str(user.id)})
     return {"access_token": token, "token_type": "bearer"}
 
@@ -651,6 +685,18 @@ def create_event(
     db.add(ev)
     db.commit()
     db.refresh(ev)
+
+    try:
+        target_user_ids = _event_target_user_ids(db, ev.allowed_domain)
+        _notify_users_by_ids(
+            db,
+            target_user_ids,
+            f"Nuevo evento: {ev.title}",
+            f"Publicado para {ev.date}" + (f" · {ev.start_time}" if ev.start_time else ""),
+        )
+    except Exception as exc:
+        print(f"⚠️ No se pudo enviar notificación automática de evento: {exc}")
+
     return {
         "id": ev.id,
         "title": ev.title,
@@ -1628,6 +1674,176 @@ def _same_domain_or_superadmin(user: User, target_user: User):
     if not user.email or not target_user.email:
         return False
     return _get_domain(user.email) == _get_domain(target_user.email)
+
+
+def _send_fcm_notification(tokens: list[str], title: str, body: str):
+    if not tokens:
+        return {"sent": 0, "failed": 0, "reason": "no_tokens"}
+
+    server_key = os.getenv("FCM_SERVER_KEY", "").strip()
+    if not server_key:
+        print("⚠️ FCM_SERVER_KEY no configurada. Notificaciones push no enviadas.")
+        return {"sent": 0, "failed": len(tokens), "reason": "missing_fcm_key"}
+
+    endpoint = os.getenv("FCM_ENDPOINT", "https://fcm.googleapis.com/fcm/send").strip()
+
+    payload = {
+        "registration_ids": tokens,
+        "notification": {
+            "title": title,
+            "body": body,
+            "sound": "default",
+        },
+        "priority": "high",
+    }
+
+    req = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"key={server_key}",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            raw = response.read().decode("utf-8")
+            parsed = json.loads(raw) if raw else {}
+            success = int(parsed.get("success", 0))
+            failure = int(parsed.get("failure", 0))
+            return {"sent": success, "failed": failure, "reason": "ok"}
+    except Exception as exc:
+        print(f"⚠️ Error enviando push FCM: {exc}")
+        return {"sent": 0, "failed": len(tokens), "reason": str(exc)}
+
+
+def _notify_users_by_ids(db: Session, user_ids: list[int], title: str, body: str):
+    if not user_ids:
+        return {"target_users": 0, "tokens": 0, "sent": 0, "failed": 0, "reason": "no_users"}
+
+    token_rows = (
+        db.query(DeviceToken)
+        .filter(DeviceToken.user_id.in_(user_ids), DeviceToken.active == 1)
+        .all()
+    )
+    unique_tokens = sorted({row.token for row in token_rows if row.token})
+
+    result = _send_fcm_notification(unique_tokens, title, body)
+    return {
+        "target_users": len(set(user_ids)),
+        "tokens": len(unique_tokens),
+        "sent": result["sent"],
+        "failed": result["failed"],
+        "reason": result["reason"],
+    }
+
+
+def _event_target_user_ids(db: Session, allowed_domain: str | None):
+    users = db.query(User).all()
+    if allowed_domain:
+        domain_norm = allowed_domain.strip().lower()
+        return [u.id for u in users if _get_domain(u.email) == domain_norm]
+    return [u.id for u in users]
+
+
+@app.post("/device-tokens/register")
+def register_device_token(
+    data: DeviceTokenRegister,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    user = get_user_from_token(cred.credentials if cred else None, db)
+    token_value = (data.token or "").strip()
+    if not token_value:
+        raise HTTPException(400, "Token de dispositivo obligatorio")
+
+    collective = _get_domain(user.email)
+    now_iso = datetime.utcnow().isoformat()
+
+    existing = db.query(DeviceToken).filter(DeviceToken.token == token_value).first()
+    if existing:
+        existing.user_id = user.id
+        existing.platform = (data.platform or "android").strip().lower()
+        existing.device_id = data.device_id
+        existing.collective = collective
+        existing.active = 1
+        existing.updated_at = now_iso
+    else:
+        db.add(DeviceToken(
+            user_id=user.id,
+            token=token_value,
+            platform=(data.platform or "android").strip().lower(),
+            device_id=data.device_id,
+            collective=collective,
+            active=1,
+            updated_at=now_iso,
+        ))
+
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/admin/notifications/send")
+def send_admin_notification(
+    data: AdminNotificationSend,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials if cred else None, db)
+    require_superadmin(admin)
+
+    scope = (data.scope or "").strip().lower()
+    title = (data.title or "").strip()
+    body = (data.body or "").strip()
+
+    if scope not in ["all", "colectivo", "users"]:
+        raise HTTPException(400, "scope inválido: usa all, colectivo o users")
+    if not title or not body:
+        raise HTTPException(400, "title y body son obligatorios")
+
+    target_user_ids: list[int] = []
+    target_collective = None
+
+    if scope == "all":
+        target_user_ids = [u.id for u in db.query(User.id).all()]
+    elif scope == "colectivo":
+        target_collective = (data.collective or "").strip().lower()
+        if not target_collective:
+            raise HTTPException(400, "collective obligatorio para scope=colectivo")
+        users = db.query(User).all()
+        target_user_ids = [u.id for u in users if _get_domain(u.email) == target_collective]
+    else:
+        target_user_ids = sorted(set(data.user_ids or []))
+        if not target_user_ids:
+            raise HTTPException(400, "user_ids obligatorio para scope=users")
+
+    notify_result = _notify_users_by_ids(db, target_user_ids, title, body)
+
+    dispatch = NotificationDispatch(
+        created_by=admin.id,
+        scope=scope,
+        title=title,
+        body=body,
+        target_collective=target_collective,
+        target_user_ids=json.dumps(target_user_ids),
+        sent_count=notify_result["sent"],
+        failed_count=notify_result["failed"],
+        created_at=datetime.utcnow().isoformat(),
+    )
+    db.add(dispatch)
+    db.commit()
+
+    return {
+        "ok": True,
+        "scope": scope,
+        "target_users": notify_result["target_users"],
+        "tokens": notify_result["tokens"],
+        "sent": notify_result["sent"],
+        "failed": notify_result["failed"],
+        "reason": notify_result["reason"],
+    }
 
 
 def _ensure_event_domain_access(user: User, event: Event):
