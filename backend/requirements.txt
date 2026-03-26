@@ -6,3 +6,5 @@ python-jose
 passlib[argon2]
 python-multipart
 resend
+google-auth
+requests

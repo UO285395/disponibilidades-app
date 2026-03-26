@@ -1676,15 +1676,55 @@ def _same_domain_or_superadmin(user: User, target_user: User):
     return _get_domain(user.email) == _get_domain(target_user.email)
 
 
-def _send_fcm_notification(tokens: list[str], title: str, body: str):
-    if not tokens:
-        return {"sent": 0, "failed": 0, "reason": "no_tokens"}
+def _load_fcm_service_account():
+    raw = (
+        os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
+        or os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+        or os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip()
+    )
 
-    server_key = os.getenv("FCM_SERVER_KEY", "").strip()
-    if not server_key:
-        print("⚠️ FCM_SERVER_KEY no configurada. Notificaciones push no enviadas.")
-        return {"sent": 0, "failed": len(tokens), "reason": "missing_fcm_key"}
+    if not raw:
+        return None, None, "missing_fcm_config", (
+            "Falta configurar FIREBASE_SERVICE_ACCOUNT_JSON en Railway "
+            "(o FCM_SERVER_KEY para el modo legacy)"
+        )
 
+    try:
+        if raw.startswith("{"):
+            info = json.loads(raw)
+        else:
+            info = json.loads(base64.b64decode(raw).decode("utf-8"))
+    except Exception as exc:
+        return None, None, "invalid_fcm_service_account", f"Service account inválida: {exc}"
+
+    project_id = os.getenv("FIREBASE_PROJECT_ID", "").strip() or str(info.get("project_id") or "").strip()
+    if not project_id:
+        return None, None, "missing_firebase_project_id", (
+            "Falta FIREBASE_PROJECT_ID en Railway o project_id en la service account"
+        )
+
+    return info, project_id, None, None
+
+
+def _get_fcm_v1_access_token(service_account_info: dict):
+    try:
+        from google.auth.transport.requests import Request as GoogleAuthRequest
+        from google.oauth2 import service_account
+    except Exception as exc:
+        return None, "missing_google_auth_dependency", f"Dependencias FCM no instaladas: {exc}"
+
+    try:
+        credentials = service_account.Credentials.from_service_account_info(
+            service_account_info,
+            scopes=["https://www.googleapis.com/auth/firebase.messaging"],
+        )
+        credentials.refresh(GoogleAuthRequest())
+        return credentials.token, None, None
+    except Exception as exc:
+        return None, "fcm_auth_error", f"No se pudo obtener access token FCM: {exc}"
+
+
+def _send_fcm_notification_legacy(tokens: list[str], title: str, body: str, server_key: str):
     endpoint = os.getenv("FCM_ENDPOINT", "https://fcm.googleapis.com/fcm/send").strip()
 
     payload = {
@@ -1713,10 +1753,87 @@ def _send_fcm_notification(tokens: list[str], title: str, body: str):
             parsed = json.loads(raw) if raw else {}
             success = int(parsed.get("success", 0))
             failure = int(parsed.get("failure", 0))
-            return {"sent": success, "failed": failure, "reason": "ok"}
+            return {"sent": success, "failed": failure, "reason": "ok", "message": "ok"}
     except Exception as exc:
-        print(f"⚠️ Error enviando push FCM: {exc}")
-        return {"sent": 0, "failed": len(tokens), "reason": str(exc)}
+        print(f"⚠️ Error enviando push FCM legacy: {exc}")
+        return {"sent": 0, "failed": len(tokens), "reason": str(exc), "message": str(exc)}
+
+
+def _send_fcm_notification_v1(tokens: list[str], title: str, body: str):
+    service_account_info, project_id, reason, message = _load_fcm_service_account()
+    if reason:
+        print(f"⚠️ Configuración FCM v1 incompleta: {message}")
+        return {"sent": 0, "failed": len(tokens), "reason": reason, "message": message}
+
+    access_token, reason, message = _get_fcm_v1_access_token(service_account_info)
+    if reason:
+        print(f"⚠️ Error autenticando FCM v1: {message}")
+        return {"sent": 0, "failed": len(tokens), "reason": reason, "message": message}
+
+    endpoint = os.getenv("FCM_V1_ENDPOINT", "").strip() or f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
+
+    sent = 0
+    failed = 0
+    last_error = "ok"
+
+    for token in tokens:
+        payload = {
+            "message": {
+                "token": token,
+                "notification": {
+                    "title": title,
+                    "body": body,
+                },
+                "android": {
+                    "priority": "high",
+                    "notification": {
+                        "sound": "default",
+                    },
+                },
+            }
+        }
+
+        req = urllib.request.Request(
+            endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {access_token}",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=15):
+                sent += 1
+        except urllib.error.HTTPError as exc:
+            failed += 1
+            try:
+                last_error = exc.read().decode("utf-8")
+            except Exception:
+                last_error = str(exc)
+            print(f"⚠️ Error HTTP enviando push FCM v1: {last_error}")
+        except Exception as exc:
+            failed += 1
+            last_error = str(exc)
+            print(f"⚠️ Error enviando push FCM v1: {exc}")
+
+    if failed == 0:
+        return {"sent": sent, "failed": failed, "reason": "ok", "message": "ok"}
+    if sent > 0:
+        return {"sent": sent, "failed": failed, "reason": "partial_failure", "message": last_error}
+    return {"sent": sent, "failed": failed, "reason": "fcm_v1_error", "message": last_error}
+
+
+def _send_fcm_notification(tokens: list[str], title: str, body: str):
+    if not tokens:
+        return {"sent": 0, "failed": 0, "reason": "no_tokens"}
+
+    server_key = os.getenv("FCM_SERVER_KEY", "").strip()
+    if server_key:
+        return _send_fcm_notification_legacy(tokens, title, body, server_key)
+
+    return _send_fcm_notification_v1(tokens, title, body)
 
 
 def _notify_users_by_ids(db: Session, user_ids: list[int], title: str, body: str):

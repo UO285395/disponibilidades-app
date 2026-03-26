@@ -1,11 +1,32 @@
 import { Capacitor } from "@capacitor/core";
 
 const API_URL = "https://backend-disponibilidad-production.up.railway.app";
+const AUTH_CHANGE_EVENT = "auth-changed";
 
 const TOKEN_KEY = "token";
 let cachedToken = null;
-try { cachedToken = localStorage.getItem(TOKEN_KEY); } catch (_) {}
+try {
+  cachedToken = localStorage.getItem(TOKEN_KEY);
+} catch {
+  cachedToken = null;
+}
 let preferencesPromise = null;
+
+function emitAuthChange() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(AUTH_CHANGE_EVENT, { detail: { hasSession: Boolean(cachedToken) } }));
+}
+
+export function subscribeAuthChanges(callback) {
+  if (typeof window === "undefined") return () => {};
+
+  const handler = (event) => {
+    callback(Boolean(event?.detail?.hasSession));
+  };
+
+  window.addEventListener(AUTH_CHANGE_EVENT, handler);
+  return () => window.removeEventListener(AUTH_CHANGE_EVENT, handler);
+}
 
 async function getPreferences() {
   if (!Capacitor.isNativePlatform()) return null;
@@ -18,23 +39,35 @@ async function getPreferences() {
 }
 
 export async function initializeAuthStorage() {
+  const timeout = new Promise((resolve) => setTimeout(resolve, 3000));
   try {
-    const Preferences = await getPreferences();
-    if (!Preferences) {
-      cachedToken = localStorage.getItem(TOKEN_KEY);
-      return;
-    }
+    const init = (async () => {
+      const Preferences = await getPreferences();
+      if (!Preferences) {
+        cachedToken = localStorage.getItem(TOKEN_KEY);
+        return;
+      }
+      const stored = await Preferences.get({ key: TOKEN_KEY });
+      if (stored?.value) {
+        cachedToken = stored.value;
+        localStorage.setItem(TOKEN_KEY, stored.value);
+      } else {
+        cachedToken = localStorage.getItem(TOKEN_KEY);
+      }
+    })();
 
-    const stored = await Preferences.get({ key: TOKEN_KEY });
-    if (stored?.value) {
-      cachedToken = stored.value;
-      localStorage.setItem(TOKEN_KEY, stored.value);
-    } else {
-      cachedToken = localStorage.getItem(TOKEN_KEY);
-    }
+    await Promise.race([init, timeout]);
   } catch (error) {
     console.error("No se pudo inicializar almacenamiento de sesion", error);
-    cachedToken = localStorage.getItem(TOKEN_KEY);
+  } finally {
+    // Fallback siempre: si cachedToken sigue null, intentar localStorage
+    if (!cachedToken) {
+      try {
+        cachedToken = localStorage.getItem(TOKEN_KEY);
+      } catch {
+        cachedToken = null;
+      }
+    }
   }
 }
 
@@ -54,6 +87,8 @@ export async function setToken(token) {
   if (Preferences) {
     await Preferences.set({ key: TOKEN_KEY, value: token });
   }
+
+  emitAuthChange();
 }
 
 export function clearToken() {
@@ -63,6 +98,8 @@ export function clearToken() {
   getPreferences()
     .then((Preferences) => Preferences?.remove({ key: TOKEN_KEY }))
     .catch(() => {});
+
+  emitAuthChange();
 }
 
 // ------------------- REQUEST WRAPPER -------------------

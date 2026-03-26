@@ -59,6 +59,9 @@ export default function AdminNotifications() {
       setSending(true);
       const r = await adminAPI.sendNotification(payload);
       setResult(r);
+      if (["missing_fcm_key", "missing_fcm_config", "missing_firebase_project_id", "invalid_fcm_service_account", "fcm_auth_error", "missing_google_auth_dependency"].includes(r?.reason)) {
+        alert(r?.message || "Falta configurar Firebase/FCM en Railway para poder enviar notificaciones push.");
+      }
     } catch (e) {
       console.error("Error enviando notificación", e);
       alert(e?.message || "Error enviando notificación");

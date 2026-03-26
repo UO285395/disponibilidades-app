@@ -6,7 +6,7 @@ import Dashboard from "./pages/Dashboard.jsx";
 import AdminDashboard from "./pages/AdminDashboard.jsx";
 import AdminEventResponses from "./pages/AdminEventResponses.jsx";
 import CensusForm from "./pages/CensusForm.jsx";
-import { getToken, initializeAuthStorage } from "./api/api.js";
+import { getToken, initializeAuthStorage, subscribeAuthChanges } from "./api/api.js";
 
 export default function App() {
   const [ready, setReady] = useState(false);
@@ -25,6 +25,12 @@ export default function App() {
         setReady(true);
       }
     })();
+
+    const unsubscribe = subscribeAuthChanges((nextHasSession) => {
+      setHasSession(nextHasSession);
+    });
+
+    return unsubscribe;
   }, []);
 
   if (!ready) return (
@@ -40,10 +46,10 @@ export default function App() {
 
         <Route path="/" element={hasSession ? <Navigate to="/dashboard" replace /> : <Login />} />
 
-        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/dashboard" element={hasSession ? <Dashboard /> : <Navigate to="/" replace />} />
 
-        <Route path="/admin" element={<AdminDashboard />} />
-        <Route path="/admin/event/:id" element={<AdminEventResponses />} />
+        <Route path="/admin" element={hasSession ? <AdminDashboard /> : <Navigate to="/" replace />} />
+        <Route path="/admin/event/:id" element={hasSession ? <AdminEventResponses /> : <Navigate to="/" replace />} />
 
         {/* Ruta pública de censo — sin autenticación */}
         <Route path="/censo/:token" element={<CensusForm />} />
