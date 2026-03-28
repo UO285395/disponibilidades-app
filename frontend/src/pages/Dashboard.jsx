@@ -123,6 +123,13 @@ export default function Dashboard() {
                   >
                     Semana siguiente
                   </Button>
+                  <Button
+                    size="xs"
+                    variant={offsetWeeks === 2 ? "filled" : "outline"}
+                    onClick={() => setOffsetWeeks(2)}
+                  >
+                    Semana posterior
+                  </Button>
                 </Group>
 
                 <Text size="sm" c="dimmed" mb="md">

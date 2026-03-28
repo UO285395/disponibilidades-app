@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import { adminAPI } from "../api/adminApi.js";
 import {
   Alert,
@@ -56,8 +56,9 @@ export default function AdminAvailabilitiesCalendar() {
   const [modalUsers, setModalUsers] = useState([]);
   const [modalSlot, setModalSlot] = useState("");
 
-  // control de semana actual (0 = actual, 1 = siguiente)
+  // control de semana visible (0 = actual, 1 = siguiente, 2 = posterior)
   const [weekOffset, setWeekOffset] = useState(0);
+  const MAX_WEEK_OFFSET = 2;
 
   // cargar disponibilidades
   useEffect(() => {
@@ -102,13 +103,17 @@ export default function AdminAvailabilitiesCalendar() {
     });
   }, [rows, filterCode]);
 
-  // semana actual / siguiente
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // semana actual / siguiente / posterior
+  const today = useMemo(() => {
+    const value = new Date();
+    value.setHours(0, 0, 0, 0);
+    return value;
+  }, []);
 
-  function isPastDate(date) {
-    return parseISODate(date) < today;
-  }
+  const isPastDate = useCallback(
+    (date) => parseISODate(date) < today,
+    [today]
+  );
 
   const baseWeekStart = startOfWeek(today);
 const weekStart = useMemo(() => {
@@ -136,7 +141,7 @@ const weekStart = useMemo(() => {
       d.setHours(0, 0, 0, 0);
       return d >= weekStart && d < weekEnd;
     });
-  }, [filteredByEmail, weekStart, weekEnd]);
+  }, [filteredByEmail, isPastDate, weekStart, weekEnd]);
 
   // días de la semana
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -229,7 +234,7 @@ const weekStart = useMemo(() => {
   return (
     <div>
       <Title order={3} mb="md">
-        Disponibilidades (Semana actual y siguiente)
+        Disponibilidades (Semana actual, siguiente y posterior)
       </Title>
 
       {/* Filtro por colectivo */}
@@ -249,7 +254,7 @@ const weekStart = useMemo(() => {
           Semana anterior
         </Button>
         <Button
-          disabled={weekOffset === 1}
+          disabled={weekOffset === MAX_WEEK_OFFSET}
           onClick={() => setWeekOffset((v) => v + 1)}
         >
           Semana siguiente

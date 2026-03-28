@@ -1082,6 +1082,11 @@ def create_my_availability(
     if availability_date < today:
         raise HTTPException(410, "No puedes votar disponibilidades en días pasados")
 
+    current_week_start = today - timedelta(days=today.weekday())
+    max_allowed_date = current_week_start + timedelta(days=20)  # semana actual + siguiente + posterior
+    if availability_date > max_allowed_date:
+        raise HTTPException(400, "Solo puedes votar disponibilidades para la semana actual, siguiente y posterior")
+
     a = Availability(
         user_id=user.id,
         date=data.date,
@@ -1708,17 +1713,17 @@ def _load_fcm_service_account():
 
 def _get_fcm_v1_access_token(service_account_info: dict):
     try:
-        from google.auth.transport.requests import Request as GoogleAuthRequest
-        from google.oauth2 import service_account
+        google_auth_requests = importlib.import_module("google.auth.transport.requests")
+        google_oauth2_service_account = importlib.import_module("google.oauth2.service_account")
     except Exception as exc:
         return None, "missing_google_auth_dependency", f"Dependencias FCM no instaladas: {exc}"
 
     try:
-        credentials = service_account.Credentials.from_service_account_info(
+        credentials = google_oauth2_service_account.Credentials.from_service_account_info(
             service_account_info,
             scopes=["https://www.googleapis.com/auth/firebase.messaging"],
         )
-        credentials.refresh(GoogleAuthRequest())
+        credentials.refresh(google_auth_requests.Request())
         return credentials.token, None, None
     except Exception as exc:
         return None, "fcm_auth_error", f"No se pudo obtener access token FCM: {exc}"
