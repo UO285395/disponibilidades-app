@@ -31,7 +31,7 @@ function startOfWeek(date) {
 }
 
 function formatISO(d) {
-  return d.toISOString().slice(0, 10);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
 function formatDay(d) {

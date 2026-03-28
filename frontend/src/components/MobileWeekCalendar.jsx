@@ -22,7 +22,7 @@ function pad2(value) {
 }
 
 function formatISO(date) {
-  return date.toISOString().slice(0, 10);
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 }
 
 function parseISODate(value) {
