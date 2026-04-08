@@ -45,6 +45,29 @@ function parseISODate(value) {
   return new Date(year, month - 1, day);
 }
 
+function toDateKey(value) {
+  if (!value) return "";
+
+  // Handle values like YYYY-MM-DD, YYYY-M-D or full ISO datetime.
+  const direct = new Date(value);
+  if (!Number.isNaN(direct.getTime())) {
+    return formatISO(direct);
+  }
+
+  const text = String(value).trim();
+  const datePart = text.includes("T") ? text.split("T")[0] : text;
+  const [year, month, day] = datePart.split("-").map(Number);
+  if (!year || !month || !day) return "";
+
+  return formatISO(new Date(year, month - 1, day));
+}
+
+function parseHour(value) {
+  if (!value) return Number.NaN;
+  const hour = Number(String(value).split(":")[0]);
+  return Number.isInteger(hour) ? hour : Number.NaN;
+}
+
 // ============================================
 // COMPONENTE
 // ============================================
@@ -132,16 +155,40 @@ const weekStart = useMemo(() => {
 }, [weekStart]);
 
 
+  const normalizedRows = useMemo(() => {
+    return filteredByEmail
+      .map((r) => {
+        const dateKey = toDateKey(r.date);
+        const startHour = parseHour(r.start_time);
+        const endHour = parseHour(r.end_time);
+
+        return {
+          ...r,
+          dateKey,
+          startHour,
+          endHour,
+        };
+      })
+      .filter(
+        (r) =>
+          r.dateKey &&
+          Number.isInteger(r.startHour) &&
+          Number.isInteger(r.endHour) &&
+          r.startHour >= 0 &&
+          r.endHour <= 24 &&
+          r.startHour < r.endHour
+      );
+  }, [filteredByEmail]);
+
   // obtener filas solo de la semana visible
   const weekRows = useMemo(() => {
-    return filteredByEmail.filter((r) => {
-      if (!r.date) return false;
-      if (isPastDate(r.date)) return false;
-      const d = new Date(r.date);
+    return normalizedRows.filter((r) => {
+      if (isPastDate(r.dateKey)) return false;
+      const d = parseISODate(r.dateKey);
       d.setHours(0, 0, 0, 0);
       return d >= weekStart && d < weekEnd;
     });
-  }, [filteredByEmail, isPastDate, weekStart, weekEnd]);
+  }, [normalizedRows, isPastDate, weekStart, weekEnd]);
 
   // días de la semana
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -159,13 +206,8 @@ const weekStart = useMemo(() => {
     const map = {};
 
     for (const r of weekRows) {
-      if (!r.date || !r.start_time || !r.end_time) continue;
-
-      const startHour = Number(r.start_time.slice(0, 2));
-      const endHour = Number(r.end_time.slice(0, 2));
-
-      for (let h = startHour; h < endHour; h++) {
-        const key = `${r.date}-${h}`;
+      for (let h = r.startHour; h < r.endHour; h++) {
+        const key = `${r.dateKey}-${h}`;
         if (!map[key]) map[key] = [];
 
         // evita duplicados por persona
