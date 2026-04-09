@@ -99,12 +99,7 @@ export default function AdminDashboard() {
           {canNotifications && <Tabs.Tab value="notifications">Notificaciones</Tabs.Tab>}
         </Tabs.List>
 
-        {canUsers && (
-          <Tabs.Panel value="users" pt="xl">
-            <AdminUsers />
-          </Tabs.Panel>
-        )}
-
+        
         {canEvents && (
           <Tabs.Panel value="events" pt="xl">
             <AdminEvents />
@@ -120,12 +115,6 @@ export default function AdminDashboard() {
         {canAvailabilities && (
           <Tabs.Panel value="availabilities-calendar" pt="xl">
             <AdminAvailabilitiesCalendar />
-          </Tabs.Panel>
-        )}
-
-        {canDomainPolicies && (
-          <Tabs.Panel value="domain-policies" pt="xl">
-            <AdminDomainPolicies />
           </Tabs.Panel>
         )}
 
@@ -146,6 +135,20 @@ export default function AdminDashboard() {
             <AdminNotifications />
           </Tabs.Panel>
         )}
+
+        {canDomainPolicies && (
+          <Tabs.Panel value="domain-policies" pt="xl">
+            <AdminDomainPolicies />
+          </Tabs.Panel>
+        )}
+
+        {canUsers && (
+          <Tabs.Panel value="users" pt="xl">
+            <AdminUsers />
+          </Tabs.Panel>
+        )}
+
+
       </Tabs>
 
       {!defaultTab && (
