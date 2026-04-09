@@ -142,6 +142,56 @@ class CensusField(Base):
     config = relationship("CensusConfig", back_populates="fields")
 
 
+class Survey(Base):
+    __tablename__ = "surveys"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    url_token = Column(String, unique=True, nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    is_active = Column(Integer, nullable=False, default=1)
+    created_at = Column(String, nullable=False)
+
+    creator = relationship("User")
+    fields = relationship(
+        "SurveyField",
+        back_populates="survey",
+        order_by="SurveyField.order_index",
+        cascade="all, delete-orphan",
+    )
+    responses = relationship(
+        "SurveyResponse",
+        back_populates="survey",
+        cascade="all, delete-orphan",
+    )
+
+
+class SurveyField(Base):
+    __tablename__ = "survey_fields"
+
+    id = Column(Integer, primary_key=True, index=True)
+    survey_id = Column(Integer, ForeignKey("surveys.id"), nullable=False)
+    label = Column(String, nullable=False)
+    field_type = Column(String, nullable=False, default="text")
+    required = Column(Integer, default=1)
+    order_index = Column(Integer, default=0)
+    options = Column(String, nullable=True)  # JSON-encoded list for 'select' type
+
+    survey = relationship("Survey", back_populates="fields")
+
+
+class SurveyResponse(Base):
+    __tablename__ = "survey_responses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    survey_id = Column(Integer, ForeignKey("surveys.id"), nullable=False)
+    answers = Column(String, nullable=False)  # JSON-encoded object keyed by field id
+    submitted_at = Column(String, nullable=False)
+
+    survey = relationship("Survey", back_populates="responses")
+
+
 class DeviceToken(Base):
     __tablename__ = "device_tokens"
 

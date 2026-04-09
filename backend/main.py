@@ -33,6 +33,9 @@ from models import (
     EventCompanion,
     CensusConfig,
     CensusField,
+    Survey,
+    SurveyField,
+    SurveyResponse,
     DeviceToken,
     NotificationDispatch,
 )
@@ -250,6 +253,20 @@ class CensusConfigCreate(BaseModel):
 
 class CensusTestEmailRequest(BaseModel):
     email_to: str | None = None
+
+
+class SurveyFieldCreate(BaseModel):
+    label: str
+    field_type: str = "text"
+    required: bool = True
+    order_index: int = 0
+    options: list[str] | None = None
+
+
+class SurveyCreate(BaseModel):
+    title: str
+    description: str | None = None
+    fields: list[SurveyFieldCreate]
 
 class DomainPolicyCreate(BaseModel):
     domain: str
@@ -1634,6 +1651,229 @@ def submit_census(
         args=(config.email_to, output.getvalue()),
         daemon=True,
     ).start()
+    return {"ok": True}
+
+
+# =========================================================
+# ENCUESTAS
+# =========================================================
+
+SURVEY_FIELD_TYPES = {"text", "textarea", "number", "select"}
+
+
+def _survey_field_to_dict(field: SurveyField) -> dict:
+    return {
+        "id": field.id,
+        "label": field.label,
+        "field_type": field.field_type,
+        "required": bool(field.required),
+        "order_index": field.order_index,
+        "options": json.loads(field.options) if field.options else [],
+    }
+
+
+def _survey_to_dict(survey: Survey, include_count: bool = False) -> dict:
+    data = {
+        "id": survey.id,
+        "title": survey.title,
+        "description": survey.description,
+        "url_token": survey.url_token,
+        "is_active": bool(survey.is_active),
+        "created_at": survey.created_at,
+        "created_by": survey.created_by,
+        "fields": [_survey_field_to_dict(field) for field in survey.fields],
+    }
+    if include_count:
+        data["responses_count"] = len(survey.responses)
+    return data
+
+
+def _validate_survey_fields(fields: list[SurveyFieldCreate]):
+    if not fields:
+        raise HTTPException(400, "Debes añadir al menos un campo")
+
+    for field in fields:
+        if not field.label or not field.label.strip():
+            raise HTTPException(400, "Todos los campos deben tener etiqueta")
+        if field.field_type not in SURVEY_FIELD_TYPES:
+            raise HTTPException(400, f"Tipo de campo inválido: {field.field_type}")
+
+
+@app.get("/admin/surveys")
+def admin_list_surveys(
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    if not cred or not cred.credentials:
+        raise HTTPException(401, "Token inválido")
+
+    admin = get_user_from_token(cred.credentials, db)
+    require_superadmin(admin)
+
+    surveys = db.query(Survey).order_by(Survey.id.desc()).all()
+    return [_survey_to_dict(survey, include_count=True) for survey in surveys]
+
+
+@app.post("/admin/surveys")
+def admin_create_survey(
+    data: SurveyCreate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    if not cred or not cred.credentials:
+        raise HTTPException(401, "Token inválido")
+
+    admin = get_user_from_token(cred.credentials, db)
+    require_superadmin(admin)
+
+    title = (data.title or "").strip()
+    if not title:
+        raise HTTPException(400, "El título de la encuesta es obligatorio")
+
+    _validate_survey_fields(data.fields)
+
+    survey = Survey(
+        title=title,
+        description=(data.description or "").strip() or None,
+        url_token=secrets.token_urlsafe(16),
+        created_by=admin.id,
+        is_active=1,
+        created_at=datetime.utcnow().isoformat(),
+    )
+    db.add(survey)
+    db.flush()
+
+    for idx, field in enumerate(data.fields):
+        options = None
+        if field.field_type == "select" and field.options:
+            options = json.dumps([opt.strip() for opt in field.options if opt and opt.strip()])
+
+        db.add(SurveyField(
+            survey_id=survey.id,
+            label=field.label.strip(),
+            field_type=field.field_type,
+            required=1 if field.required else 0,
+            order_index=field.order_index if field.order_index is not None else idx,
+            options=options,
+        ))
+
+    db.commit()
+    db.refresh(survey)
+    return _survey_to_dict(survey, include_count=True)
+
+
+@app.post("/admin/surveys/{survey_id}/regenerate-token")
+def admin_regenerate_survey_token(
+    survey_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    if not cred or not cred.credentials:
+        raise HTTPException(401, "Token inválido")
+
+    admin = get_user_from_token(cred.credentials, db)
+    require_superadmin(admin)
+
+    survey = db.query(Survey).filter(Survey.id == survey_id).first()
+    if not survey:
+        raise HTTPException(404, "Encuesta no encontrada")
+
+    survey.url_token = secrets.token_urlsafe(16)
+    db.commit()
+    return {"url_token": survey.url_token}
+
+
+@app.get("/admin/surveys/{survey_id}/responses")
+def admin_survey_responses(
+    survey_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    if not cred or not cred.credentials:
+        raise HTTPException(401, "Token inválido")
+
+    admin = get_user_from_token(cred.credentials, db)
+    require_superadmin(admin)
+
+    survey = db.query(Survey).filter(Survey.id == survey_id).first()
+    if not survey:
+        raise HTTPException(404, "Encuesta no encontrada")
+
+    responses = (
+        db.query(SurveyResponse)
+        .filter(SurveyResponse.survey_id == survey.id)
+        .order_by(SurveyResponse.id.desc())
+        .all()
+    )
+
+    parsed_responses = []
+    for response in responses:
+        try:
+            answers = json.loads(response.answers)
+        except Exception:
+            answers = {}
+
+        parsed_responses.append({
+            "id": response.id,
+            "submitted_at": response.submitted_at,
+            "answers": answers,
+        })
+
+    return {
+        "survey": _survey_to_dict(survey, include_count=True),
+        "responses": parsed_responses,
+    }
+
+
+@app.get("/encuesta/{token}/fields")
+def public_get_survey_fields(token: str, db: Session = Depends(get_db)):
+    survey = db.query(Survey).filter(Survey.url_token == token, Survey.is_active == 1).first()
+    if not survey:
+        raise HTTPException(404, "Encuesta no encontrada")
+
+    return {
+        "id": survey.id,
+        "title": survey.title,
+        "description": survey.description,
+        "fields": [_survey_field_to_dict(field) for field in survey.fields],
+    }
+
+
+@app.post("/encuesta/{token}")
+def public_submit_survey(
+    token: str,
+    data: dict = Body(...),
+    db: Session = Depends(get_db)
+):
+    survey = db.query(Survey).filter(Survey.url_token == token, Survey.is_active == 1).first()
+    if not survey:
+        raise HTTPException(404, "Encuesta no encontrada")
+
+    fields = sorted(survey.fields, key=lambda field: field.order_index)
+    cleaned_answers: dict[str, str] = {}
+
+    for field in fields:
+        key = str(field.id)
+        raw_value = data.get(key, "")
+        value = "" if raw_value is None else str(raw_value).strip()
+
+        if bool(field.required) and not value:
+            raise HTTPException(400, f'El campo "{field.label}" es obligatorio')
+
+        if field.field_type == "select" and value:
+            options = json.loads(field.options) if field.options else []
+            if value not in options:
+                raise HTTPException(400, f'Valor inválido para el campo "{field.label}"')
+
+        cleaned_answers[key] = value
+
+    response = SurveyResponse(
+        survey_id=survey.id,
+        answers=json.dumps(cleaned_answers, ensure_ascii=False),
+        submitted_at=datetime.utcnow().isoformat(),
+    )
+    db.add(response)
+    db.commit()
     return {"ok": True}
 
 

@@ -9,6 +9,7 @@ import AdminSpaces from "../components/AdminSpaces.jsx";
 import AdminDomainPolicies from "../components/AdminDomainPolicies.jsx";
 import AdminCensus from "../components/AdminCensus.jsx";
 import AdminNotifications from "../components/AdminNotifications.jsx";
+import AdminSurveys from "../components/AdminSurveys.jsx";
 
 export default function AdminDashboard() {
   const [user, setUser] = useState(null);
@@ -53,6 +54,7 @@ export default function AdminDashboard() {
   const canUsers = user.role === "superadmin" || user.users_enabled;
   const canDomainPolicies = user.role === "superadmin" || user.domain_policies_enabled;
   const canCensus = user.role === "superadmin";
+  const canSurveys = user.role === "superadmin";
   const canNotifications = user.role === "superadmin";
 
   const defaultTab = canEvents
@@ -65,6 +67,8 @@ export default function AdminDashboard() {
     ? "users"
     : canDomainPolicies
     ? "domain-policies"
+    : canSurveys
+    ? "surveys"
     : null;
 
   return (
@@ -91,6 +95,7 @@ export default function AdminDashboard() {
             <Tabs.Tab value="domain-policies">Políticas de colectivo</Tabs.Tab>
           )}
           {canCensus && <Tabs.Tab value="censo">Censo</Tabs.Tab>}
+          {canSurveys && <Tabs.Tab value="surveys">Encuestas</Tabs.Tab>}
           {canNotifications && <Tabs.Tab value="notifications">Notificaciones</Tabs.Tab>}
         </Tabs.List>
 
@@ -127,6 +132,12 @@ export default function AdminDashboard() {
         {canCensus && (
           <Tabs.Panel value="censo" pt="xl">
             <AdminCensus />
+          </Tabs.Panel>
+        )}
+
+        {canSurveys && (
+          <Tabs.Panel value="surveys" pt="xl">
+            <AdminSurveys />
           </Tabs.Panel>
         )}
 

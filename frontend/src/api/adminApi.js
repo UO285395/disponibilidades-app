@@ -106,6 +106,23 @@ export const adminAPI = {
     return request("/admin/census/test-email", "POST", payload);
   },
 
+  // Encuestas (superadmin)
+  listSurveys() {
+    return request("/admin/surveys");
+  },
+
+  createSurvey(payload) {
+    return request("/admin/surveys", "POST", payload);
+  },
+
+  regenerateSurveyToken(surveyId) {
+    return request(`/admin/surveys/${surveyId}/regenerate-token`, "POST");
+  },
+
+  getSurveyResponses(surveyId) {
+    return request(`/admin/surveys/${surveyId}/responses`);
+  },
+
   sendNotification(payload) {
     return request("/admin/notifications/send", "POST", payload);
   },

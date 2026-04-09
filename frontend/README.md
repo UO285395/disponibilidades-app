@@ -46,6 +46,13 @@ Nota: Vite 7 requiere Node 20.19+ o 22.12+. Mantener estas versiones alineadas e
 - Se optimizó lookup por celda con una estructura en memoria para reducir búsquedas repetidas.
 - El calendario admin se refresca automáticamente de forma periódica y al recuperar foco para reflejar cambios recientes de usuarios.
 
+### Encuestas (admin + público)
+
+- Superadmin puede crear encuestas dinámicas con campos configurables (texto, textarea, número y selección).
+- Cada encuesta genera una URL pública única sin autenticación para permitir respuestas de personas no registradas.
+- Las respuestas se almacenan dentro de la aplicación y se consultan desde la pestaña "Votaciones" del panel de encuestas.
+- Es posible regenerar la URL pública de una encuesta; la URL anterior queda invalidada.
+
 ## Endpoints usados por frontend
 
 - Auth: `POST /login`, `POST /register`, `GET /me`
@@ -54,6 +61,8 @@ Nota: Vite 7 requiere Node 20.19+ o 22.12+. Mantener estas versiones alineadas e
 - Admin: `GET /admin/users`, `POST /admin/make_admin/{id}`, `POST /admin/remove_admin/{id}`
 - Admin eventos: `POST /events`, `DELETE /events/{id}`, `GET /events/{id}`, `GET /events/{id}/responses`
 - Admin disponibilidad: `GET /admin/availability`
+- Encuestas admin: `GET /admin/surveys`, `POST /admin/surveys`, `POST /admin/surveys/{id}/regenerate-token`, `GET /admin/surveys/{id}/responses`
+- Encuestas públicas: `GET /encuesta/{token}/fields`, `POST /encuesta/{token}`
 - Espacios/reservas: `GET/POST/DELETE /spaces`, `GET/POST/DELETE /reservations`, `GET /admin/reservations`
 - Políticas dominio (superadmin): `GET/POST/PUT/DELETE /admin/domain-policies`
 

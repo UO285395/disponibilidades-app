@@ -6,6 +6,7 @@ import Dashboard from "./pages/Dashboard.jsx";
 import AdminDashboard from "./pages/AdminDashboard.jsx";
 import AdminEventResponses from "./pages/AdminEventResponses.jsx";
 import CensusForm from "./pages/CensusForm.jsx";
+import SurveyForm from "./pages/SurveyForm.jsx";
 import { getToken, initializeAuthStorage, subscribeAuthChanges } from "./api/api.js";
 
 export default function App() {
@@ -53,6 +54,7 @@ export default function App() {
 
         {/* Ruta pública de censo — sin autenticación */}
         <Route path="/censo/:token" element={<CensusForm />} />
+        <Route path="/encuesta/:token" element={<SurveyForm />} />
         <Route path="*" element={<Navigate to="/" replace />} />
 
       </Routes>
