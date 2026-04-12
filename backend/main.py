@@ -70,6 +70,13 @@ def ensure_legacy_schema_compatibility():
                 if "domain_policies_enabled" not in policy_columns:
                     conn.execute(text("ALTER TABLE domain_policies ADD COLUMN domain_policies_enabled INTEGER DEFAULT 0"))
                     print("✅ Columna domain_policies.domain_policies_enabled añadida para compatibilidad")
+
+        if "users" in table_names:
+            user_columns = {column["name"] for column in inspector.get_columns("users")}
+            if "group_tag" not in user_columns:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN group_tag VARCHAR"))
+                print("✅ Columna users.group_tag añadida para compatibilidad")
     except Exception as exc:
         print(f"⚠️ No se pudo verificar compatibilidad de esquema: {exc}")
 
@@ -151,6 +158,28 @@ def get_user_from_token(token: str | None, db: Session):
         raise HTTPException(401, "Invalid or expired token")
 
 
+def _normalize_group_tag(tag: str) -> str:
+    return " ".join((tag or "").strip().lower().split())
+
+
+def _parse_group_tags(raw_value: str | None) -> list[str]:
+    if not raw_value:
+        return []
+
+    parsed = []
+    seen = set()
+    for part in str(raw_value).split(","):
+        normalized = _normalize_group_tag(part)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            parsed.append(normalized)
+    return parsed
+
+
+def _serialize_group_tags(tags: list[str]) -> str | None:
+    return ",".join(tags) if tags else None
+
+
 def require_admin(user: User):
     if user.role not in ["admin", "superadmin"]:
         raise HTTPException(403, "No autorizado")
@@ -200,6 +229,16 @@ class AdminUserCreate(BaseModel):
     email: str
     full_name: str
     password: str
+    group_tag: str | None = None
+    group_tags: list[str] | None = None
+
+
+class AdminUserGroupTagUpdate(BaseModel):
+    group_tag: str | None = None
+
+
+class AdminUserGroupTagAdd(BaseModel):
+    tag: str
 
 class Login(BaseModel):
     email: str
@@ -399,7 +438,9 @@ def admin_list_users(
             "id": u.id,
             "full_name": u.full_name,
             "email": u.email,
-            "role": u.role
+            "role": u.role,
+            "group_tag": u.group_tag,
+            "group_tags": _parse_group_tags(u.group_tag),
         }
         for u in users
     ]
@@ -437,11 +478,27 @@ def admin_create_user(
         if admin_domain != target_domain:
             raise HTTPException(403, "Solo puedes crear usuarios de tu dominio")
 
+    initial_tags = []
+    if data.group_tags:
+        initial_tags = [_normalize_group_tag(tag) for tag in data.group_tags if _normalize_group_tag(tag)]
+    elif data.group_tag:
+        normalized = _normalize_group_tag(data.group_tag)
+        if normalized:
+            initial_tags = [normalized]
+
+    deduped_initial_tags = []
+    seen_initial_tags = set()
+    for tag in initial_tags:
+        if tag not in seen_initial_tags:
+            seen_initial_tags.add(tag)
+            deduped_initial_tags.append(tag)
+
     user = User(
         email=email,
         full_name=full_name,
         hashed_password=hash_password(password),
         role="user",
+        group_tag=_serialize_group_tags(deduped_initial_tags),
     )
     db.add(user)
     db.commit()
@@ -452,6 +509,117 @@ def admin_create_user(
         "email": user.email,
         "full_name": user.full_name,
         "role": user.role,
+        "group_tag": user.group_tag,
+        "group_tags": _parse_group_tags(user.group_tag),
+    }
+
+
+@app.put("/admin/users/{user_id}/group-tag")
+def admin_update_user_group_tag(
+    user_id: int,
+    data: AdminUserGroupTagUpdate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    require_admin(admin)
+
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role):
+        raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "Usuario no encontrado")
+
+    if user.role == "superadmin" and admin.role != "superadmin":
+        raise HTTPException(403, "No autorizado para modificar superadmin")
+
+    if admin.role != "superadmin" and not _same_domain_or_superadmin(admin, user):
+        raise HTTPException(403, "No puedes administrar usuarios de otro dominio")
+
+    group_tag = _normalize_group_tag(data.group_tag or "")
+    user.group_tag = _serialize_group_tags([group_tag]) if group_tag else None
+    db.commit()
+
+    return {
+        "id": user.id,
+        "group_tag": user.group_tag,
+        "group_tags": _parse_group_tags(user.group_tag),
+    }
+
+
+@app.post("/admin/users/{user_id}/group-tags")
+def admin_add_user_group_tag(
+    user_id: int,
+    data: AdminUserGroupTagAdd,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    require_admin(admin)
+
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role):
+        raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "Usuario no encontrado")
+
+    if user.role == "superadmin" and admin.role != "superadmin":
+        raise HTTPException(403, "No autorizado para modificar superadmin")
+
+    if admin.role != "superadmin" and not _same_domain_or_superadmin(admin, user):
+        raise HTTPException(403, "No puedes administrar usuarios de otro dominio")
+
+    new_tag = _normalize_group_tag(data.tag)
+    if not new_tag:
+        raise HTTPException(400, "La etiqueta no puede estar vacía")
+
+    current_tags = _parse_group_tags(user.group_tag)
+    if new_tag not in current_tags:
+        current_tags.append(new_tag)
+        user.group_tag = _serialize_group_tags(current_tags)
+        db.commit()
+
+    return {
+        "id": user.id,
+        "group_tag": user.group_tag,
+        "group_tags": _parse_group_tags(user.group_tag),
+    }
+
+
+@app.delete("/admin/users/{user_id}/group-tags/{tag}")
+def admin_remove_user_group_tag(
+    user_id: int,
+    tag: str,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    require_admin(admin)
+
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role):
+        raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "Usuario no encontrado")
+
+    if user.role == "superadmin" and admin.role != "superadmin":
+        raise HTTPException(403, "No autorizado para modificar superadmin")
+
+    if admin.role != "superadmin" and not _same_domain_or_superadmin(admin, user):
+        raise HTTPException(403, "No puedes administrar usuarios de otro dominio")
+
+    target_tag = _normalize_group_tag(tag)
+    remaining_tags = [value for value in _parse_group_tags(user.group_tag) if value != target_tag]
+    user.group_tag = _serialize_group_tags(remaining_tags)
+    db.commit()
+
+    return {
+        "id": user.id,
+        "group_tag": user.group_tag,
+        "group_tags": _parse_group_tags(user.group_tag),
     }
 
 
@@ -1165,6 +1333,8 @@ def admin_all_availability(
             "id": a.id,
             "user": a.user.full_name,
             "email": a.user.email,
+            "group_tag": a.user.group_tag,
+            "group_tags": _parse_group_tags(a.user.group_tag),
             "date": a.date,
             "start_time": a.start_time,
             "end_time": a.end_time,

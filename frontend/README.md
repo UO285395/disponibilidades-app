@@ -45,6 +45,13 @@ Nota: Vite 7 requiere Node 20.19+ o 22.12+. Mantener estas versiones alineadas e
 - El calendario de usuario usa actualización optimista al marcar/desmarcar franjas.
 - Se optimizó lookup por celda con una estructura en memoria para reducir búsquedas repetidas.
 - El calendario admin se refresca automáticamente de forma periódica y al recuperar foco para reflejar cambios recientes de usuarios.
+- El calendario admin permite filtrar por dominio (colectivo) y también por etiqueta de grupo del usuario (por ejemplo `organizador`).
+
+### Etiquetas de grupo de usuario
+
+- En administración de usuarios se pueden asignar múltiples etiquetas de grupo por usuario.
+- Las etiquetas se añaden una a una y se pueden consultar/eliminar una a una desde el botón "Ver etiquetas".
+- La etiqueta es transparente para el usuario final y está pensada para segmentación interna en filtros administrativos.
 
 ### Encuestas (admin + público)
 

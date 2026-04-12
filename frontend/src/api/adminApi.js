@@ -13,6 +13,20 @@ export const adminAPI = {
     return request(`/admin/users/${userId}`, "DELETE");
   },
 
+  updateUserGroupTag(userId, groupTag) {
+    return request(`/admin/users/${userId}/group-tag`, "PUT", {
+      group_tag: groupTag,
+    });
+  },
+
+  addUserGroupTag(userId, tag) {
+    return request(`/admin/users/${userId}/group-tags`, "POST", { tag });
+  },
+
+  removeUserGroupTag(userId, tag) {
+    return request(`/admin/users/${userId}/group-tags/${encodeURIComponent(tag)}`, "DELETE");
+  },
+
   // endpoint secreto para ti
   becomeAdmin() {
     return request("/admin/become_admin", "POST");

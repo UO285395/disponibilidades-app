@@ -116,13 +116,20 @@ export default function AdminAvailabilitiesCalendar() {
     };
   }, []);
 
-  // filtrado por dominio
-  const filteredByEmail = useMemo(() => {
+  // filtrado por dominio o etiqueta de grupo
+  const filteredRows = useMemo(() => {
     if (!filterCode.trim()) return rows;
     const code = filterCode.toLowerCase();
     return rows.filter((r) => {
       const domain = r.email.split("@")[1]?.toLowerCase() || "";
-      return domain.includes(code);
+      const tags = Array.isArray(r.group_tags)
+        ? r.group_tags
+        : String(r.group_tag || "")
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean);
+      const matchesTag = tags.some((tag) => tag.toLowerCase().includes(code));
+      return domain.includes(code) || matchesTag;
     });
   }, [rows, filterCode]);
 
@@ -156,7 +163,7 @@ const weekStart = useMemo(() => {
 
 
   const normalizedRows = useMemo(() => {
-    return filteredByEmail
+    return filteredRows
       .map((r) => {
         const dateKey = toDateKey(r.date);
         const startHour = parseHour(r.start_time);
@@ -178,7 +185,7 @@ const weekStart = useMemo(() => {
           r.endHour <= 24 &&
           r.startHour < r.endHour
       );
-  }, [filteredByEmail]);
+  }, [filteredRows]);
 
   // obtener filas solo de la semana visible
   const weekRows = useMemo(() => {
@@ -279,9 +286,9 @@ const weekStart = useMemo(() => {
         Disponibilidades (Semana actual, siguiente y posterior)
       </Title>
 
-      {/* Filtro por colectivo */}
+      {/* Filtro por colectivo o etiqueta */}
       <TextInput
-        placeholder="Filtrar por colectivo"
+        placeholder="Filtrar por colectivo o etiqueta (ej: organizador)"
         value={filterCode}
         onChange={(e) => setFilterCode(e.target.value)}
         mb="lg"
