@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Card,
   Title,
@@ -10,72 +10,104 @@ import {
   Group,
   Text,
   Stack,
+  Select,
 } from "@mantine/core";
 import { adminAPI } from "../api/adminApi.js";
 
 export default function AdminDomainPolicies() {
   const [policies, setPolicies] = useState([]);
   const [editingId, setEditingId] = useState(null);
+  const [targetType, setTargetType] = useState("domain");
   const [domain, setDomain] = useState("");
   const [eventsEnabled, setEventsEnabled] = useState(true);
   const [availabilitiesEnabled, setAvailabilitiesEnabled] = useState(true);
   const [spacesEnabled, setSpacesEnabled] = useState(true);
   const [usersEnabled, setUsersEnabled] = useState(true);
   const [domainPoliciesEnabled, setDomainPoliciesEnabled] = useState(false);
+  const [censusEnabled, setCensusEnabled] = useState(false);
+  const [surveysEnabled, setSurveysEnabled] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  useEffect(() => {
-    loadPolicies();
-  }, []);
-
-  async function loadPolicies() {
+  const loadPolicies = useCallback(async () => {
     try {
       const data = await adminAPI.listDomainPolicies();
       setPolicies(data.sort((left, right) => left.domain.localeCompare(right.domain)));
     } catch (e) {
       console.error(e);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const data = await adminAPI.listDomainPolicies();
+        if (!cancelled) {
+          setPolicies(data.sort((left, right) => left.domain.localeCompare(right.domain)));
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function resetForm() {
     setEditingId(null);
+    setTargetType("domain");
     setDomain("");
     setEventsEnabled(true);
     setAvailabilitiesEnabled(true);
     setSpacesEnabled(true);
     setUsersEnabled(true);
     setDomainPoliciesEnabled(false);
+    setCensusEnabled(false);
+    setSurveysEnabled(false);
+    setNotificationsEnabled(false);
   }
 
   function fillForm(policy) {
     setEditingId(policy.id);
+    setTargetType(policy.target_type || "domain");
     setDomain(policy.domain);
     setEventsEnabled(Boolean(policy.events_enabled));
     setAvailabilitiesEnabled(Boolean(policy.availabilities_enabled));
     setSpacesEnabled(Boolean(policy.spaces_enabled));
     setUsersEnabled(Boolean(policy.users_enabled));
     setDomainPoliciesEnabled(Boolean(policy.domain_policies_enabled));
+    setCensusEnabled(Boolean(policy.census_enabled));
+    setSurveysEnabled(Boolean(policy.surveys_enabled));
+    setNotificationsEnabled(Boolean(policy.notifications_enabled));
   }
 
   async function submitPolicy() {
     try {
       setError("");
       setSuccess("");
-      const normalizedDomain = domain.trim().toLowerCase();
+      const normalizedTarget = domain.trim().toLowerCase();
 
-      if (!normalizedDomain) {
-        setError("Colectivo requerido");
+      if (!normalizedTarget) {
+        setError(targetType === "tag" ? "Etiqueta requerida" : "Colectivo requerido");
         return;
       }
 
       const payload = {
-        domain: normalizedDomain,
+        domain: normalizedTarget,
+        target_type: targetType,
         events_enabled: eventsEnabled,
         availabilities_enabled: availabilitiesEnabled,
         spaces_enabled: spacesEnabled,
         users_enabled: usersEnabled,
         domain_policies_enabled: domainPoliciesEnabled,
+        census_enabled: censusEnabled,
+        surveys_enabled: surveysEnabled,
+        notifications_enabled: notificationsEnabled,
       };
 
       if (editingId) {
@@ -124,15 +156,26 @@ export default function AdminDomainPolicies() {
         {success && <Notification color="green">{success}</Notification>}
 
         <Text size="sm" c="dimmed" mb="sm">
-          Define qué módulos puede usar cada colectivo. Ejemplo: un colectivo invitado puede tener solo eventos habilitados.
+          Define módulos para un colectivo o etiqueta. Los módulos de superadmin seleccionados aplican solo a admins del objetivo, no a usuarios estándar.
         </Text>
 
+        <Select
+          label="Tipo de política"
+          data={[
+            { value: "domain", label: "Colectivo (dominio)" },
+            { value: "tag", label: "Etiqueta" },
+          ]}
+          value={targetType}
+          onChange={(value) => setTargetType(value || "domain")}
+          mb="sm"
+        />
+
         <TextInput
-          label="Colectivo"
+          label={targetType === "tag" ? "Etiqueta" : "Colectivo"}
           value={domain}
           onChange={(e) => setDomain(e.target.value)}
           mb="sm"
-          placeholder="example.com"
+          placeholder={targetType === "tag" ? "voluntariado" : "example.com"}
         />
 
         <Stack gap="xs">
@@ -157,9 +200,24 @@ export default function AdminDomainPolicies() {
             onChange={(event) => setUsersEnabled(event.currentTarget.checked)}
           />
           <Checkbox
-            label="Políticas de colectivo"
+            label="Políticas de colectivo (módulo superadmin para admins)"
             checked={domainPoliciesEnabled}
             onChange={(event) => setDomainPoliciesEnabled(event.currentTarget.checked)}
+          />
+          <Checkbox
+            label="Censo (módulo superadmin para admins)"
+            checked={censusEnabled}
+            onChange={(event) => setCensusEnabled(event.currentTarget.checked)}
+          />
+          <Checkbox
+            label="Encuestas (módulo superadmin para admins)"
+            checked={surveysEnabled}
+            onChange={(event) => setSurveysEnabled(event.currentTarget.checked)}
+          />
+          <Checkbox
+            label="Notificaciones (módulo superadmin para admins)"
+            checked={notificationsEnabled}
+            onChange={(event) => setNotificationsEnabled(event.currentTarget.checked)}
           />
         </Stack>
 
@@ -188,29 +246,39 @@ export default function AdminDomainPolicies() {
       <Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>
-            <Table.Th>Colectivo</Table.Th>
+            <Table.Th>Tipo</Table.Th>
+            <Table.Th>Objetivo</Table.Th>
             <Table.Th>Eventos</Table.Th>
             <Table.Th>Disponibilidades</Table.Th>
             <Table.Th>Espacios</Table.Th>
             <Table.Th>Usuarios</Table.Th>
+            <Table.Th>Políticas</Table.Th>
+            <Table.Th>Censo</Table.Th>
+            <Table.Th>Encuestas</Table.Th>
+            <Table.Th>Notificaciones</Table.Th>
             <Table.Th>Acciones</Table.Th>
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
           {policies.map((p) => (
             <Table.Tr key={p.id}>
+              <Table.Td>{p.target_type === "tag" ? "Etiqueta" : "Colectivo"}</Table.Td>
               <Table.Td>{p.domain}</Table.Td>
               <Table.Td>{p.events_enabled ? "Sí" : "No"}</Table.Td>
               <Table.Td>{p.availabilities_enabled ? "Sí" : "No"}</Table.Td>
               <Table.Td>{p.spaces_enabled ? "Sí" : "No"}</Table.Td>
               <Table.Td>{p.users_enabled ? "Sí" : "No"}</Table.Td>
+              <Table.Td>{p.domain_policies_enabled ? "Sí" : "No"}</Table.Td>
+              <Table.Td>{p.census_enabled ? "Sí" : "No"}</Table.Td>
+              <Table.Td>{p.surveys_enabled ? "Sí" : "No"}</Table.Td>
+              <Table.Td>{p.notifications_enabled ? "Sí" : "No"}</Table.Td>
               <Table.Td>
                 <Group gap="xs">
                   <Button compact variant="outline" size="xs" onClick={() => fillForm(p)}>
                     Editar
                   </Button>
                   <Button compact color="red" size="xs" onClick={() => deletePolicy(p.id)}>
-                  Eliminar
+                    Eliminar
                   </Button>
                 </Group>
               </Table.Td>

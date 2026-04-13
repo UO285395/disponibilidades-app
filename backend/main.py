@@ -70,6 +70,15 @@ def ensure_legacy_schema_compatibility():
                 if "domain_policies_enabled" not in policy_columns:
                     conn.execute(text("ALTER TABLE domain_policies ADD COLUMN domain_policies_enabled INTEGER DEFAULT 0"))
                     print("✅ Columna domain_policies.domain_policies_enabled añadida para compatibilidad")
+                if "census_enabled" not in policy_columns:
+                    conn.execute(text("ALTER TABLE domain_policies ADD COLUMN census_enabled INTEGER DEFAULT 0"))
+                    print("✅ Columna domain_policies.census_enabled añadida para compatibilidad")
+                if "surveys_enabled" not in policy_columns:
+                    conn.execute(text("ALTER TABLE domain_policies ADD COLUMN surveys_enabled INTEGER DEFAULT 0"))
+                    print("✅ Columna domain_policies.surveys_enabled añadida para compatibilidad")
+                if "notifications_enabled" not in policy_columns:
+                    conn.execute(text("ALTER TABLE domain_policies ADD COLUMN notifications_enabled INTEGER DEFAULT 0"))
+                    print("✅ Columna domain_policies.notifications_enabled añadida para compatibilidad")
 
         if "users" in table_names:
             user_columns = {column["name"] for column in inspector.get_columns("users")}
@@ -315,11 +324,15 @@ class SurveyCreate(BaseModel):
 
 class DomainPolicyCreate(BaseModel):
     domain: str
+    target_type: str = "domain"  # domain | tag
     events_enabled: bool = True
     availabilities_enabled: bool = True
     spaces_enabled: bool = True
     users_enabled: bool = True
     domain_policies_enabled: bool = False
+    census_enabled: bool = False
+    surveys_enabled: bool = False
+    notifications_enabled: bool = False
 
 class SpaceCreate(BaseModel):
     name: str
@@ -368,24 +381,19 @@ def me(
 ):
     user = get_user_from_token(cred.credentials, db)
     domain = user.email.split("@")[-1].lower() if "@" in user.email else ""
+    tags = set(_parse_group_tags(user.group_tag))
 
-    policy = _get_domain_policy(db, domain)
-    events_enabled = True
-    availabilities_enabled = True
-    spaces_enabled = True
-    users_enabled = True
-    domain_policies_enabled = False
+    events_enabled = _is_feature_enabled(db, domain, "events", user.role, tags)
+    availabilities_enabled = _is_feature_enabled(db, domain, "availabilities", user.role, tags)
+    spaces_enabled = _is_feature_enabled(db, domain, "spaces", user.role, tags)
+    users_enabled = _is_feature_enabled(db, domain, "users", user.role, tags)
 
-    if user.role != "superadmin" and policy:
-        events_enabled = bool(policy.events_enabled)
-        availabilities_enabled = bool(policy.availabilities_enabled)
-        spaces_enabled = bool(policy.spaces_enabled)
-        users_enabled = bool(policy.users_enabled)
-        domain_policies_enabled = bool(policy.domain_policies_enabled)
-
-    if user.role == "superadmin":
-        users_enabled = True
-        domain_policies_enabled = True
+    # Modulos de superadmin delegables solo para admins (no para users estandar)
+    can_receive_super_modules = user.role in ["admin", "superadmin"]
+    domain_policies_enabled = can_receive_super_modules and _is_feature_enabled(db, domain, "domain_policies", user.role, tags)
+    census_enabled = can_receive_super_modules and _is_feature_enabled(db, domain, "census", user.role, tags)
+    surveys_enabled = can_receive_super_modules and _is_feature_enabled(db, domain, "surveys", user.role, tags)
+    notifications_enabled = can_receive_super_modules and _is_feature_enabled(db, domain, "notifications", user.role, tags)
 
     return {
         "id": user.id,
@@ -398,6 +406,9 @@ def me(
         "spaces_enabled": spaces_enabled,
         "users_enabled": users_enabled,
         "domain_policies_enabled": domain_policies_enabled,
+        "census_enabled": census_enabled,
+        "surveys_enabled": surveys_enabled,
+        "notifications_enabled": notifications_enabled,
     }
 
 @app.get("/admin/users")
@@ -408,7 +419,7 @@ def admin_list_users(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag))):
         raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
     all_users = db.query(User).order_by(func.lower(User.email)).all()
@@ -436,7 +447,7 @@ def admin_create_user(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag))):
         raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
     email = data.email.strip().lower()
@@ -504,7 +515,7 @@ def admin_update_user_group_tag(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag))):
         raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
     user = db.query(User).filter(User.id == user_id).first()
@@ -538,7 +549,7 @@ def admin_add_user_group_tag(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag))):
         raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
     user = db.query(User).filter(User.id == user_id).first()
@@ -578,7 +589,7 @@ def admin_remove_user_group_tag(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag))):
         raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
     user = db.query(User).filter(User.id == user_id).first()
@@ -650,7 +661,7 @@ def remove_admin(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag))):
         raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
     if admin.id == user_id:
@@ -681,7 +692,7 @@ def make_admin(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag))):
         raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
     user = db.query(User).filter(User.id == user_id).first()
@@ -706,20 +717,19 @@ def admin_list_domain_policies(
     db: Session = Depends(get_db)
 ):
     admin = get_user_from_token(cred.credentials, db)
-    require_superadmin(admin)
+    _require_superadmin_module_access(admin, db, "domain_policies")
 
-    return [
-        {
-            "id": p.id,
-            "domain": p.domain,
-            "events_enabled": bool(p.events_enabled),
-            "availabilities_enabled": bool(p.availabilities_enabled),
-            "spaces_enabled": bool(p.spaces_enabled),
-            "users_enabled": bool(p.users_enabled),
-            "domain_policies_enabled": bool(p.domain_policies_enabled),
-        }
-        for p in db.query(models.DomainPolicy).all()
-    ]
+    all_policies = db.query(models.DomainPolicy).all()
+    if admin.role == "superadmin":
+        policies = all_policies
+    else:
+        policies = [
+            policy
+            for policy in all_policies
+            if _can_admin_manage_policy_target(admin, policy.domain, db)
+        ]
+
+    return [_domain_policy_to_dict(p) for p in policies]
 
 
 @app.post("/admin/domain-policies")
@@ -729,36 +739,42 @@ def create_domain_policy(
     db: Session = Depends(get_db)
 ):
     admin = get_user_from_token(cred.credentials, db)
-    require_superadmin(admin)
+    _require_superadmin_module_access(admin, db, "domain_policies")
 
-    domain = data.domain.strip().lower()
-    if not domain:
-        raise HTTPException(400, "Dominio inválido")
+    normalized_target_type = (data.target_type or "domain").strip().lower()
+    if normalized_target_type not in ["domain", "tag"]:
+        raise HTTPException(400, "target_type invalido: usa domain o tag")
 
-    if db.query(models.DomainPolicy).filter(models.DomainPolicy.domain == domain).first():
-        raise HTTPException(400, "Política ya existe")
+    target_value = data.domain.strip()
+    if not target_value:
+        raise HTTPException(400, "Dominio/etiqueta invalido")
+
+    storage_key = _policy_storage_key(normalized_target_type, target_value)
+    if not storage_key:
+        raise HTTPException(400, "Dominio/etiqueta invalido")
+
+    if admin.role != "superadmin" and not _can_admin_manage_policy_target(admin, storage_key, db):
+        raise HTTPException(403, "No puedes crear politicas para este dominio/etiqueta")
+
+    if db.query(models.DomainPolicy).filter(models.DomainPolicy.domain == storage_key).first():
+        raise HTTPException(400, "Politica ya existe")
 
     policy = models.DomainPolicy(
-        domain=domain,
+        domain=storage_key,
         events_enabled=1 if data.events_enabled else 0,
         availabilities_enabled=1 if data.availabilities_enabled else 0,
         spaces_enabled=1 if data.spaces_enabled else 0,
         users_enabled=1 if data.users_enabled else 0,
         domain_policies_enabled=1 if data.domain_policies_enabled else 0,
+        census_enabled=1 if data.census_enabled else 0,
+        surveys_enabled=1 if data.surveys_enabled else 0,
+        notifications_enabled=1 if data.notifications_enabled else 0,
     )
     db.add(policy)
     db.commit()
     db.refresh(policy)
 
-    return {
-        "id": policy.id,
-        "domain": policy.domain,
-        "events_enabled": bool(policy.events_enabled),
-        "availabilities_enabled": bool(policy.availabilities_enabled),
-        "spaces_enabled": bool(policy.spaces_enabled),
-        "users_enabled": bool(policy.users_enabled),
-        "domain_policies_enabled": bool(policy.domain_policies_enabled),
-    }
+    return _domain_policy_to_dict(policy)
 
 
 @app.put("/admin/domain-policies/{policy_id}")
@@ -769,36 +785,45 @@ def update_domain_policy(
     db: Session = Depends(get_db)
 ):
     admin = get_user_from_token(cred.credentials, db)
-    require_superadmin(admin)
+    _require_superadmin_module_access(admin, db, "domain_policies")
 
     policy = db.query(models.DomainPolicy).filter(models.DomainPolicy.id == policy_id).first()
     if not policy:
-        raise HTTPException(404, "Política no encontrada")
+        raise HTTPException(404, "Politica no encontrada")
 
-    domain = data.domain.strip().lower()
-    if not domain:
-        raise HTTPException(400, "Dominio inválido")
+    if admin.role != "superadmin" and not _can_admin_manage_policy_target(admin, policy.domain, db):
+        raise HTTPException(403, "No puedes editar esta politica")
 
-    if policy.domain != domain and db.query(models.DomainPolicy).filter(models.DomainPolicy.domain == domain).first():
-        raise HTTPException(400, "Política con ese dominio ya existe")
+    normalized_target_type = (data.target_type or "domain").strip().lower()
+    if normalized_target_type not in ["domain", "tag"]:
+        raise HTTPException(400, "target_type invalido: usa domain o tag")
 
-    policy.domain = domain
+    target_value = data.domain.strip()
+    if not target_value:
+        raise HTTPException(400, "Dominio/etiqueta invalido")
+
+    new_storage_key = _policy_storage_key(normalized_target_type, target_value)
+    if not new_storage_key:
+        raise HTTPException(400, "Dominio/etiqueta invalido")
+
+    if admin.role != "superadmin" and not _can_admin_manage_policy_target(admin, new_storage_key, db):
+        raise HTTPException(403, "No puedes mover esta politica a ese dominio/etiqueta")
+
+    if policy.domain != new_storage_key and db.query(models.DomainPolicy).filter(models.DomainPolicy.domain == new_storage_key).first():
+        raise HTTPException(400, "Ya existe una politica con ese objetivo")
+
+    policy.domain = new_storage_key
     policy.events_enabled = 1 if data.events_enabled else 0
     policy.availabilities_enabled = 1 if data.availabilities_enabled else 0
     policy.spaces_enabled = 1 if data.spaces_enabled else 0
     policy.users_enabled = 1 if data.users_enabled else 0
     policy.domain_policies_enabled = 1 if data.domain_policies_enabled else 0
+    policy.census_enabled = 1 if data.census_enabled else 0
+    policy.surveys_enabled = 1 if data.surveys_enabled else 0
+    policy.notifications_enabled = 1 if data.notifications_enabled else 0
     db.commit()
 
-    return {
-        "id": policy.id,
-        "domain": policy.domain,
-        "events_enabled": bool(policy.events_enabled),
-        "availabilities_enabled": bool(policy.availabilities_enabled),
-        "spaces_enabled": bool(policy.spaces_enabled),
-        "users_enabled": bool(policy.users_enabled),
-        "domain_policies_enabled": bool(policy.domain_policies_enabled),
-    }
+    return _domain_policy_to_dict(policy)
 
 
 @app.delete("/admin/domain-policies/{policy_id}")
@@ -808,11 +833,14 @@ def delete_domain_policy(
     db: Session = Depends(get_db)
 ):
     admin = get_user_from_token(cred.credentials, db)
-    require_superadmin(admin)
+    _require_superadmin_module_access(admin, db, "domain_policies")
 
     policy = db.query(models.DomainPolicy).filter(models.DomainPolicy.id == policy_id).first()
     if not policy:
-        raise HTTPException(404, "Política no encontrada")
+        raise HTTPException(404, "Politica no encontrada")
+
+    if admin.role != "superadmin" and not _can_admin_manage_policy_target(admin, policy.domain, db):
+        raise HTTPException(403, "No puedes eliminar esta politica")
 
     db.delete(policy)
     db.commit()
@@ -832,7 +860,7 @@ def create_event(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "events", admin.role):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "events", admin.role, set(_parse_group_tags(admin.group_tag))):
         raise HTTPException(403, "Eventos deshabilitados para tu dominio")
 
     allowed_domain = data.allowed_domain.strip().lower() if data.allowed_domain else None
@@ -887,7 +915,7 @@ def list_events(
 
     user_domain = _get_domain(user.email) if user else None
 
-    if user and not _is_feature_enabled(db, user_domain, "events", user.role):
+    if user and not _is_feature_enabled(db, user_domain, "events", user.role, set(_parse_group_tags(user.group_tag))):
         raise HTTPException(403, "Eventos deshabilitados para tu dominio")
 
     events = db.query(Event).all()
@@ -1227,7 +1255,7 @@ def get_my_availability(
     db: Session = Depends(get_db)
 ):
     user = get_user_from_token(cred.credentials, db)
-    if not _is_feature_enabled(db, _get_domain(user.email), "availabilities", user.role):
+    if not _is_feature_enabled(db, _get_domain(user.email), "availabilities", user.role, set(_parse_group_tags(user.group_tag))):
         raise HTTPException(403, "Disponibilidades deshabilitadas para tu dominio")
     return db.query(Availability).filter(Availability.user_id == user.id).all()
 
@@ -1239,7 +1267,7 @@ def create_my_availability(
     db: Session = Depends(get_db)
 ):
     user = get_user_from_token(cred.credentials, db)
-    if not _is_feature_enabled(db, _get_domain(user.email), "availabilities", user.role):
+    if not _is_feature_enabled(db, _get_domain(user.email), "availabilities", user.role, set(_parse_group_tags(user.group_tag))):
         raise HTTPException(403, "Disponibilidades deshabilitadas para tu dominio")
 
     today = datetime.utcnow().date()
@@ -1293,7 +1321,7 @@ def admin_all_availability(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "availabilities", admin.role):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "availabilities", admin.role, set(_parse_group_tags(admin.group_tag))):
         raise HTTPException(403, "Disponibilidades deshabilitadas para tu dominio")
 
     cleanup_expired_data(db)
@@ -1661,7 +1689,7 @@ def get_census_config(
         raise HTTPException(401, "Token inválido")
 
     admin = get_user_from_token(cred.credentials, db)
-    require_superadmin(admin)
+    _require_superadmin_module_access(admin, db, "census")
 
     config = db.query(CensusConfig).first()
     if not config:
@@ -1679,7 +1707,7 @@ def upsert_census_config(
         raise HTTPException(401, "Token inválido")
 
     admin = get_user_from_token(cred.credentials, db)
-    require_superadmin(admin)
+    _require_superadmin_module_access(admin, db, "census")
 
     existing = db.query(CensusConfig).first()
     token = existing.url_token if existing else secrets.token_urlsafe(16)
@@ -1716,7 +1744,7 @@ def regenerate_census_token(
         raise HTTPException(401, "Token inválido")
 
     admin = get_user_from_token(cred.credentials, db)
-    require_superadmin(admin)
+    _require_superadmin_module_access(admin, db, "census")
 
     config = db.query(CensusConfig).first()
     if not config:
@@ -1737,7 +1765,7 @@ def test_census_email(
         raise HTTPException(401, "Token inválido")
 
     admin = get_user_from_token(cred.credentials, db)
-    require_superadmin(admin)
+    _require_superadmin_module_access(admin, db, "census")
 
     config = db.query(CensusConfig).first()
     if not config:
@@ -1859,7 +1887,7 @@ def admin_list_surveys(
         raise HTTPException(401, "Token inválido")
 
     admin = get_user_from_token(cred.credentials, db)
-    require_superadmin(admin)
+    _require_superadmin_module_access(admin, db, "surveys")
 
     surveys = db.query(Survey).order_by(Survey.id.desc()).all()
     return [_survey_to_dict(survey, include_count=True) for survey in surveys]
@@ -1875,7 +1903,7 @@ def admin_create_survey(
         raise HTTPException(401, "Token inválido")
 
     admin = get_user_from_token(cred.credentials, db)
-    require_superadmin(admin)
+    _require_superadmin_module_access(admin, db, "surveys")
 
     title = (data.title or "").strip()
     if not title:
@@ -1923,7 +1951,7 @@ def admin_regenerate_survey_token(
         raise HTTPException(401, "Token inválido")
 
     admin = get_user_from_token(cred.credentials, db)
-    require_superadmin(admin)
+    _require_superadmin_module_access(admin, db, "surveys")
 
     survey = db.query(Survey).filter(Survey.id == survey_id).first()
     if not survey:
@@ -1944,7 +1972,7 @@ def admin_survey_responses(
         raise HTTPException(401, "Token inválido")
 
     admin = get_user_from_token(cred.credentials, db)
-    require_superadmin(admin)
+    _require_superadmin_module_access(admin, db, "surveys")
 
     survey = db.query(Survey).filter(Survey.id == survey_id).first()
     if not survey:
@@ -2038,30 +2066,107 @@ def _get_domain(email: str):
     return email.split("@")[-1].strip().lower()
 
 
-def _get_domain_policy(db: Session, domain: str):
-    if not domain:
-        return None
-    return db.query(models.DomainPolicy).filter(models.DomainPolicy.domain == domain).first()
+def _policy_storage_key(target_type: str, target_value: str) -> str:
+    normalized_target_type = (target_type or "domain").strip().lower()
+    if normalized_target_type == "tag":
+        return f"tag:{_normalize_group_tag(target_value)}"
+    return (target_value or "").strip().lower()
 
 
-def _is_feature_enabled(db: Session, domain: str, feature: str, role: str = "user"):
+def _policy_target_from_storage(storage_key: str) -> tuple[str, str]:
+    key = (storage_key or "").strip().lower()
+    if key.startswith("tag:"):
+        return "tag", _normalize_group_tag(key.split(":", 1)[1])
+    return "domain", key
+
+
+def _matches_policy_target(storage_key: str, domain: str, tags: set[str]) -> bool:
+    target_type, target_value = _policy_target_from_storage(storage_key)
+    if target_type == "tag":
+        return target_value in tags
+    return target_value == (domain or "").strip().lower()
+
+
+def _get_applicable_policies(db: Session, domain: str, tags: set[str] | None = None):
+    normalized_domain = (domain or "").strip().lower()
+    normalized_tags = set(tags or set())
+    all_policies = db.query(models.DomainPolicy).all()
+    return [
+        policy
+        for policy in all_policies
+        if _matches_policy_target(policy.domain, normalized_domain, normalized_tags)
+    ]
+
+
+def _is_feature_enabled(db: Session, domain: str, feature: str, role: str = "user", tags: set[str] | None = None):
     if role == "superadmin":
         return True
 
-    policy = _get_domain_policy(db, domain)
-    if not policy:
+    applicable = _get_applicable_policies(db, domain, tags)
+    if not applicable:
+        # Defaults when no policy is defined, by role
+        if role == "admin":
+            return feature in {"events", "availabilities", "users"}
+        # user role
+        return feature in {"events", "availabilities"}
+
+    feature_map = {
+        "events": "events_enabled",
+        "availabilities": "availabilities_enabled",
+        "spaces": "spaces_enabled",
+        "users": "users_enabled",
+        "domain_policies": "domain_policies_enabled",
+        "census": "census_enabled",
+        "surveys": "surveys_enabled",
+        "notifications": "notifications_enabled",
+    }
+    column_name = feature_map.get(feature)
+    if not column_name:
         return True
-    if feature == "events":
-        return bool(policy.events_enabled)
-    if feature == "availabilities":
-        return bool(policy.availabilities_enabled)
-    if feature == "spaces":
-        return bool(policy.spaces_enabled)
-    if feature == "users":
-        return bool(policy.users_enabled)
-    if feature == "domain_policies":
-        return bool(policy.domain_policies_enabled)
-    return True
+
+    # Si hay políticas aplicables, habilita si al menos una política habilita el feature.
+    return any(bool(getattr(policy, column_name, 0)) for policy in applicable)
+
+
+def _domain_policy_to_dict(policy: models.DomainPolicy) -> dict:
+    target_type, target_value = _policy_target_from_storage(policy.domain)
+    return {
+        "id": policy.id,
+        "domain": target_value,
+        "target_type": target_type,
+        "events_enabled": bool(policy.events_enabled),
+        "availabilities_enabled": bool(policy.availabilities_enabled),
+        "spaces_enabled": bool(policy.spaces_enabled),
+        "users_enabled": bool(policy.users_enabled),
+        "domain_policies_enabled": bool(policy.domain_policies_enabled),
+        "census_enabled": bool(getattr(policy, "census_enabled", 0)),
+        "surveys_enabled": bool(getattr(policy, "surveys_enabled", 0)),
+        "notifications_enabled": bool(getattr(policy, "notifications_enabled", 0)),
+    }
+
+
+def _can_admin_manage_policy_target(admin: User, storage_key: str, db: Session) -> bool:
+    if admin.role == "superadmin":
+        return True
+
+    target_type, target_value = _policy_target_from_storage(storage_key)
+    if target_type == "domain":
+        return _can_admin_manage_domain(admin, target_value, db)
+
+    admin_tags = set(_parse_group_tags(admin.group_tag))
+    return target_value in admin_tags
+
+
+def _require_superadmin_module_access(user: User, db: Session, module_name: str):
+    if user.role == "superadmin":
+        return
+    if user.role != "admin":
+        raise HTTPException(403, "No autorizado")
+
+    user_domain = _get_domain(user.email)
+    user_tags = set(_parse_group_tags(user.group_tag))
+    if not _is_feature_enabled(db, user_domain, module_name, user.role, user_tags):
+        raise HTTPException(403, "No autorizado para este modulo")
 
 
 def _same_domain_or_superadmin(user: User, target_user: User, db: Session | None = None):
@@ -2095,14 +2200,14 @@ def _can_admin_manage_domain(admin: User, target_domain: str, db: Session) -> bo
         return True
 
     admin_domain = _get_domain(admin.email)
+    admin_tags = set(_parse_group_tags(admin.group_tag))
     normalized_target_domain = (target_domain or "").strip().lower()
 
     if normalized_target_domain == admin_domain:
         return True
 
-    # Solo admins con politica habilitada pueden gestionar fuera de su dominio
-    admin_policy = _get_domain_policy(db, admin_domain)
-    if not admin_policy or not bool(admin_policy.domain_policies_enabled):
+    # Solo admins con politica habilitada pueden gestionar fuera de su dominio.
+    if not _is_feature_enabled(db, admin_domain, "domain_policies", admin.role, admin_tags):
         return False
 
     return normalized_target_domain in _extra_domains_from_admin_tags(admin)
@@ -2119,12 +2224,12 @@ def _can_admin_manage_user(admin: User, target_user: User, db: Session | None = 
     if db is None:
         return False
 
+    admin_tags = set(_parse_group_tags(admin.group_tag))
+
     # Politica habilitada + etiqueta compartida o dominio delegado por tag
-    admin_policy = _get_domain_policy(db, _get_domain(admin.email))
-    if not admin_policy or not bool(admin_policy.domain_policies_enabled):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "domain_policies", admin.role, admin_tags):
         return False
 
-    admin_tags = set(_parse_group_tags(admin.group_tag))
     target_tags = set(_parse_group_tags(target_user.group_tag))
     if admin_tags.intersection(target_tags):
         return True
@@ -2365,7 +2470,7 @@ def send_admin_notification(
     db: Session = Depends(get_db)
 ):
     admin = get_user_from_token(cred.credentials if cred else None, db)
-    require_superadmin(admin)
+    _require_superadmin_module_access(admin, db, "notifications")
 
     scope = (data.scope or "").strip().lower()
     title = (data.title or "").strip()
@@ -2380,17 +2485,28 @@ def send_admin_notification(
     target_collective = None
 
     if scope == "all":
+        if admin.role != "superadmin":
+            raise HTTPException(403, "Los admins delegados no pueden enviar notificaciones globales")
         target_user_ids = [u.id for u in db.query(User.id).all()]
     elif scope == "colectivo":
         target_collective = (data.collective or "").strip().lower()
         if not target_collective:
             raise HTTPException(400, "collective obligatorio para scope=colectivo")
+        if admin.role != "superadmin" and not _can_admin_manage_domain(admin, target_collective, db):
+            raise HTTPException(403, "No autorizado para notificar ese colectivo")
         users = db.query(User).all()
         target_user_ids = [u.id for u in users if _get_domain(u.email) == target_collective]
     else:
         target_user_ids = sorted(set(data.user_ids or []))
         if not target_user_ids:
             raise HTTPException(400, "user_ids obligatorio para scope=users")
+        if admin.role != "superadmin":
+            target_users = db.query(User).filter(User.id.in_(target_user_ids)).all()
+            if len(target_users) != len(target_user_ids):
+                raise HTTPException(404, "Alguno de los usuarios destino no existe")
+            for target_user in target_users:
+                if not _can_admin_manage_user(admin, target_user, db):
+                    raise HTTPException(403, "No autorizado para notificar a usuarios fuera de tu alcance")
 
     notify_result = _notify_users_by_ids(db, target_user_ids, title, body)
 
@@ -2446,7 +2562,7 @@ def list_spaces(
         except HTTPException:
             user = None
 
-    if user and not _is_feature_enabled(db, _get_domain(user.email), "spaces", user.role):
+    if user and not _is_feature_enabled(db, _get_domain(user.email), "spaces", user.role, set(_parse_group_tags(user.group_tag))):
         raise HTTPException(403, "Funcionalidad de espacios deshabilitada para tu dominio")
 
     return [
@@ -2468,7 +2584,7 @@ def create_space(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "spaces", admin.role):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "spaces", admin.role, set(_parse_group_tags(admin.group_tag))):
         raise HTTPException(403, "Funcionalidad de espacios deshabilitada para tu dominio")
 
     if db.query(models.Space).filter(models.Space.name == data.name).first():
@@ -2499,7 +2615,7 @@ def delete_space(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "spaces", admin.role):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "spaces", admin.role, set(_parse_group_tags(admin.group_tag))):
         raise HTTPException(403, "Funcionalidad de espacios deshabilitada para tu dominio")
 
     s = db.query(models.Space).filter(models.Space.id == space_id).first()
@@ -2527,7 +2643,7 @@ def list_reservations(
     user = get_user_from_token(cred.credentials, db)
     user_domain = _get_domain(user.email)
 
-    if not _is_feature_enabled(db, user_domain, "spaces", user.role):
+    if not _is_feature_enabled(db, user_domain, "spaces", user.role, set(_parse_group_tags(user.group_tag))):
         raise HTTPException(403, "Funcionalidad de espacios deshabilitada para tu dominio")
 
     all_reservations = db.query(models.SpaceReservation).join(models.Space).join(models.User).all()
@@ -2681,7 +2797,7 @@ def admin_list_reservations(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "spaces", admin.role):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "spaces", admin.role, set(_parse_group_tags(admin.group_tag))):
         raise HTTPException(403, "Funcionalidad de espacios deshabilitada para tu dominio")
 
     all_items = db.query(models.SpaceReservation).join(models.Space).join(models.User).all()
@@ -2748,7 +2864,7 @@ def edit_event(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "events", admin.role):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "events", admin.role, set(_parse_group_tags(admin.group_tag))):
         raise HTTPException(403, "Eventos deshabilitados para tu dominio")
 
     ev = db.query(Event).filter(Event.id == event_id).first()
@@ -2785,3 +2901,6 @@ def edit_event(
 
 
 # =========================================================
+
+
+

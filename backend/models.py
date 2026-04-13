@@ -58,6 +58,9 @@ class DomainPolicy(Base):
     spaces_enabled = Column(Integer, default=1)
     users_enabled = Column(Integer, default=1)
     domain_policies_enabled = Column(Integer, default=0)
+    census_enabled = Column(Integer, default=0)
+    surveys_enabled = Column(Integer, default=0)
+    notifications_enabled = Column(Integer, default=0)
 
 
 

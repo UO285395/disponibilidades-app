@@ -26,9 +26,9 @@ export default function AdminDashboard() {
     if (u.role === "superadmin" || u.spaces_enabled) values.push("spaces");
     if (u.role === "superadmin" || u.users_enabled) values.push("users");
     if (u.role === "superadmin" || u.domain_policies_enabled) values.push("domain-policies");
-    if (u.role === "superadmin") values.push("censo");
-    if (u.role === "superadmin") values.push("surveys");
-    if (u.role === "superadmin") values.push("notifications");
+    if (u.role === "superadmin" || u.census_enabled) values.push("censo");
+    if (u.role === "superadmin" || u.surveys_enabled) values.push("surveys");
+    if (u.role === "superadmin" || u.notifications_enabled) values.push("notifications");
     return values;
   }, []);
 
@@ -90,9 +90,9 @@ export default function AdminDashboard() {
   const canSpaces = Boolean(user && (user.role === "superadmin" || user.spaces_enabled));
   const canUsers = Boolean(user && (user.role === "superadmin" || user.users_enabled));
   const canDomainPolicies = Boolean(user && (user.role === "superadmin" || user.domain_policies_enabled));
-  const canCensus = Boolean(user && user.role === "superadmin");
-  const canSurveys = Boolean(user && user.role === "superadmin");
-  const canNotifications = Boolean(user && user.role === "superadmin");
+  const canCensus = Boolean(user && (user.role === "superadmin" || user.census_enabled));
+  const canSurveys = Boolean(user && (user.role === "superadmin" || user.surveys_enabled));
+  const canNotifications = Boolean(user && (user.role === "superadmin" || user.notifications_enabled));
 
   const tabDefs = useMemo(
     () => [
