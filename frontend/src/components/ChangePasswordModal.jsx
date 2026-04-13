@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Modal, Button, PasswordInput, Group, Alert } from "@mantine/core";
 import { authAPI } from "../api/api.js";
-import { AlertCircle, CheckCircle } from "lucide-react";
 
 export default function ChangePasswordModal({ opened, onClose }) {
   const [currentPassword, setCurrentPassword] = useState("");
@@ -63,12 +62,12 @@ export default function ChangePasswordModal({ opened, onClose }) {
     >
       <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
         {error && (
-          <Alert icon={<AlertCircle size={16} />} color="red" title="Error">
+          <Alert color="red" title="Error">
             {error}
           </Alert>
         )}
         {message && (
-          <Alert icon={<CheckCircle size={16} />} color="green" title="Éxito">
+          <Alert color="green" title="Éxito">
             {message}
           </Alert>
         )}
