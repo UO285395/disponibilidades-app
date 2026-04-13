@@ -27,11 +27,6 @@ export const adminAPI = {
     return request(`/admin/users/${userId}/group-tags/${encodeURIComponent(tag)}`, "DELETE");
   },
 
-  // endpoint secreto para ti
-  becomeAdmin() {
-    return request("/admin/become_admin", "POST");
-  },
-
   makeAdmin(userId) {
     return request(`/admin/make_admin/${userId}`, "POST");
   },
@@ -54,9 +49,13 @@ export const adminAPI = {
     return request("/events", "POST", payload);
   },
 
+  editEvent(id, payload) {
+    return request(`/events/${id}`, "PUT", payload);
+  },
+
   deleteEvent(id) {
-  return request(`/events/${id}`, "DELETE");
-},
+    return request(`/events/${id}`, "DELETE");
+  },
 
 
   getEventResponses(eventId) {

@@ -245,6 +245,12 @@ class Login(BaseModel):
     password: str
 
 
+class ChangePassword(BaseModel):
+    current_password: str
+    new_password: str
+    confirm_new_password: str
+
+
 class DeviceTokenRegister(BaseModel):
     token: str
     platform: str = "android"
@@ -394,32 +400,6 @@ def me(
         "domain_policies_enabled": domain_policies_enabled,
     }
 
-@app.post("/admin/become_admin")
-def become_admin(
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    user = get_user_from_token(cred.credentials, db)
-
-    user.role = "admin"
-    db.commit()
-
-    return {"ok": True}
-
-
-@app.post("/admin/become_superadmin")
-def become_superadmin(
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    user = get_user_from_token(cred.credentials, db)
-
-    user.role = "superadmin"
-    db.commit()
-
-    return {"ok": True}
-
-
 @app.get("/admin/users")
 def admin_list_users(
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
@@ -431,7 +411,8 @@ def admin_list_users(
     if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role):
         raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
-    users = db.query(User).order_by(func.lower(User.email)).all()
+    all_users = db.query(User).order_by(func.lower(User.email)).all()
+    users = [u for u in all_users if _can_admin_manage_user(admin, u, db)]
 
     return [
         {
@@ -473,10 +454,9 @@ def admin_create_user(
         raise HTTPException(400, "Email ya registrado")
 
     if admin.role != "superadmin":
-        admin_domain = _get_domain(admin.email)
         target_domain = _get_domain(email)
-        if admin_domain != target_domain:
-            raise HTTPException(403, "Solo puedes crear usuarios de tu dominio")
+        if not _can_admin_manage_domain(admin, target_domain, db):
+            raise HTTPException(403, "Solo puedes crear usuarios de tu dominio o dominios delegados")
 
     initial_tags = []
     if data.group_tags:
@@ -534,7 +514,7 @@ def admin_update_user_group_tag(
     if user.role == "superadmin" and admin.role != "superadmin":
         raise HTTPException(403, "No autorizado para modificar superadmin")
 
-    if admin.role != "superadmin" and not _same_domain_or_superadmin(admin, user):
+    if admin.role != "superadmin" and not _same_domain_or_superadmin(admin, user, db):
         raise HTTPException(403, "No puedes administrar usuarios de otro dominio")
 
     group_tag = _normalize_group_tag(data.group_tag or "")
@@ -568,7 +548,7 @@ def admin_add_user_group_tag(
     if user.role == "superadmin" and admin.role != "superadmin":
         raise HTTPException(403, "No autorizado para modificar superadmin")
 
-    if admin.role != "superadmin" and not _same_domain_or_superadmin(admin, user):
+    if admin.role != "superadmin" and not _same_domain_or_superadmin(admin, user, db):
         raise HTTPException(403, "No puedes administrar usuarios de otro dominio")
 
     new_tag = _normalize_group_tag(data.tag)
@@ -608,7 +588,7 @@ def admin_remove_user_group_tag(
     if user.role == "superadmin" and admin.role != "superadmin":
         raise HTTPException(403, "No autorizado para modificar superadmin")
 
-    if admin.role != "superadmin" and not _same_domain_or_superadmin(admin, user):
+    if admin.role != "superadmin" and not _same_domain_or_superadmin(admin, user, db):
         raise HTTPException(403, "No puedes administrar usuarios de otro dominio")
 
     target_tag = _normalize_group_tag(tag)
@@ -683,7 +663,7 @@ def remove_admin(
     if user.role == "superadmin" and admin.role != "superadmin":
         raise HTTPException(403, "No autorizado para modificar superadmin")
 
-    if admin.role != "superadmin" and not _same_domain_or_superadmin(admin, user):
+    if admin.role != "superadmin" and not _same_domain_or_superadmin(admin, user, db):
         raise HTTPException(403, "No puedes administrar usuarios de otro dominio")
 
     user.role = "user"
@@ -711,7 +691,7 @@ def make_admin(
     if user.role == "superadmin" and admin.role != "superadmin":
         raise HTTPException(403, "No autorizado para modificar superadmin")
 
-    if admin.role != "superadmin" and not _same_domain_or_superadmin(admin, user):
+    if admin.role != "superadmin" and not _same_domain_or_superadmin(admin, user, db):
         raise HTTPException(403, "No puedes administrar usuarios de otro dominio")
 
     user.role = "admin"
@@ -993,7 +973,7 @@ def get_event(
     if not ev:
         raise HTTPException(404, "Evento no encontrado")
 
-    _ensure_event_domain_access(admin, ev)
+    _ensure_event_domain_access(admin, ev, db)
 
     return {
         "id": ev.id,
@@ -1019,7 +999,7 @@ def event_responses(
     if not ev:
         raise HTTPException(404, "Evento no encontrado")
 
-    _ensure_event_domain_access(user, ev)
+    _ensure_event_domain_access(user, ev, db)
 
     user_domain = _get_domain(user.email)
 
@@ -1163,7 +1143,7 @@ def update_my_event_companions(
     if not event:
         raise HTTPException(404, "Evento no encontrado")
 
-    _ensure_event_domain_access(user, event)
+    _ensure_event_domain_access(user, event, db)
 
     if data.count < 0:
         raise HTTPException(400, "El número de acompañantes no puede ser negativo")
@@ -1221,7 +1201,7 @@ def delete_event(
     if not ev:
         raise HTTPException(404, "Evento no encontrado")
 
-    _ensure_event_domain_access(admin, ev)
+    _ensure_event_domain_access(admin, ev, db)
 
     # borrar primero respuestas asociadas
     db.query(EventCompanion)\
@@ -1326,7 +1306,8 @@ def admin_all_availability(
 
     db.commit()
 
-    items = db.query(Availability).all()
+    all_items = db.query(Availability).all()
+    items = [a for a in all_items if _can_admin_manage_domain(admin, _get_domain(a.user.email), db)]
 
     return [
         {
@@ -2083,12 +2064,72 @@ def _is_feature_enabled(db: Session, domain: str, feature: str, role: str = "use
     return True
 
 
-def _same_domain_or_superadmin(user: User, target_user: User):
-    if user.role == "superadmin":
+def _same_domain_or_superadmin(user: User, target_user: User, db: Session | None = None):
+    return _can_admin_manage_user(user, target_user, db)
+
+
+def _extra_domains_from_admin_tags(admin: User) -> set[str]:
+    extra_domains = set()
+    for tag in _parse_group_tags(admin.group_tag):
+        if tag.startswith("domain:"):
+            candidate = tag.split(":", 1)[1].strip().lower()
+            if candidate:
+                extra_domains.add(candidate)
+        elif tag.startswith("dominio:"):
+            candidate = tag.split(":", 1)[1].strip().lower()
+            if candidate:
+                extra_domains.add(candidate)
+        elif tag.startswith("manage-domain:"):
+            candidate = tag.split(":", 1)[1].strip().lower()
+            if candidate:
+                extra_domains.add(candidate)
+        elif tag.startswith("manage:"):
+            candidate = tag.split(":", 1)[1].strip().lower()
+            if candidate:
+                extra_domains.add(candidate)
+    return extra_domains
+
+
+def _can_admin_manage_domain(admin: User, target_domain: str, db: Session) -> bool:
+    if admin.role == "superadmin":
         return True
-    if not user.email or not target_user.email:
+
+    admin_domain = _get_domain(admin.email)
+    normalized_target_domain = (target_domain or "").strip().lower()
+
+    if normalized_target_domain == admin_domain:
+        return True
+
+    # Solo admins con politica habilitada pueden gestionar fuera de su dominio
+    admin_policy = _get_domain_policy(db, admin_domain)
+    if not admin_policy or not bool(admin_policy.domain_policies_enabled):
         return False
-    return _get_domain(user.email) == _get_domain(target_user.email)
+
+    return normalized_target_domain in _extra_domains_from_admin_tags(admin)
+
+
+def _can_admin_manage_user(admin: User, target_user: User, db: Session | None = None) -> bool:
+    if admin.role == "superadmin":
+        return True
+
+    target_domain = _get_domain(target_user.email)
+    if _get_domain(admin.email) == target_domain:
+        return True
+
+    if db is None:
+        return False
+
+    # Politica habilitada + etiqueta compartida o dominio delegado por tag
+    admin_policy = _get_domain_policy(db, _get_domain(admin.email))
+    if not admin_policy or not bool(admin_policy.domain_policies_enabled):
+        return False
+
+    admin_tags = set(_parse_group_tags(admin.group_tag))
+    target_tags = set(_parse_group_tags(target_user.group_tag))
+    if admin_tags.intersection(target_tags):
+        return True
+
+    return target_domain in _extra_domains_from_admin_tags(admin)
 
 
 def _load_fcm_service_account():
@@ -2378,13 +2419,17 @@ def send_admin_notification(
     }
 
 
-def _ensure_event_domain_access(user: User, event: Event):
+def _ensure_event_domain_access(user: User, event: Event, db: Session | None = None):
     if user.role == "superadmin":
         return
 
     if event.allowed_domain:
         event_domain = event.allowed_domain.strip().lower()
         user_domain = _get_domain(user.email)
+        if user.role == "admin" and db is not None:
+            if not _can_admin_manage_domain(user, event_domain, db):
+                raise HTTPException(403, "No autorizado para operar eventos de otro dominio")
+            return
         if event_domain != user_domain:
             raise HTTPException(403, "No autorizado para operar eventos de otro dominio")
 
@@ -2460,6 +2505,12 @@ def delete_space(
     s = db.query(models.Space).filter(models.Space.id == space_id).first()
     if not s:
         raise HTTPException(404, "Espacio no encontrado")
+    
+    # Validar que admin solo puede eliminar espacios creados en su dominio
+    if admin.role != "superadmin":
+        creator_domain = _get_domain(s.creator.email) if s.creator else ""
+        if not _can_admin_manage_domain(admin, creator_domain, db):
+            raise HTTPException(403, "No puedes eliminar espacios de otro dominio")
 
     db.query(models.SpaceReservation).filter(models.SpaceReservation.space_id == space_id).delete()
     db.delete(s)
@@ -2546,6 +2597,26 @@ def create_reservation(
     start_time = start_dt.strftime("%H:%M:%S")
     end_time = end_dt.strftime("%H:%M:%S")
 
+    # Validar conflictos de reservas en el mismo espacio y fecha
+    conflicting = db.query(models.SpaceReservation).filter(
+        models.SpaceReservation.space_id == data.space_id,
+        models.SpaceReservation.date == data.date
+    ).all()
+
+    # Helper function to check if two time ranges overlap
+    def times_overlap(start1, end1, start2, end2):
+        # Convert to datetime objects for comparison
+        from datetime import datetime as dt
+        s1 = dt.strptime(start1, "%H:%M:%S")
+        e1 = dt.strptime(end1, "%H:%M:%S")
+        s2 = dt.strptime(start2, "%H:%M:%S")
+        e2 = dt.strptime(end2, "%H:%M:%S")
+        return s1 < e2 and s2 < e1
+
+    for existing in conflicting:
+        if times_overlap(start_time, end_time, existing.start_time, existing.end_time):
+            raise HTTPException(409, f"Conflicto: Ya existe una reserva en {existing.space.name} de {existing.start_time} a {existing.end_time} en esta fecha")
+
     # No forzar validación de colisiones en sprint inicial, se asume allowed.
     r = models.SpaceReservation(
         space_id=data.space_id,
@@ -2581,7 +2652,20 @@ def delete_reservation(
     if not r:
         raise HTTPException(404, "Reserva no encontrada")
 
-    if user.role not in ["admin", "superadmin"] and r.user_id != user.id:
+    # User own reservations, admin/superadmin of creator's domain, or superadmin
+    if r.user_id == user.id:
+        # Own reservation
+        pass
+    elif user.role == "superadmin":
+        # Superadmin can delete any
+        pass
+    elif user.role == "admin":
+        # Admin can only delete reservations from users in their domain
+        creator_domain = _get_domain(r.user.email)
+        if not _can_admin_manage_domain(user, creator_domain, db):
+            raise HTTPException(403, "No puedes eliminar reservas de otro dominio")
+    else:
+        # Regular user can only delete their own
         raise HTTPException(403, "No autorizado")
 
     db.delete(r)
@@ -2623,3 +2707,81 @@ def admin_list_reservations(
         }
         for r in items
     ]
+
+@app.put("/auth/change-password")
+def change_password(
+    data: ChangePassword,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    user = get_user_from_token(cred.credentials, db)
+
+    # Validar que las nuevas contrasenas coincidan
+    if data.new_password != data.confirm_new_password:
+        raise HTTPException(400, "Las nuevas contrasenias no coinciden")
+
+    # Validar contrasena actual
+    if not verify_password(data.current_password, user.hashed_password):
+        raise HTTPException(400, "Contrasena actual incorrecta")
+
+    # Validar que sea diferente
+    if data.current_password == data.new_password:
+        raise HTTPException(400, "La nueva contrasena debe ser diferente a la actual")
+
+    # Validar longitud minima
+    if len(data.new_password) < 6:
+        raise HTTPException(400, "La nueva contrasena debe tener al menos 6 caracteres")
+
+    # Actualizar contrasena
+    user.hashed_password = hash_password(data.new_password)
+    db.commit()
+
+    return {"ok": True, "message": "Contrasena actualizada correctamente"}
+
+@app.put("/events/{event_id}")
+def edit_event(
+    event_id: int,
+    data: EventCreate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    require_admin(admin)
+
+    if not _is_feature_enabled(db, _get_domain(admin.email), "events", admin.role):
+        raise HTTPException(403, "Eventos deshabilitados para tu dominio")
+
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    if not ev:
+        raise HTTPException(404, "Evento no encontrado")
+
+    _ensure_event_domain_access(admin, ev, db)
+
+    # Solo creador o superadmin puede editar
+    if admin.role != "superadmin" and ev.created_by != admin.id:
+        raise HTTPException(403, "Solo el creador puede editar este evento")
+
+    allowed_domain = data.allowed_domain.strip().lower() if data.allowed_domain else None
+    if allowed_domain in ["todos", "all"]:
+        allowed_domain = None
+
+    ev.title = data.title
+    ev.description = data.description
+    ev.date = data.date
+    ev.start_time = data.start_time
+    ev.allowed_domain = allowed_domain
+    db.commit()
+    db.refresh(ev)
+
+    return {
+        "id": ev.id,
+        "title": ev.title,
+        "description": ev.description,
+        "date": ev.date,
+        "start_time": ev.start_time,
+        "allowed_domain": ev.allowed_domain,
+        "created_by": ev.created_by,
+    }
+
+
+# =========================================================

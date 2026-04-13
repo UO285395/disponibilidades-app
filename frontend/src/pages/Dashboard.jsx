@@ -6,11 +6,13 @@ import MobileWeekCalendar from "../components/MobileWeekCalendar.jsx";
 import EventsSection from "../components/EventsSection.jsx";
 import SpaceReservations from "../components/SpaceReservations.jsx";
 import { initMobileNotifications } from "../services/mobileNotifications.js";
+import ChangePasswordModal from "../components/ChangePasswordModal.jsx";
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);
   const [offsetWeeks, setOffsetWeeks] = useState(0);
   const navigate = useNavigate();
+  const [changePasswordOpened, setChangePasswordOpened] = useState(false);
 
   useEffect(() => {
     if (!getToken()) {
@@ -81,10 +83,18 @@ export default function Dashboard() {
               Ir al panel admin
             </Button>
           )}
+                    <Button variant="outline" onClick={() => setChangePasswordOpened(true)}>
+                      Cambiar contraseña
+                    </Button>
           <Button color="red" onClick={logout}>
             Cerrar sesión
           </Button>
         </Group>
+
+            <ChangePasswordModal
+              opened={changePasswordOpened}
+              onClose={() => setChangePasswordOpened(false)}
+            />
       </Box>
 
       <Divider my="md" />

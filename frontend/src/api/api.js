@@ -153,6 +153,14 @@ export const authAPI = {
       full_name: fullName,
       password
     });
+  },
+
+  changePassword(currentPassword, newPassword, confirmNewPassword) {
+    return request("/auth/change-password", "PUT", {
+      current_password: currentPassword,
+      new_password: newPassword,
+      confirm_new_password: confirmNewPassword
+    });
   }
 };
 

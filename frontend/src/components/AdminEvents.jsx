@@ -10,6 +10,12 @@ export default function AdminEvents() {
   const [date, setDate] = useState(null);
   const [startTime, setStartTime] = useState("");
   const [allowedDomain, setAllowedDomain] = useState("");
+  const [editingEventId, setEditingEventId] = useState(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editDate, setEditDate] = useState("");
+  const [editStartTime, setEditStartTime] = useState("");
+  const [editAllowedDomain, setEditAllowedDomain] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -77,6 +83,46 @@ export default function AdminEvents() {
     }
   }
 
+  function startEdit(ev) {
+    setEditingEventId(ev.id);
+    setEditTitle(ev.title || "");
+    setEditDescription(ev.description || "");
+    setEditDate(ev.date || "");
+    setEditStartTime(ev.start_time || "");
+    setEditAllowedDomain(ev.allowed_domain || "");
+  }
+
+  function cancelEdit() {
+    setEditingEventId(null);
+    setEditTitle("");
+    setEditDescription("");
+    setEditDate("");
+    setEditStartTime("");
+    setEditAllowedDomain("");
+  }
+
+  async function saveEdit() {
+    if (!editingEventId || !editTitle || !editDate) return;
+
+    const normalized = editAllowedDomain.trim().toLowerCase();
+    const domainToSend = !normalized || normalized === "todos" || normalized === "all" ? null : normalized;
+
+    try {
+      await adminAPI.editEvent(editingEventId, {
+        title: editTitle,
+        description: editDescription || null,
+        date: editDate,
+        start_time: editStartTime || null,
+        allowed_domain: domainToSend,
+      });
+      cancelEdit();
+      await reload();
+    } catch (e) {
+      console.error("Error editando evento", e);
+      alert(e?.message || "Error editando evento");
+    }
+  }
+
   return (
     <>
       <Title order={3} mb="md">
@@ -134,13 +180,52 @@ export default function AdminEvents() {
       {events.map((ev) => {
         return (
           <Card key={ev.id} shadow="sm" p="md" mb="md">
-            <div><b>{ev.title}</b> — {ev.date}</div>
-            {ev.allowed_domain && (
-              <p style={{ margin: '4px 0', color: '#555' }}>
-                Colectivo: <strong>{ev.allowed_domain}</strong>
-              </p>
+            {editingEventId === ev.id ? (
+              <>
+                <TextInput
+                  label="Titulo"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  mb="sm"
+                />
+                <Textarea
+                  label="Descripcion"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  mb="sm"
+                />
+                <TextInput
+                  type="date"
+                  label="Fecha"
+                  value={editDate}
+                  onChange={(e) => setEditDate(e.target.value)}
+                  mb="sm"
+                />
+                <TextInput
+                  type="time"
+                  label="Hora inicio"
+                  value={editStartTime}
+                  onChange={(e) => setEditStartTime(e.target.value)}
+                  mb="sm"
+                />
+                <TextInput
+                  label="Colectivo"
+                  value={editAllowedDomain}
+                  onChange={(e) => setEditAllowedDomain(e.target.value)}
+                  mb="sm"
+                />
+              </>
+            ) : (
+              <>
+                <div><b>{ev.title}</b> - {ev.date}</div>
+                {ev.allowed_domain && (
+                  <p style={{ margin: "4px 0", color: "#555" }}>
+                    Colectivo: <strong>{ev.allowed_domain}</strong>
+                  </p>
+                )}
+                {ev.description && <p>{ev.description}</p>}
+              </>
             )}
-            {ev.description && <p>{ev.description}</p>}
 
             {/* Resumen de votos Sí / No */}
             <div style={{ marginTop: "10px" }}>
@@ -158,6 +243,21 @@ export default function AdminEvents() {
               >
                 Ver respuestas
               </Button>
+
+              {editingEventId === ev.id ? (
+                <>
+                  <Button w={130} color="green" onClick={saveEdit}>
+                    Guardar
+                  </Button>
+                  <Button w={130} variant="outline" onClick={cancelEdit}>
+                    Cancelar
+                  </Button>
+                </>
+              ) : (
+                <Button w={130} variant="outline" onClick={() => startEdit(ev)}>
+                  Editar
+                </Button>
+              )}
 
               <Button
                 w={130}
