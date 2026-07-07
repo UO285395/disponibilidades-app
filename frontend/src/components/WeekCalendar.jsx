@@ -34,8 +34,6 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
   const [availabilities, setAvailabilities] = useState([]);
   const [pendingKeys, setPendingKeys] = useState(new Set());
 
-  const baseWeekStart = startOfWeek(new Date());
-  const weekStart = addDays(baseWeekStart, offsetWeeks * 7);
   const today = useMemo(() => {
     const value = new Date();
     value.setHours(0, 0, 0, 0);
@@ -167,8 +165,11 @@ export default function WeekCalendar({ offsetWeeks = 0 }) {
 
 
 
-  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-  const hours = Array.from({ length: 16 }, (_, h) => h + 8);
+  const days = useMemo(() => {
+    const weekStart = addDays(startOfWeek(new Date()), offsetWeeks * 7);
+    return Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  }, [offsetWeeks]);
+  const hours = useMemo(() => Array.from({ length: 16 }, (_, h) => h + 8), []);
 
   return (
     <Card shadow="md" p="lg" radius="md">

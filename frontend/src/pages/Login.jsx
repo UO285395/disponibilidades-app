@@ -12,16 +12,21 @@ import { authAPI } from "../api/api.js";
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
 
   async function handleLogin(e) {
     e.preventDefault(); // evita recarga al pulsar Enter
+    if (submitting) return;
 
     try {
+      setSubmitting(true);
       await authAPI.login(email, password);
       navigate("/dashboard", { replace: true });
     } catch (e) {
       alert("Error: " + e.message);
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -50,7 +55,7 @@ export default function Login() {
             mb="md"
           />
 
-          <Button fullWidth mt="md" type="submit">
+          <Button fullWidth mt="md" type="submit" loading={submitting} disabled={submitting}>
             Entrar
           </Button>
         </form>

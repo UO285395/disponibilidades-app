@@ -784,6 +784,55 @@ class DomainPolicy(Base):
 
 **Objetivo funcional**:
 
+---
+
+## 14) Consistencia de eventos, sesión móvil y build APK (2026-07-07)
+
+Cambios conservadores aplicados sobre `mobile/adaptacion-capacitor` para corregir estados inconsistentes al borrar eventos, reducir llamadas `/me` duplicadas en el arranque móvil y dejar la APK lista para regenerar con versión incrementada. Sin cambios de contrato de API (mismos endpoints y payloads).
+
+### Backend
+
+- `backend/models.py`: `EventResponse` y `EventCompanion` ahora declaran `UniqueConstraint(event_id, user_id)` y `ondelete="CASCADE"` en sus FKs; `Event.responses`/`Event.companions` usan `cascade="all, delete-orphan"`. Esto es metadata de SQLAlchemy (aplica tal cual a bases de datos nuevas creadas con `create_all`).
+- `backend/main.py`: `ensure_legacy_schema_compatibility()` (la misma rutina que ya añadía columnas legacy con `ALTER TABLE` en cada arranque) ahora además, de forma aditiva e idempotente:
+  1. Elimina duplicados históricos en `event_responses`/`event_companions` (conserva la fila de menor `id` por `event_id`+`user_id`).
+  2. Crea `CREATE UNIQUE INDEX IF NOT EXISTS ux_event_responses_event_user` y `ux_event_companions_event_user`.
+  - Se ejecuta automáticamente en el próximo arranque/deploy del backend (local SQLite y Railway Postgres), sin pasos manuales. Verificado localmente ejecutando el arranque dos veces seguidas (segunda vez no reporta cambios, confirmando idempotencia).
+  - `respond_event` y `update_my_event_companions` capturan `IntegrityError` en el commit y devuelven 400 con mensaje claro en vez de un 500 si alguna vez se produce una carrera real.
+  - Nota: no se retroaplica `ondelete=CASCADE` a nivel de motor en la base de datos ya existente (en SQLite requeriría reconstruir la tabla); no es necesario porque `delete_event()` ya borra explícitamente `EventCompanion`/`EventResponse` antes de borrar el `Event`, todo en una misma transacción.
+
+### Frontend — eventos
+
+- `EventsSection.jsx`: refresco silencioso al recuperar el foco de la pestaña/app (además del fetch inicial), y limpieza del evento en memoria con mensaje claro si `respond()`/`saveCompanions()` reciben un 404 (evento borrado por un admin).
+- `AdminEvents.jsx`: confirmación antes de borrar un evento, estados de carga por acción (`creating`/`savingEdit`/`deletingId`) que deshabilitan los botones implicados y se restauran con `finally`, y el mismo refresco silencioso al recuperar el foco.
+- `AdminEventResponses.jsx`: si el evento ya no existe o no es accesible (404/403), se muestra un mensaje claro en vez de quedarse en "(cargando...)" o fallar en silencio.
+
+### Frontend — sesión y arranque móvil
+
+- Nuevo hook `frontend/src/hooks/useSessionUser.js`: centraliza el flujo `GET /me` → si falla, `POST /auth/refresh` + reintento → si vuelve a fallar, limpia sesión y redirige una sola vez a login (con gate opcional de rol admin). Devuelve `{ user, ready }` para mostrar un estado breve "Comprobando sesión…".
+- `Dashboard.jsx` y `AdminDashboard.jsx` usan ahora ese hook en vez de duplicar la lógica de bootstrap.
+- Se detectaron y eliminaron llamadas `/me` duplicadas: `SpaceReservations.jsx` y `AdminUsers.jsx` llamaban a `userAPI.me()` por su cuenta (Mantine mantiene montados todos los `Tabs.Panel` habilitados, así que se ejecutaban en paralelo con el `/me` de la página contenedora). Ahora reciben el usuario ya cargado vía prop `currentUser`.
+- `clearToken()` en `api.js` ahora es `async` y espera (`await`) el borrado en Capacitor Preferences antes de continuar, evitando que el token sobreviva en almacenamiento nativo si la app se cierra justo tras el logout.
+- Eliminado `frontend/src/services/auth.js` (duplicado muerto de la lógica de token de `api.js`, sin ningún import en el proyecto).
+- `Login.jsx` añade estado `submitting` para evitar doble envío del formulario.
+
+### Rendimiento
+
+- `WeekCalendar.jsx` y `MobileWeekCalendar.jsx`: los arrays `days`/`hours` usados para pintar la rejilla ahora están memoizados con `useMemo` (antes se recreaban en cada render, incluido cada actualización optimista de disponibilidad).
+
+### Móvil / APK
+
+- `frontend/android/app/build.gradle`: `versionCode` 1→2, `versionName` "1.0"→"1.1" (esta build incluye los cambios de este apartado).
+- Pipeline de build confirmado correcto y sin cambios: `npm run build` → `npm run build:mobile` (`vite build && npx cap sync android`) → `npm run cap:open`. `@capacitor/preferences` y `@capacitor/push-notifications` ya estaban integrados correctamente (no solo instalados).
+
+### Flujo para regenerar la APK con estos cambios
+
+1. Backend: desplegar `backend/` (Railway) y confirmar en logs que la migración de arranque corre sin errores.
+2. Frontend: `cd frontend && npm install`
+3. `npm run build:mobile` (build web + `cap sync android`, copia los assets nuevos a Android)
+4. `npm run cap:open` → Android Studio → `Build > Build APK(s)`
+5. APK resultante: `frontend/android/app/build/outputs/apk/debug/app-debug.apk` (versión 1.1 / versionCode 2)
+
+
 - Cada evento del dashboard de usuario incluye un botón para gestionar acompañantes.
 - Los acompañantes se vinculan al par `usuario-evento`.
 - El cálculo de asistentes incluye votos `sí` + acompañantes.
@@ -1075,3 +1124,8 @@ Si falla `npm install` o aparece conflicto de dependencias:
   - `npm.cmd run cap:sync android`
 
 Nota: en este sprint se actualizó el lockfile de frontend y se validó build web + sync Android tras la actualización.
+
+
+Evaluar el uso de Leaflet es una librería open source para trabajar con mapas interactivos
+➢ https://leafletjs.com
+Para indicar la ubicacion de los eventos

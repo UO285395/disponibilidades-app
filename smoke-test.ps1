@@ -77,6 +77,34 @@ if($eventId){
   try { PostJson "/events/$eventId/responses" @{answer='no';justification='retry'} $bUserToken | Out-Null; AddResult 'eventos' 'second vote blocked' $false 'unexpected second vote accepted' } catch { AddResult 'eventos' 'second vote blocked' ($_.Exception.Message -match 'Ya has votado|400') $_.Exception.Message }
 }
 
+if($eventId){
+  try { DelJson "/events/$eventId" $aAdminToken | Out-Null; AddResult 'eventos' 'cross-domain admin cannot delete event' $false 'unexpected delete allowed' } catch { AddResult 'eventos' 'cross-domain admin cannot delete event' ($_.Exception.Message -match '403') $_.Exception.Message }
+
+  try { DelJson "/events/$eventId" $bAdminToken | Out-Null; AddResult 'eventos' 'owning admin can delete event' $true 'ok' } catch { AddResult 'eventos' 'owning admin can delete event' $false $_.Exception.Message }
+
+  try { GetJson "/events/$eventId" $bAdminToken | Out-Null; AddResult 'eventos' 'event returns 404 after delete' $false 'event still accessible' } catch { AddResult 'eventos' 'event returns 404 after delete' ($_.Exception.Message -match '404') $_.Exception.Message }
+
+  try { GetJson "/events/$eventId/responses" $bAdminToken | Out-Null; AddResult 'eventos' 'responses return 404 after delete (no orphans)' $false 'responses still accessible' } catch { AddResult 'eventos' 'responses return 404 after delete (no orphans)' ($_.Exception.Message -match '404') $_.Exception.Message }
+
+  try {
+    $remaining = GetJson '/events' $bUserToken
+    $stillListed = ($remaining | Where-Object { $_.id -eq $eventId }).Count -gt 0
+    AddResult 'eventos' 'deleted event absent from list' (-not $stillListed) "stillListed=$stillListed"
+  } catch { AddResult 'eventos' 'deleted event absent from list' $false $_.Exception.Message }
+}
+
+$eventId2=$null
+try {
+  $ev2=PostJson '/events' @{title='Smoke Event B2';description='';date='2099-12-30';start_time='11:00:00';allowed_domain='b.test'} $bAdminToken
+  $eventId2=$ev2.id
+  AddResult 'eventos' 'create second event for superadmin delete check' $true "id=$eventId2"
+} catch { AddResult 'eventos' 'create second event for superadmin delete check' $false $_.Exception.Message }
+
+if($eventId2){
+  try { DelJson "/events/$eventId2" $suToken | Out-Null; AddResult 'eventos' 'superadmin can delete cross-domain event' $true 'ok' } catch { AddResult 'eventos' 'superadmin can delete cross-domain event' $false $_.Exception.Message }
+  try { GetJson "/events/$eventId2" $bAdminToken | Out-Null; AddResult 'eventos' 'event returns 404 after superadmin delete' $false 'event still accessible' } catch { AddResult 'eventos' 'event returns 404 after superadmin delete' ($_.Exception.Message -match '404') $_.Exception.Message }
+}
+
 try {
   PostJson '/availability/my' @{date='2099-12-30';start_time='09:00:00';end_time='10:00:00'} $bUserToken | Out-Null
   $all=GetJson '/admin/availability' $bAdminToken

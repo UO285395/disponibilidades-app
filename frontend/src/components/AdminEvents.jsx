@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, Button, TextInput, Title, Textarea, Text, Group } from "@mantine/core";
 import { adminAPI } from "../api/adminApi.js";
 import { useNavigate } from "react-router-dom";
@@ -16,36 +16,52 @@ export default function AdminEvents() {
   const [editDate, setEditDate] = useState("");
   const [editStartTime, setEditStartTime] = useState("");
   const [editAllowedDomain, setEditAllowedDomain] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
   const navigate = useNavigate();
+  const mountedRef = useRef(true);
+  const loadingRef = useRef(false);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const data = await adminAPI.listEvents();
-        if (!cancelled) setEvents(data);
-      } catch (e) {
-        console.error("Error cargando eventos", e);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  async function reload() {
+  const reload = useCallback(async () => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     try {
       const data = await adminAPI.listEvents();
-      setEvents(data);
+      if (mountedRef.current) setEvents(data);
     } catch (e) {
-      console.error("Error recargando eventos", e);
+      console.error("Error cargando eventos", e);
+    } finally {
+      loadingRef.current = false;
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    reload();
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [reload]);
+
+  // Refresco silencioso al volver a la pestaña/app, para reflejar altas/bajas
+  // hechas desde otra sesión sin depender de una recarga manual.
+  useEffect(() => {
+    function handleFocusOrVisible() {
+      if (document.visibilityState && document.visibilityState !== "visible") return;
+      reload();
+    }
+
+    window.addEventListener("focus", handleFocusOrVisible);
+    document.addEventListener("visibilitychange", handleFocusOrVisible);
+    return () => {
+      window.removeEventListener("focus", handleFocusOrVisible);
+      document.removeEventListener("visibilitychange", handleFocusOrVisible);
+    };
+  }, [reload]);
 
   async function createEvent() {
-    if (!title || !date) return;
+    if (!title || !date || creating) return;
 
     const isoDate = typeof date === "string" ? date : date instanceof Date ? date.toISOString().slice(0, 10) : "";
 
@@ -53,6 +69,7 @@ export default function AdminEvents() {
     const domainToSend = !normalized || normalized === "todos" || normalized === "all" ? null : normalized;
 
     try {
+      setCreating(true);
       await adminAPI.createEvent({
         title,
         description: description || null,
@@ -70,16 +87,26 @@ export default function AdminEvents() {
     } catch (e) {
       console.error("Error creando evento", e);
       alert(e?.message || "Error creando evento");
+    } finally {
+      setCreating(false);
     }
   }
 
   async function deleteEvent(id) {
+    if (deletingId !== null) return;
+
+    const confirmed = window.confirm("¿Seguro que quieres eliminar este evento? Esta acción no se puede deshacer.");
+    if (!confirmed) return;
+
     try {
+      setDeletingId(id);
       await adminAPI.deleteEvent(id);
       await reload();
     } catch (e) {
       console.error("Error eliminando evento", e);
-      alert("Error eliminando evento");
+      alert(e?.message || "Error eliminando evento");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -102,12 +129,13 @@ export default function AdminEvents() {
   }
 
   async function saveEdit() {
-    if (!editingEventId || !editTitle || !editDate) return;
+    if (!editingEventId || !editTitle || !editDate || savingEdit) return;
 
     const normalized = editAllowedDomain.trim().toLowerCase();
     const domainToSend = !normalized || normalized === "todos" || normalized === "all" ? null : normalized;
 
     try {
+      setSavingEdit(true);
       await adminAPI.editEvent(editingEventId, {
         title: editTitle,
         description: editDescription || null,
@@ -120,6 +148,8 @@ export default function AdminEvents() {
     } catch (e) {
       console.error("Error editando evento", e);
       alert(e?.message || "Error editando evento");
+    } finally {
+      setSavingEdit(false);
     }
   }
 
@@ -164,7 +194,9 @@ export default function AdminEvents() {
           mb="sm"
         />
 
-        <Button onClick={createEvent}>Crear evento</Button>
+        <Button onClick={createEvent} loading={creating} disabled={creating}>
+          Crear evento
+        </Button>
       </Card>
 
       <Title order={3} mb="md">
@@ -246,15 +278,15 @@ export default function AdminEvents() {
 
               {editingEventId === ev.id ? (
                 <>
-                  <Button w={130} color="green" onClick={saveEdit}>
+                  <Button w={130} color="green" onClick={saveEdit} loading={savingEdit} disabled={savingEdit}>
                     Guardar
                   </Button>
-                  <Button w={130} variant="outline" onClick={cancelEdit}>
+                  <Button w={130} variant="outline" onClick={cancelEdit} disabled={savingEdit}>
                     Cancelar
                   </Button>
                 </>
               ) : (
-                <Button w={130} variant="outline" onClick={() => startEdit(ev)}>
+                <Button w={130} variant="outline" onClick={() => startEdit(ev)} disabled={deletingId !== null}>
                   Editar
                 </Button>
               )}
@@ -263,6 +295,8 @@ export default function AdminEvents() {
                 w={130}
                 color="red"
                 onClick={() => deleteEvent(ev.id)}
+                loading={deletingId === ev.id}
+                disabled={deletingId !== null}
               >
                 Eliminar
               </Button>

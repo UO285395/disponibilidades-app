@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { adminAPI } from "../api/adminApi.js";
-import { userAPI } from "../api/api.js";
 import {
   Table,
   Button,
@@ -14,9 +13,9 @@ import {
   Badge,
 } from "@mantine/core";
 
-export default function AdminUsers() {
+export default function AdminUsers({ currentUser }) {
   const [rows, setRows] = useState([]);
-  const [currentUser, setCurrentUser] = useState(null);
+  const [loaded, setLoaded] = useState(false);
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
@@ -36,9 +35,8 @@ export default function AdminUsers() {
   }
 
   async function reload() {
-    const [users, me] = await Promise.all([adminAPI.listUsers(), userAPI.me()]);
+    const users = await adminAPI.listUsers();
     setRows(users);
-    setCurrentUser(me);
     setTagDrafts((prev) => {
       const next = { ...prev };
       for (const user of users) {
@@ -55,10 +53,9 @@ export default function AdminUsers() {
 
     (async () => {
       try {
-        const [users, me] = await Promise.all([adminAPI.listUsers(), userAPI.me()]);
+        const users = await adminAPI.listUsers();
         if (!cancelled) {
           setRows(users);
-          setCurrentUser(me);
           setTagDrafts((prev) => {
             const next = { ...prev };
             for (const user of users) {
@@ -71,6 +68,8 @@ export default function AdminUsers() {
         }
       } catch (e) {
         console.error("Error cargando usuarios", e);
+      } finally {
+        if (!cancelled) setLoaded(true);
       }
     })();
 
@@ -175,7 +174,7 @@ export default function AdminUsers() {
     [sortedRows, modalUserId]
   );
 
-  if (!currentUser) {
+  if (!loaded) {
     return <Text>Cargando usuarios…</Text>;
   }
 

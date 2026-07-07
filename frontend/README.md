@@ -92,14 +92,14 @@ Esta rama incluye integración con Capacitor en:
 - JDK 17
 - Android SDK instalado desde Android Studio
 
-### Flujo para generar APK
+### Flujo para generar APK actualizada
 
-Desde `frontend/`:
-
-1. `npm install`
-2. `npm run build:mobile`
-3. `npm run cap:open`
-4. En Android Studio: `Build > Build APK(s)`
+0. Si hubo cambios de backend, desplegar primero (Railway) y confirmar que la API en producción responde con los cambios esperados.
+1. Desde `frontend/`: `npm install`
+2. `npm run build:mobile` (ejecuta `vite build` y luego `npx cap sync android`, copiando los assets nuevos a `android/app/src/main/assets/public`)
+3. Si la APK se va a distribuir (no solo debug local), incrementar `versionCode` y `versionName` en `frontend/android/app/build.gradle` antes de compilar.
+4. `npm run cap:open`
+5. En Android Studio: `Build > Build APK(s)`
 
 El APK se genera en:
 
@@ -117,6 +117,8 @@ El APK se genera en:
 Hoja de ruta para el desarrollo de características específicas para la experiencia nativa en Android.
 
 ### Sprint 1: Sesión Local Persistente (Capacitor Preferences)
+
+**Estado: implementado.** `frontend/src/api/api.js` ya usa `Capacitor Preferences` (con `localStorage` como respaldo en web) para `getToken()`/`setToken()`/`clearToken()`, con cache en memoria para evitar lecturas repetidas del almacenamiento nativo. Las tareas técnicas de abajo quedan como referencia histórica del diseño original; no se creó `tokenService.js` por separado, la lógica vive directamente en `api.js`.
 
 **Objetivo**: Eliminar re-login al reiniciar la aplicación. El usuario abre la app y accede directamente si su token aún es válido.
 

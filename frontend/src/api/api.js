@@ -91,13 +91,18 @@ export async function setToken(token) {
   emitAuthChange();
 }
 
-export function clearToken() {
+export async function clearToken() {
   cachedToken = null;
   localStorage.removeItem(TOKEN_KEY);
 
-  getPreferences()
-    .then((Preferences) => Preferences?.remove({ key: TOKEN_KEY }))
-    .catch(() => {});
+  try {
+    const Preferences = await getPreferences();
+    if (Preferences) {
+      await Preferences.remove({ key: TOKEN_KEY });
+    }
+  } catch {
+    // Best-effort: la sesion local ya quedo limpia aunque falle el storage nativo.
+  }
 
   emitAuthChange();
 }

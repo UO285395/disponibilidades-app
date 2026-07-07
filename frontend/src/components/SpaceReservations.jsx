@@ -10,9 +10,9 @@ import {
   Group,
   Notification,
 } from "@mantine/core";
-import { spacesAPI, reservationsAPI, userAPI } from "../api/api.js";
+import { spacesAPI, reservationsAPI } from "../api/api.js";
 
-export default function SpaceReservations() {
+export default function SpaceReservations({ currentUser }) {
   const [spaces, setSpaces] = useState([]);
   const [reservations, setReservations] = useState([]);
   const [spaceId, setSpaceId] = useState(null);
@@ -22,19 +22,16 @@ export default function SpaceReservations() {
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [user, setUser] = useState(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const [spaceList, reservationList, userInfo] = await Promise.all([
+        const [spaceList, reservationList] = await Promise.all([
           spacesAPI.list(),
           reservationsAPI.list(),
-          userAPI.me(),
         ]);
         setSpaces(spaceList);
         setReservations(reservationList);
-        setUser(userInfo);
       } catch (e) {
         console.error(e);
       }
@@ -104,7 +101,7 @@ export default function SpaceReservations() {
 
   function formatDateShort(value) {
     if (!value) return "";
-    const [year, month, day] = value.split("-");
+    const [, month, day] = value.split("-");
     return `${day}/${month}`;
   }
 
@@ -116,9 +113,9 @@ export default function SpaceReservations() {
   }
 
   function canCancel(reservation) {
-    if (!user) return false;
-    if (user.role === "admin") return true;
-    return user.email === reservation.creator_email;
+    if (!currentUser) return false;
+    if (currentUser.role === "admin") return true;
+    return currentUser.email === reservation.creator_email;
   }
 
   return (

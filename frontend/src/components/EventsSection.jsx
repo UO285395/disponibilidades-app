@@ -1,6 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, Button, TextInput, Title, Text, Group, Modal, NumberInput } from "@mantine/core";
 import { eventsAPI } from "../api/api.js";
+
+function isNotFoundError(error) {
+  return typeof error?.message === "string" && error.message.startsWith("HTTP 404");
+}
 
 export default function EventsSection() {
   const [events, setEvents] = useState([]);
@@ -12,58 +16,81 @@ export default function EventsSection() {
   const [activeCompanionEvent, setActiveCompanionEvent] = useState(null);
   const [companionCountDraft, setCompanionCountDraft] = useState(0);
   const [loading, setLoading] = useState(true);
+  const mountedRef = useRef(true);
+  const loadingRef = useRef(false);
+
+  const loadAll = useCallback(async (silent = false) => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    if (!silent) setLoading(true);
+
+    try {
+      const [eventsResult, votesResult, companionsResult] = await Promise.allSettled([
+        eventsAPI.list(),
+        eventsAPI.myResponses(),
+        eventsAPI.myCompanions(),
+      ]);
+
+      if (!mountedRef.current) return;
+
+      if (eventsResult.status === "fulfilled") {
+        setEvents(eventsResult.value);
+      } else {
+        console.error("Error cargando eventos", eventsResult.reason);
+        if (!silent) setEvents([]);
+      }
+
+      if (votesResult.status === "fulfilled") {
+        const normalized = votesResult.value
+          .map((id) => Number(id))
+          .filter((id) => Number.isFinite(id));
+        setVotedEvents(new Set(normalized));
+      } else {
+        console.error("Error cargando votos del usuario", votesResult.reason);
+      }
+
+      if (companionsResult && companionsResult.status === "fulfilled") {
+        const map = new Map();
+        companionsResult.value.forEach((item) => {
+          const eventId = Number(item.event_id);
+          const count = Number(item.count || 0);
+          if (Number.isFinite(eventId)) {
+            map.set(eventId, count);
+          }
+        });
+        setCompanionsByEvent(map);
+      } else if (companionsResult && companionsResult.status === "rejected") {
+        console.error("Error cargando acompañantes", companionsResult.reason);
+      }
+    } finally {
+      loadingRef.current = false;
+      if (mountedRef.current && !silent) setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const [eventsResult, votesResult, companionsResult] = await Promise.allSettled([
-          eventsAPI.list(),
-          eventsAPI.myResponses(),
-          eventsAPI.myCompanions(),
-        ]);
-
-        if (cancelled) return;
-
-        if (eventsResult.status === "fulfilled") {
-          setEvents(eventsResult.value);
-        } else {
-          console.error("Error cargando eventos", eventsResult.reason);
-          setEvents([]);
-        }
-
-        if (votesResult.status === "fulfilled") {
-          const normalized = votesResult.value
-            .map((id) => Number(id))
-            .filter((id) => Number.isFinite(id));
-          setVotedEvents(new Set(normalized));
-        } else {
-          console.error("Error cargando votos del usuario", votesResult.reason);
-        }
-
-        if (companionsResult && companionsResult.status === "fulfilled") {
-          const map = new Map();
-          companionsResult.value.forEach((item) => {
-            const eventId = Number(item.event_id);
-            const count = Number(item.count || 0);
-            if (Number.isFinite(eventId)) {
-              map.set(eventId, count);
-            }
-          });
-          setCompanionsByEvent(map);
-        } else if (companionsResult && companionsResult.status === "rejected") {
-          console.error("Error cargando acompañantes", companionsResult.reason);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-
+    mountedRef.current = true;
+    loadAll(false);
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
     };
-  }, []);
+  }, [loadAll]);
+
+  // Refresco silencioso al volver a la pestaña/app: evita que un evento
+  // borrado por un admin siga apareciendo hasta que el usuario recargue.
+  useEffect(() => {
+    function handleFocusOrVisible() {
+      if (document.visibilityState && document.visibilityState !== "visible") return;
+      loadAll(true);
+    }
+
+    window.addEventListener("focus", handleFocusOrVisible);
+    document.addEventListener("visibilitychange", handleFocusOrVisible);
+    return () => {
+      window.removeEventListener("focus", handleFocusOrVisible);
+      document.removeEventListener("visibilitychange", handleFocusOrVisible);
+    };
+  }, [loadAll]);
 
   async function respond(id, answer) {
     const eventId = Number(id);
@@ -90,6 +117,12 @@ export default function EventsSection() {
       }
     } catch (e) {
       console.error("Error enviando respuesta", e);
+
+      if (isNotFoundError(e)) {
+        setEvents((prev) => prev.filter((ev) => Number(ev.id) !== eventId));
+        alert("Este evento ya no existe. Puede que haya sido eliminado.");
+        return;
+      }
 
       const message = e?.message || "";
       if (message.includes("Ya has votado en este evento")) {
@@ -132,6 +165,15 @@ export default function EventsSection() {
       setActiveCompanionEvent(null);
     } catch (error) {
       console.error("Error guardando acompañantes", error);
+
+      if (isNotFoundError(error)) {
+        setEvents((prev) => prev.filter((ev) => Number(ev.id) !== eventId));
+        setCompanionModalOpen(false);
+        setActiveCompanionEvent(null);
+        alert("Este evento ya no existe. Puede que haya sido eliminado.");
+        return;
+      }
+
       alert(error?.message || "No se pudieron guardar los acompañantes");
     } finally {
       setSavingCompanions(false);

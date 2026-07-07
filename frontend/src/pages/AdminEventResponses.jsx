@@ -43,6 +43,7 @@ export default function AdminEventResponses() {
   const [responses, setResponses] = useState([]);
   const [eventName, setEventName] = useState("");
   const [filterDomain, setFilterDomain] = useState("");
+  const [loadError, setLoadError] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -52,7 +53,9 @@ export default function AdminEventResponses() {
       try {
         // 1) Obtener respuestas
         const resp = await adminAPI.getEventResponses(id);
-        if (!cancelled) setResponses(resp);
+        if (cancelled) return;
+        setResponses(resp);
+        setLoadError("");
 
         // 2) Obtener título del evento
         const ev = await adminAPI.getEvent(id);
@@ -60,6 +63,16 @@ export default function AdminEventResponses() {
 
       } catch (e) {
         console.error("Error cargando respuestas", e);
+        if (cancelled) return;
+
+        const message = e?.message || "";
+        if (message.startsWith("HTTP 404")) {
+          setLoadError("Este evento ya no existe. Puede que haya sido eliminado.");
+        } else if (message.startsWith("HTTP 403")) {
+          setLoadError("No tienes permiso para ver las respuestas de este evento.");
+        } else {
+          setLoadError("No se pudieron cargar las respuestas del evento.");
+        }
       }
     })();
 
@@ -80,6 +93,24 @@ export default function AdminEventResponses() {
 
   const { si, no } = resumirVotos(filteredResponses);
   const simpas = filteredResponses.reduce((acc, r) => acc + Number(r.companions_count || 0), 0);
+
+  if (loadError) {
+    return (
+      <Box p="lg">
+        <Button mb="md" variant="outline" onClick={() => navigate("/admin")}>
+          Volver
+        </Button>
+
+        <Title order={2} mb="lg">
+          Respuestas del evento
+        </Title>
+
+        <Card shadow="sm" p="lg" style={{ background: "#fff5f5" }}>
+          <Text c="red">{loadError}</Text>
+        </Card>
+      </Box>
+    );
+  }
 
   return (
     <Box p="lg">

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey
+from sqlalchemy import Column, Integer, String, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -45,7 +45,18 @@ class Event(Base):
 
     # RELACIONES
     creator = relationship("User", back_populates="events_created")
-    responses = relationship("EventResponse", back_populates="event")
+    responses = relationship(
+        "EventResponse",
+        back_populates="event",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    companions = relationship(
+        "EventCompanion",
+        back_populates="event",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 class DomainPolicy(Base):
@@ -66,9 +77,12 @@ class DomainPolicy(Base):
 
 class EventResponse(Base):
     __tablename__ = "event_responses"
+    __table_args__ = (
+        UniqueConstraint("event_id", "user_id", name="ux_event_responses_event_user"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(Integer, ForeignKey("events.id"))
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"))
     user_id = Column(Integer, ForeignKey("users.id"))
     answer = Column(String, nullable=False)
     justification = Column(String)
@@ -80,13 +94,16 @@ class EventResponse(Base):
 
 class EventCompanion(Base):
     __tablename__ = "event_companions"
+    __table_args__ = (
+        UniqueConstraint("event_id", "user_id", name="ux_event_companions_event_user"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     count = Column(Integer, nullable=False, default=0)
 
-    event = relationship("Event")
+    event = relationship("Event", back_populates="companions")
     user = relationship("User")
 
 

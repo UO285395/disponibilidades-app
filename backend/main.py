@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import func, inspect, text
+from sqlalchemy.exc import IntegrityError
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
@@ -86,6 +87,34 @@ def ensure_legacy_schema_compatibility():
                 with engine.begin() as conn:
                     conn.execute(text("ALTER TABLE users ADD COLUMN group_tag VARCHAR"))
                 print("✅ Columna users.group_tag añadida para compatibilidad")
+
+        # Deduplicar y reforzar unicidad (event_id, user_id) en respuestas y acompañantes.
+        # Se hace de forma aditiva e idempotente: no borra datos legítimos (solo duplicados
+        # históricos, quedándose con el registro más antiguo por usuario/evento) y no requiere
+        # pasos manuales, para que el usuario no perciba ningún cambio.
+        if "event_responses" in table_names:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "DELETE FROM event_responses WHERE id NOT IN "
+                    "(SELECT MIN(id) FROM event_responses GROUP BY event_id, user_id)"
+                ))
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ux_event_responses_event_user "
+                    "ON event_responses(event_id, user_id)"
+                ))
+            print("✅ Índice único event_responses(event_id, user_id) verificado")
+
+        if "event_companions" in table_names:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "DELETE FROM event_companions WHERE id NOT IN "
+                    "(SELECT MIN(id) FROM event_companions GROUP BY event_id, user_id)"
+                ))
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ux_event_companions_event_user "
+                    "ON event_companions(event_id, user_id)"
+                ))
+            print("✅ Índice único event_companions(event_id, user_id) verificado")
     except Exception as exc:
         print(f"⚠️ No se pudo verificar compatibilidad de esquema: {exc}")
 
@@ -1116,7 +1145,11 @@ def respond_event(
         answer=normalized_answer,
         justification=data.justification
     ))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(400, "Ya has votado en este evento")
 
     return {"ok": True}
 
@@ -1212,7 +1245,11 @@ def update_my_event_companions(
         item = EventCompanion(event_id=event_id, user_id=user.id, count=data.count)
         db.add(item)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(400, "Ya se han guardado acompañantes para este evento, recarga e inténtalo de nuevo")
 
     return {"ok": True, "event_id": event_id, "count": int(item.count)}
 

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Title, Tabs, Box, Button, Group, Text } from "@mantine/core";
-import { userAPI, clearToken, authAPI } from "../api/api.js";
+import { clearToken } from "../api/api.js";
+import { useSessionUser } from "../hooks/useSessionUser.js";
 import AdminUsers from "../components/AdminUsers.jsx";
 import AdminEvents from "../components/AdminEvents.jsx";
 import AdminAvailabilitiesCalendar from "../components/AdminAvailabilitiesCalendar.jsx";
@@ -12,7 +13,6 @@ import AdminNotifications from "../components/AdminNotifications.jsx";
 import AdminSurveys from "../components/AdminSurveys.jsx";
 
 export default function AdminDashboard() {
-  const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState(null);
   const [orderedTabs, setOrderedTabs] = useState([]);
   const [draggedTab, setDraggedTab] = useState(null);
@@ -52,36 +52,10 @@ export default function AdminDashboard() {
     setActiveTab(nextOrder[0] ?? null);
   }, [buildAvailableTabValues]);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const u = await userAPI.me();
-        if (u.role !== "admin" && u.role !== "superadmin") {
-          navigate("/dashboard");
-          return;
-        }
-        initializeTabOrder(u);
-        setUser(u);
-      } catch {
-        try {
-          await authAPI.refresh();
-          const u = await userAPI.me();
-          if (u.role !== "admin" && u.role !== "superadmin") {
-            navigate("/dashboard");
-            return;
-          }
-          initializeTabOrder(u);
-          setUser(u);
-        } catch {
-          clearToken();
-          navigate("/");
-        }
-      }
-    })();
-  }, [navigate, initializeTabOrder]);
+  const { user, ready } = useSessionUser({ requireAdmin: true, onLoaded: initializeTabOrder });
 
-  function logout() {
-    clearToken();
+  async function logout() {
+    await clearToken();
     navigate("/");
   }
 
@@ -149,6 +123,14 @@ export default function AdminDashboard() {
 
   const tabsByValue = Object.fromEntries(tabDefs.map((tab) => [tab.value, tab]));
   const renderedTabOrder = orderedTabs.length > 0 ? orderedTabs : tabDefs.map((t) => t.value);
+
+  if (!ready) {
+    return (
+      <Box p="lg" style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "60vh" }}>
+        <Text c="dimmed">Comprobando sesión…</Text>
+      </Box>
+    );
+  }
 
   if (!user) return null;
 
@@ -230,7 +212,7 @@ export default function AdminDashboard() {
 
         {canUsers && (
           <Tabs.Panel value="users" pt="xl">
-            <AdminUsers />
+            <AdminUsers currentUser={user} />
           </Tabs.Panel>
         )}
 

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Title, Button, Box, Text, Divider, Group, Tabs, Card } from "@mantine/core";
-import { userAPI, getToken, clearToken, authAPI } from "../api/api.js";
+import { clearToken } from "../api/api.js";
+import { useSessionUser } from "../hooks/useSessionUser.js";
 import MobileWeekCalendar from "../components/MobileWeekCalendar.jsx";
 import EventsSection from "../components/EventsSection.jsx";
 import SpaceReservations from "../components/SpaceReservations.jsx";
@@ -9,33 +10,10 @@ import { initMobileNotifications } from "../services/mobileNotifications.js";
 import ChangePasswordModal from "../components/ChangePasswordModal.jsx";
 
 export default function Dashboard() {
-  const [user, setUser] = useState(null);
+  const { user, ready } = useSessionUser();
   const [offsetWeeks, setOffsetWeeks] = useState(0);
   const navigate = useNavigate();
   const [changePasswordOpened, setChangePasswordOpened] = useState(false);
-
-  useEffect(() => {
-    if (!getToken()) {
-      navigate("/");
-      return;
-    }
-
-    (async () => {
-      try {
-        const u = await userAPI.me();
-        setUser(u);
-      } catch {
-        try {
-          await authAPI.refresh();
-          const u = await userAPI.me();
-          setUser(u);
-        } catch {
-          clearToken();
-          navigate("/");
-        }
-      }
-    })();
-  }, [navigate]);
 
   useEffect(() => {
     if (!user) return;
@@ -44,9 +22,17 @@ export default function Dashboard() {
     });
   }, [user]);
 
-  function logout() {
-    clearToken();
+  async function logout() {
+    await clearToken();
     navigate("/");
+  }
+
+  if (!ready) {
+    return (
+      <Box p="lg" style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "60vh" }}>
+        <Text c="dimmed">Comprobando sesión…</Text>
+      </Box>
+    );
   }
 
   if (!user) return null;
@@ -168,7 +154,7 @@ export default function Dashboard() {
                 style={{ border: "1px solid #e0e0e0", borderRadius: 8, padding: "1rem" }}
                 mb="md"
               >
-                <SpaceReservations />
+                <SpaceReservations currentUser={user} />
               </Card>
             </Tabs.Panel>
           )}
