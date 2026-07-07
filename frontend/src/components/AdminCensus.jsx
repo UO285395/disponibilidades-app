@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Title, Text, TextInput, Button, Group, Card, Select,
   Checkbox, ActionIcon, Stack, Badge, CopyButton, Divider,
@@ -12,13 +12,32 @@ const FIELD_TYPES = [
   { value: "select", label: "Selección (opciones)" },
 ];
 
+const AUTOSAVE_DEBOUNCE_MS = 700;
+
 const emptyField = () => ({
-  _key: Math.random(),
+  _key: `tmp-${Date.now()}-${Math.random()}`,
+  id: null,
   label: "",
   field_type: "text",
   required: true,
-  options: "",
+  options: [],
 });
+
+function parseOptions(rawOptions) {
+  if (!Array.isArray(rawOptions)) return [];
+  return rawOptions.map((opt) => String(opt)).filter((opt) => opt.trim().length > 0);
+}
+
+function normalizeFieldFromServer(field) {
+  return {
+    _key: `field-${field.id}`,
+    id: field.id,
+    label: field.label,
+    field_type: field.field_type,
+    required: Boolean(field.required),
+    options: parseOptions(field.options),
+  };
+}
 
 export default function AdminCensus() {
   const [config, setConfig] = useState(null);
@@ -29,6 +48,13 @@ export default function AdminCensus() {
   const [testingEmail, setTestingEmail] = useState(false);
   const [testMessage, setTestMessage] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [draggedFieldKey, setDraggedFieldKey] = useState(null);
+  const [draggedOptionMeta, setDraggedOptionMeta] = useState(null);
+
+  const initialLoadCompletedRef = useRef(false);
+  const autosaveTimeoutRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -37,23 +63,130 @@ export default function AdminCensus() {
         if (data) {
           setConfig(data);
           setEmailTo(data.email_to);
-          setFields(
-            data.fields.map((f) => ({
-              _key: f.id,
-              label: f.label,
-              field_type: f.field_type,
-              required: f.required,
-              options: Array.isArray(f.options) ? f.options.join(", ") : "",
-            }))
-          );
+          if (Array.isArray(data.fields) && data.fields.length > 0) {
+            setFields(data.fields.map(normalizeFieldFromServer));
+          } else {
+            setFields([emptyField()]);
+          }
         }
       } catch (e) {
         console.error("Error cargando censo", e);
       } finally {
         setLoaded(true);
+        initialLoadCompletedRef.current = true;
       }
     })();
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (autosaveTimeoutRef.current) {
+        clearTimeout(autosaveTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const hasRequiredInfo = useMemo(() => {
+    if (!emailTo.trim()) return false;
+    return fields.every((f) => f.label.trim().length > 0);
+  }, [emailTo, fields]);
+
+  function buildPayload(currentEmail, currentFields) {
+    const trimmedEmail = currentEmail.trim();
+    if (!trimmedEmail) {
+      return { payload: null, error: "Completa el email para guardar los cambios." };
+    }
+
+    if (currentFields.some((f) => !f.label.trim())) {
+      return { payload: null, error: "Todas las etiquetas deben tener texto para guardar." };
+    }
+
+    const normalizedFields = currentFields.map((f, i) => {
+      const options = f.field_type === "select"
+        ? (Array.isArray(f.options) ? f.options : [])
+            .map((opt) => opt.trim())
+            .filter(Boolean)
+        : [];
+
+      return {
+        id: Number.isInteger(f.id) ? f.id : null,
+        label: f.label.trim(),
+        field_type: f.field_type,
+        required: Boolean(f.required),
+        order_index: i,
+        options: f.field_type === "select" ? options : null,
+      };
+    });
+
+    return {
+      payload: {
+        email_to: trimmedEmail,
+        fields: normalizedFields,
+      },
+      error: null,
+    };
+  }
+
+  async function saveConfig(currentEmail, currentFields, { silent = false } = {}) {
+    const { payload, error } = buildPayload(currentEmail, currentFields);
+    if (!payload) {
+      setSaveError(error || "No se pudo guardar la configuración.");
+      if (!silent) {
+        alert(error || "No se pudo guardar la configuración.");
+      }
+      return false;
+    }
+
+    try {
+      setSaving(true);
+      setSaveError("");
+      const updated = await adminAPI.upsertCensusConfig(payload);
+      setConfig(updated);
+      setLastSavedAt(new Date());
+
+      if (updated && Array.isArray(updated.fields)) {
+        setFields((prev) =>
+          prev.map((localField, index) => {
+            const serverField = updated.fields[index];
+            if (!serverField) return localField;
+            return {
+              ...localField,
+              id: serverField.id,
+            };
+          })
+        );
+      }
+
+      return true;
+    } catch (e) {
+      console.error("Error guardando censo", e);
+      const msg = e?.message || "Error guardando la configuración";
+      setSaveError(msg);
+      if (!silent) {
+        alert(msg);
+      }
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!loaded || !initialLoadCompletedRef.current) return;
+    if (autosaveTimeoutRef.current) {
+      clearTimeout(autosaveTimeoutRef.current);
+    }
+
+    autosaveTimeoutRef.current = setTimeout(() => {
+      saveConfig(emailTo, fields, { silent: true });
+    }, AUTOSAVE_DEBOUNCE_MS);
+
+    return () => {
+      if (autosaveTimeoutRef.current) {
+        clearTimeout(autosaveTimeoutRef.current);
+      }
+    };
+  }, [emailTo, fields, loaded]);
 
   function addField() {
     setFields((prev) => [...prev, emptyField()]);
@@ -69,39 +202,67 @@ export default function AdminCensus() {
     );
   }
 
-  async function save() {
-    if (!emailTo.trim()) {
-      alert("Indica el email destinatario");
-      return;
-    }
-    if (fields.some((f) => !f.label.trim())) {
-      alert("Todos los campos deben tener una etiqueta");
-      return;
-    }
+  function reorderFields(fromKey, toKey) {
+    if (fromKey === toKey) return;
+    setFields((prev) => {
+      const fromIndex = prev.findIndex((field) => field._key === fromKey);
+      const toIndex = prev.findIndex((field) => field._key === toKey);
+      if (fromIndex < 0 || toIndex < 0) return prev;
 
-    try {
-      setSaving(true);
-      const payload = {
-        email_to: emailTo.trim(),
-        fields: fields.map((f, i) => ({
-          label: f.label.trim(),
-          field_type: f.field_type,
-          required: f.required,
-          order_index: i,
-          options:
-            f.field_type === "select" && f.options
-              ? f.options.split(",").map((o) => o.trim()).filter(Boolean)
-              : null,
-        })),
-      };
-      const updated = await adminAPI.upsertCensusConfig(payload);
-      setConfig(updated);
-    } catch (e) {
-      console.error("Error guardando censo", e);
-      alert(e?.message || "Error guardando la configuración");
-    } finally {
-      setSaving(false);
-    }
+      const reordered = [...prev];
+      const [moved] = reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, moved);
+      return reordered;
+    });
+  }
+
+  function addOption(fieldKey) {
+    updateField(fieldKey, {
+      options: [...(fields.find((f) => f._key === fieldKey)?.options || []), ""],
+    });
+  }
+
+  function updateOption(fieldKey, optionIndex, value) {
+    setFields((prev) =>
+      prev.map((f) => {
+        if (f._key !== fieldKey) return f;
+        const nextOptions = [...(f.options || [])];
+        nextOptions[optionIndex] = value;
+        return { ...f, options: nextOptions };
+      })
+    );
+  }
+
+  function removeOption(fieldKey, optionIndex) {
+    setFields((prev) =>
+      prev.map((f) => {
+        if (f._key !== fieldKey) return f;
+        return {
+          ...f,
+          options: (f.options || []).filter((_, idx) => idx !== optionIndex),
+        };
+      })
+    );
+  }
+
+  function reorderOptions(fieldKey, fromIndex, toIndex) {
+    if (fromIndex === toIndex) return;
+    setFields((prev) =>
+      prev.map((f) => {
+        if (f._key !== fieldKey) return f;
+        const opts = [...(f.options || [])];
+        if (fromIndex < 0 || toIndex < 0 || fromIndex >= opts.length || toIndex >= opts.length) {
+          return f;
+        }
+        const [moved] = opts.splice(fromIndex, 1);
+        opts.splice(toIndex, 0, moved);
+        return { ...f, options: opts };
+      })
+    );
+  }
+
+  async function saveNow() {
+    await saveConfig(emailTo, fields, { silent: false });
   }
 
   async function regenerateToken() {
@@ -153,6 +314,19 @@ export default function AdminCensus() {
         Define los campos del formulario y el correo al que se enviarán las respuestas en CSV.
         El formulario es accesible únicamente por URL directa (sin login).
       </Text>
+
+      <Group gap="xs" mb="md">
+        <Badge color={saving ? "yellow" : saveError ? "red" : "green"} variant="light">
+          {saving ? "Guardando..." : saveError ? "Con cambios sin guardar" : "Guardado"}
+        </Badge>
+        <Text size="xs" c="dimmed">
+          {saveError
+            ? saveError
+            : lastSavedAt
+              ? `Ultima actualizacion: ${lastSavedAt.toLocaleTimeString()}`
+              : "Los cambios se guardan automaticamente en tiempo real."}
+        </Text>
+      </Group>
 
       {/* URL del formulario */}
       {config && (
@@ -213,12 +387,31 @@ export default function AdminCensus() {
 
       <Divider mb="lg" label="Campos del formulario" labelPosition="left" />
 
+      <Text size="xs" c="dimmed" mb="sm">
+        Arrastra para reordenar campos y opciones. Los cambios se aplican en tiempo real.
+      </Text>
+
       <Stack gap="sm" mb="lg">
         {fields.map((f, idx) => (
-          <Card key={f._key} shadow="xs" p="sm" withBorder>
+          <Card
+            key={f._key}
+            shadow="xs"
+            p="sm"
+            withBorder
+            draggable
+            onDragStart={() => setDraggedFieldKey(f._key)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={() => {
+              if (draggedFieldKey) {
+                reorderFields(draggedFieldKey, f._key);
+              }
+              setDraggedFieldKey(null);
+            }}
+            onDragEnd={() => setDraggedFieldKey(null)}
+          >
             <Group justify="space-between" mb="xs">
               <Badge variant="outline" size="sm">
-                Campo {idx + 1}
+                Campo {idx + 1} - arrastra para ordenar
               </Badge>
               <ActionIcon
                 color="red"
@@ -247,13 +440,61 @@ export default function AdminCensus() {
             </Group>
 
             {f.field_type === "select" && (
-              <TextInput
-                mt="xs"
-                label="Opciones (separadas por coma)"
-                placeholder="Opción A, Opción B, Opción C"
-                value={f.options}
-                onChange={(e) => updateField(f._key, { options: e.target.value })}
-              />
+              <Card mt="xs" p="sm" withBorder radius="md">
+                <Group justify="space-between" mb="xs">
+                  <Text size="sm" fw={500}>
+                    Opciones
+                  </Text>
+                  <Button size="xs" variant="light" onClick={() => addOption(f._key)}>
+                    + Añadir opcion
+                  </Button>
+                </Group>
+
+                <Stack gap="xs">
+                  {(f.options || []).map((option, optionIndex) => (
+                    <Group
+                      key={`${f._key}-opt-${optionIndex}`}
+                      wrap="nowrap"
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={() => {
+                        if (!draggedOptionMeta) return;
+                        if (draggedOptionMeta.fieldKey !== f._key) return;
+                        reorderOptions(f._key, draggedOptionMeta.optionIndex, optionIndex);
+                        setDraggedOptionMeta(null);
+                      }}
+                    >
+                      <ActionIcon
+                        variant="subtle"
+                        draggable
+                        onDragStart={() => setDraggedOptionMeta({ fieldKey: f._key, optionIndex })}
+                        onDragEnd={() => setDraggedOptionMeta(null)}
+                        title="Arrastra para ordenar"
+                      >
+                        ↕
+                      </ActionIcon>
+                      <TextInput
+                        style={{ flex: 1 }}
+                        placeholder={`Opcion ${optionIndex + 1}`}
+                        value={option}
+                        onChange={(e) => updateOption(f._key, optionIndex, e.target.value)}
+                      />
+                      <ActionIcon
+                        color="red"
+                        variant="subtle"
+                        onClick={() => removeOption(f._key, optionIndex)}
+                      >
+                        ✕
+                      </ActionIcon>
+                    </Group>
+                  ))}
+
+                  {(!f.options || f.options.length === 0) && (
+                    <Text size="xs" c="dimmed">
+                      Añade al menos una opcion para este campo de seleccion.
+                    </Text>
+                  )}
+                </Stack>
+              </Card>
             )}
 
             <Checkbox
@@ -272,8 +513,8 @@ export default function AdminCensus() {
         </Button>
       </Group>
 
-      <Button onClick={save} loading={saving}>
-        Guardar configuración
+      <Button onClick={saveNow} loading={saving} disabled={!hasRequiredInfo}>
+        Guardar ahora
       </Button>
     </>
   );

@@ -323,6 +323,7 @@ class EventCompanionUpdate(BaseModel):
     count: int
 
 class CensusFieldCreate(BaseModel):
+    id: int | None = None
     label: str
     field_type: str = "text"
     required: bool = True
@@ -1746,26 +1747,54 @@ def upsert_census_config(
     admin = get_user_from_token(cred.credentials, db)
     _require_superadmin_module_access(admin, db, "census")
 
-    existing = db.query(CensusConfig).first()
-    token = existing.url_token if existing else secrets.token_urlsafe(16)
+    if not data.email_to.strip():
+        raise HTTPException(400, "Email destino obligatorio")
 
-    if existing:
-        db.delete(existing)
-        db.commit()
+    if not data.fields:
+        raise HTTPException(400, "Debes añadir al menos un campo")
 
-    config = CensusConfig(email_to=data.email_to, url_token=token)
-    db.add(config)
-    db.flush()
+    for field in data.fields:
+        if not field.label or not field.label.strip():
+            raise HTTPException(400, "Todos los campos deben tener etiqueta")
 
-    for i, f in enumerate(data.fields):
-        db.add(CensusField(
-            config_id=config.id,
-            label=f.label,
-            field_type=f.field_type,
-            required=1 if f.required else 0,
-            order_index=f.order_index if f.order_index is not None else i,
-            options=json.dumps(f.options) if f.options else None,
-        ))
+    config = db.query(CensusConfig).first()
+    if not config:
+        config = CensusConfig(
+            email_to=data.email_to.strip(),
+            url_token=secrets.token_urlsafe(16),
+        )
+        db.add(config)
+        db.flush()
+    else:
+        config.email_to = data.email_to.strip()
+
+    existing_fields_by_id = {field.id: field for field in config.fields}
+    incoming_ids = {field.id for field in data.fields if field.id is not None}
+
+    for field in list(config.fields):
+        if field.id not in incoming_ids:
+            db.delete(field)
+
+    for index, incoming in enumerate(data.fields):
+        options = [opt.strip() for opt in (incoming.options or []) if opt and opt.strip()]
+        options_json = json.dumps(options) if incoming.field_type == "select" and options else None
+
+        if incoming.id is not None and incoming.id in existing_fields_by_id:
+            field = existing_fields_by_id[incoming.id]
+            field.label = incoming.label.strip()
+            field.field_type = incoming.field_type
+            field.required = 1 if incoming.required else 0
+            field.order_index = index
+            field.options = options_json
+        else:
+            db.add(CensusField(
+                config_id=config.id,
+                label=incoming.label.strip(),
+                field_type=incoming.field_type,
+                required=1 if incoming.required else 0,
+                order_index=index,
+                options=options_json,
+            ))
 
     db.commit()
     db.refresh(config)
