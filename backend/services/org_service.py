@@ -377,6 +377,104 @@ def _backfill_global_content(db: Session, root: OrgUnit):
 
 
 # =========================================================
+# CREACIÓN / EDICIÓN / REPARENTADO DE UNIDADES
+# =========================================================
+
+def allowed_child_type_ids(db: Session, parent_level_type_id: int | None) -> list[int]:
+    """Tipos de nivel que la matriz permite crear bajo el tipo padre dado
+    (None = reglas de creación de raíz)."""
+    query = db.query(OrgLevelParentRule.child_level_type_id)
+    if parent_level_type_id is None:
+        query = query.filter(OrgLevelParentRule.parent_level_type_id.is_(None))
+    else:
+        query = query.filter(OrgLevelParentRule.parent_level_type_id == parent_level_type_id)
+    return [row[0] for row in query.all()]
+
+
+def can_place_under(db: Session, parent_unit: OrgUnit | None, child_level_type_id: int) -> bool:
+    parent_type_id = parent_unit.level_type_id if parent_unit else None
+    return child_level_type_id in allowed_child_type_ids(db, parent_type_id)
+
+
+def create_unit(db: Session, level_type_id: int, parent_id: int | None, name: str,
+                slug: str | None = None) -> OrgUnit:
+    parent = db.query(OrgUnit).get(parent_id) if parent_id else None
+    if not can_place_under(db, parent, level_type_id):
+        raise ValueError("La estructura elegida no admite ese tipo de unidad debajo")
+
+    level_type = db.query(OrgLevelType).get(level_type_id)
+    if level_type is None:
+        raise ValueError("Tipo de nivel inexistente")
+    # is_root_only solo puede existir como raíz y una sola vez.
+    if level_type.is_root_only and (parent is not None or get_root_unit(db) is not None):
+        raise ValueError("Ese tipo solo puede existir como raíz única")
+
+    now = datetime.utcnow().isoformat()
+    unit = OrgUnit(
+        level_type_id=level_type_id, parent_id=parent_id, name=name.strip(),
+        slug=(slug or name).strip().lower().replace(" ", "-"),
+        path="", depth=0, is_active=1, created_at=now,
+    )
+    db.add(unit)
+    db.flush()
+    finalize_unit_path(db, unit)
+    db.flush()
+    return unit
+
+
+def reparent_unit(db: Session, unit: OrgUnit, new_parent: OrgUnit) -> None:
+    """Mueve una unidad (y su subárbol) bajo un nuevo padre, reescribiendo las
+    rutas del subárbol movido. Valida matriz y ausencia de ciclos."""
+    if new_parent.id == unit.id:
+        raise ValueError("Una unidad no puede ser su propio padre")
+    if new_parent.path.startswith(unit.path):
+        raise ValueError("No puedes mover una unidad dentro de su propio subárbol")
+    if not can_place_under(db, new_parent, unit.level_type_id):
+        raise ValueError("El destino no admite ese tipo de unidad")
+
+    old_prefix = unit.path
+    new_self_path = compute_path(new_parent, unit.id)
+
+    # Recolectar unidad + descendientes (path LIKE old_prefix%).
+    affected = db.query(OrgUnit).filter(OrgUnit.path.like(f"{old_prefix}%")).all()
+    for node in affected:
+        node.path = new_self_path + node.path[len(old_prefix):]
+        node.depth = len(ancestor_ids_from_path(node.path)) - 1
+    unit.parent_id = new_parent.id
+    unit.updated_at = datetime.utcnow().isoformat()
+    db.flush()
+
+
+def deactivate_unit(db: Session, unit: OrgUnit) -> None:
+    unit.is_active = 0
+    unit.deactivated_at = datetime.utcnow().isoformat()
+    db.flush()
+
+
+def reactivate_unit(db: Session, unit: OrgUnit) -> None:
+    unit.is_active = 1
+    unit.deactivated_at = None
+    db.flush()
+
+
+def serialize_unit(db: Session, unit: OrgUnit, include_counts: bool = False) -> dict:
+    data = {
+        "id": unit.id,
+        "name": unit.name,
+        "parent_id": unit.parent_id,
+        "level_type": unit.level_type.code if unit.level_type else None,
+        "level_label": unit.level_type.label if unit.level_type else None,
+        "depth": unit.depth,
+        "is_active": bool(unit.is_active),
+        "path": unit.path,
+    }
+    if include_counts:
+        data["member_count"] = db.query(User).filter(User.org_unit_id == unit.id).count()
+        data["child_count"] = db.query(OrgUnit).filter(OrgUnit.parent_id == unit.id).count()
+    return data
+
+
+# =========================================================
 # MOTOR DE AUTORIDAD (¿puedo gestionar esta unidad?)
 # =========================================================
 

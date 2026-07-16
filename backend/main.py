@@ -469,6 +469,35 @@ class SpaceReservationCreate(BaseModel):
     reason: str | None
 
 
+# ---- Organigrama / estructura ----
+class OrgUnitCreate(BaseModel):
+    name: str
+    level_type_id: int
+    parent_id: int | None = None
+
+
+class OrgUnitRename(BaseModel):
+    name: str
+
+
+class OrgUnitMove(BaseModel):
+    new_parent_id: int
+
+
+class OrgAssignmentCreate(BaseModel):
+    user_id: int
+
+
+class OrgTerritoryCreate(BaseModel):
+    territory_type: str  # ciudad | provincia | comunidad_autonoma
+    territory_id: int
+
+
+class GeoCityCreate(BaseModel):
+    name: str
+    province_id: int
+
+
 # =========================================================
 # AUTH
 # =========================================================
@@ -524,6 +553,7 @@ def me(
         "full_name": user.full_name,
         "role": user.role,
         "domain": domain,
+        "org_unit_id": user.org_unit_id,
         "events_enabled": events_enabled,
         "availabilities_enabled": availabilities_enabled,
         "spaces_enabled": spaces_enabled,
@@ -533,6 +563,403 @@ def me(
         "surveys_enabled": surveys_enabled,
         "notifications_enabled": notifications_enabled,
     }
+
+
+# =========================================================
+# ORGANIGRAMA / ESTRUCTURA ORGANIZATIVA
+# =========================================================
+from models import (
+    OrgLevelType,
+    OrgUnit,
+    AdminAssignment,
+    OrgUnitTerritory,
+    AutonomousCommunity,
+    Province,
+    City,
+)
+
+
+def _require_org_admin(admin: User):
+    """Gestionar el organigrama requiere admin (la autoridad concreta sobre
+    cada unidad se comprueba con can_manage_unit en cada operación)."""
+    require_admin(admin)
+
+
+@app.get("/me/org-scope")
+def my_org_scope(
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    """Ámbito organizativo del usuario: su unidad hogar, sus asignaciones y el
+    árbol que puede administrar. Base del selector de ámbito del frontend."""
+    user = get_user_from_token(cred.credentials, db)
+
+    home_unit = db.query(OrgUnit).get(user.org_unit_id) if user.org_unit_id else None
+    roots = org_service.authorized_root_units(db, user) if user.role in ["admin", "superadmin"] else []
+
+    # Árbol autorizado (subárbol de cada raíz de autoridad).
+    authorized_units = []
+    if user.role in ["admin", "superadmin"]:
+        subtree_ids = org_service.authorized_subtree_unit_ids(db, user)
+        if subtree_ids is None:  # superadmin: todo
+            units = db.query(OrgUnit).order_by(OrgUnit.path).all()
+        else:
+            units = db.query(OrgUnit).filter(OrgUnit.id.in_(subtree_ids)).order_by(OrgUnit.path).all() if subtree_ids else []
+        authorized_units = [org_service.serialize_unit(db, u, include_counts=True) for u in units]
+
+    return {
+        "home_unit": org_service.serialize_unit(db, home_unit) if home_unit else None,
+        "assignments": [org_service.serialize_unit(db, u) for u in roots],
+        "authorized_tree": authorized_units,
+    }
+
+
+@app.get("/admin/org/level-types")
+def org_level_types(
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+    types = db.query(OrgLevelType).order_by(OrgLevelType.sort_order).all()
+    return [
+        {
+            "id": t.id, "code": t.code, "label": t.label,
+            "is_leaf": bool(t.is_leaf), "is_root_only": bool(t.is_root_only),
+            "allowed_child_type_ids": org_service.allowed_child_type_ids(db, t.id),
+        }
+        for t in types
+    ]
+
+
+@app.get("/admin/org/tree")
+def org_tree(
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    """Árbol que el admin puede administrar (subárbol autorizado; todo si es
+    superadmin). Incluye unidades inactivas para poder reactivarlas."""
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+
+    subtree_ids = org_service.authorized_subtree_unit_ids(db, admin)
+    if subtree_ids is None:
+        units = db.query(OrgUnit).order_by(OrgUnit.path).all()
+    elif subtree_ids:
+        units = db.query(OrgUnit).filter(OrgUnit.id.in_(subtree_ids)).order_by(OrgUnit.path).all()
+    else:
+        units = []
+    return [org_service.serialize_unit(db, u, include_counts=True) for u in units]
+
+
+@app.post("/admin/org/units")
+def org_create_unit(
+    data: OrgUnitCreate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+
+    # Autoridad: debe poder gestionar el padre (o ser superadmin para la raíz).
+    if data.parent_id is None:
+        require_superadmin(admin)
+    elif not org_service.can_manage_unit(db, admin, data.parent_id):
+        raise HTTPException(403, "No autorizado sobre esa unidad superior")
+
+    try:
+        unit = org_service.create_unit(db, data.level_type_id, data.parent_id, data.name)
+        db.commit()
+        db.refresh(unit)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(400, str(exc))
+    return org_service.serialize_unit(db, unit, include_counts=True)
+
+
+@app.put("/admin/org/units/{unit_id}")
+def org_rename_unit(
+    unit_id: int,
+    data: OrgUnitRename,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+    if not org_service.can_manage_unit(db, admin, unit_id):
+        raise HTTPException(403, "No autorizado sobre esa unidad")
+    unit = db.query(OrgUnit).get(unit_id)
+    if not unit:
+        raise HTTPException(404, "Unidad no encontrada")
+    unit.name = data.name.strip()
+    unit.updated_at = datetime.utcnow().isoformat()
+    db.commit()
+    db.refresh(unit)
+    return org_service.serialize_unit(db, unit, include_counts=True)
+
+
+@app.post("/admin/org/units/{unit_id}/move")
+def org_move_unit(
+    unit_id: int,
+    data: OrgUnitMove,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+    if not org_service.can_manage_unit(db, admin, unit_id) or not org_service.can_manage_unit(db, admin, data.new_parent_id):
+        raise HTTPException(403, "No autorizado sobre esas unidades")
+    unit = db.query(OrgUnit).get(unit_id)
+    new_parent = db.query(OrgUnit).get(data.new_parent_id)
+    if not unit or not new_parent:
+        raise HTTPException(404, "Unidad no encontrada")
+    if unit.parent_id is None:
+        raise HTTPException(400, "No se puede mover la unidad raíz")
+    try:
+        org_service.reparent_unit(db, unit, new_parent)
+        db.commit()
+        db.refresh(unit)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(400, str(exc))
+    return org_service.serialize_unit(db, unit, include_counts=True)
+
+
+@app.post("/admin/org/units/{unit_id}/deactivate")
+def org_deactivate_unit(
+    unit_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+    if not org_service.can_manage_unit(db, admin, unit_id):
+        raise HTTPException(403, "No autorizado sobre esa unidad")
+    unit = db.query(OrgUnit).get(unit_id)
+    if not unit:
+        raise HTTPException(404, "Unidad no encontrada")
+    if unit.parent_id is None:
+        raise HTTPException(400, "No se puede desactivar la unidad raíz")
+    org_service.deactivate_unit(db, unit)
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/admin/org/units/{unit_id}/reactivate")
+def org_reactivate_unit(
+    unit_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+    if not org_service.can_manage_unit(db, admin, unit_id):
+        raise HTTPException(403, "No autorizado sobre esa unidad")
+    unit = db.query(OrgUnit).get(unit_id)
+    if not unit:
+        raise HTTPException(404, "Unidad no encontrada")
+    org_service.reactivate_unit(db, unit)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/admin/org/units/{unit_id}/admins")
+def org_list_unit_admins(
+    unit_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+    if not org_service.can_manage_unit(db, admin, unit_id):
+        raise HTTPException(403, "No autorizado sobre esa unidad")
+    assignments = db.query(AdminAssignment).filter(
+        AdminAssignment.org_unit_id == unit_id,
+        AdminAssignment.is_active == 1,
+    ).all()
+    result = []
+    for a in assignments:
+        u = db.query(User).get(a.user_id)
+        if u:
+            result.append({"assignment_id": a.id, "user_id": u.id, "email": u.email, "full_name": u.full_name})
+    return result
+
+
+@app.post("/admin/org/units/{unit_id}/admins")
+def org_grant_admin(
+    unit_id: int,
+    data: OrgAssignmentCreate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+    if not org_service.can_manage_unit(db, admin, unit_id):
+        raise HTTPException(403, "No autorizado sobre esa unidad")
+    unit = db.query(OrgUnit).get(unit_id)
+    target = db.query(User).get(data.user_id)
+    if not unit or not target:
+        raise HTTPException(404, "Unidad o usuario no encontrado")
+
+    existing = db.query(AdminAssignment).filter(
+        AdminAssignment.user_id == target.id,
+        AdminAssignment.org_unit_id == unit_id,
+    ).first()
+    if existing:
+        existing.is_active = 1
+    else:
+        db.add(AdminAssignment(
+            user_id=target.id, org_unit_id=unit_id, granted_by=admin.id,
+            created_at=datetime.utcnow().isoformat(), is_active=1,
+        ))
+    # Otorgar autoridad implica al menos rol admin.
+    if target.role == "user":
+        target.role = "admin"
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/admin/org/assignments/{assignment_id}")
+def org_revoke_admin(
+    assignment_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+    assignment = db.query(AdminAssignment).get(assignment_id)
+    if not assignment:
+        raise HTTPException(404, "Asignación no encontrada")
+    if not org_service.can_manage_unit(db, admin, assignment.org_unit_id):
+        raise HTTPException(403, "No autorizado sobre esa unidad")
+    assignment.is_active = 0
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/admin/org/units/{unit_id}/territories")
+def org_list_territories(
+    unit_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+    if not org_service.can_manage_unit(db, admin, unit_id):
+        raise HTTPException(403, "No autorizado sobre esa unidad")
+    rows = db.query(OrgUnitTerritory).filter(OrgUnitTerritory.org_unit_id == unit_id).all()
+    result = []
+    for r in rows:
+        label = None
+        if r.territory_type == "provincia":
+            p = db.query(Province).get(r.territory_id)
+            label = p.name if p else None
+        elif r.territory_type == "comunidad_autonoma":
+            c = db.query(AutonomousCommunity).get(r.territory_id)
+            label = c.name if c else None
+        elif r.territory_type == "ciudad":
+            c = db.query(City).get(r.territory_id)
+            label = c.name if c else None
+        result.append({"id": r.id, "territory_type": r.territory_type, "territory_id": r.territory_id, "label": label})
+    return result
+
+
+@app.post("/admin/org/units/{unit_id}/territories")
+def org_add_territory(
+    unit_id: int,
+    data: OrgTerritoryCreate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+    if not org_service.can_manage_unit(db, admin, unit_id):
+        raise HTTPException(403, "No autorizado sobre esa unidad")
+    if data.territory_type not in ["ciudad", "provincia", "comunidad_autonoma"]:
+        raise HTTPException(400, "territory_type inválido")
+    existing = db.query(OrgUnitTerritory).filter(
+        OrgUnitTerritory.org_unit_id == unit_id,
+        OrgUnitTerritory.territory_type == data.territory_type,
+        OrgUnitTerritory.territory_id == data.territory_id,
+    ).first()
+    if not existing:
+        db.add(OrgUnitTerritory(
+            org_unit_id=unit_id, territory_type=data.territory_type, territory_id=data.territory_id,
+        ))
+        db.commit()
+    return {"ok": True}
+
+
+@app.delete("/admin/org/territories/{territory_row_id}")
+def org_delete_territory(
+    territory_row_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+    row = db.query(OrgUnitTerritory).get(territory_row_id)
+    if not row:
+        raise HTTPException(404, "No encontrado")
+    if not org_service.can_manage_unit(db, admin, row.org_unit_id):
+        raise HTTPException(403, "No autorizado sobre esa unidad")
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
+
+
+# ---- Geografía (pickers) ----
+@app.get("/geo/provinces")
+def geo_provinces(db: Session = Depends(get_db)):
+    """Lista pública, fija y completa de provincias de España. NO refleja qué
+    unidades existen: es geografía estática para el filtro del visitante."""
+    provinces = db.query(Province).order_by(Province.name).all()
+    return [
+        {"id": p.id, "name": p.name, "community": p.community.name if p.community else None}
+        for p in provinces
+    ]
+
+
+@app.get("/admin/geo/communities")
+def geo_communities(
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+    rows = db.query(AutonomousCommunity).order_by(AutonomousCommunity.name).all()
+    return [{"id": c.id, "name": c.name} for c in rows]
+
+
+@app.get("/admin/geo/cities")
+def geo_cities(
+    province_id: int = Query(...),
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+    rows = db.query(City).filter(City.province_id == province_id).order_by(City.name).all()
+    return [{"id": c.id, "name": c.name} for c in rows]
+
+
+@app.post("/admin/geo/cities")
+def geo_create_city(
+    data: GeoCityCreate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+    existing = db.query(City).filter(City.name == data.name.strip(), City.province_id == data.province_id).first()
+    if existing:
+        return {"id": existing.id, "name": existing.name}
+    city = City(name=data.name.strip(), province_id=data.province_id)
+    db.add(city)
+    db.commit()
+    db.refresh(city)
+    return {"id": city.id, "name": city.name}
+
 
 @app.get("/admin/users")
 def admin_list_users(
