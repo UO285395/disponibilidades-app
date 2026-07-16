@@ -657,6 +657,37 @@ def org_tree(
     return [org_service.serialize_unit(db, u, include_counts=True) for u in units]
 
 
+@app.get("/admin/org/aggregate")
+def org_aggregate(
+    unit_id: int | None = Query(None),
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    """Vista agregada por defecto: recuentos por unidad hija directa, sin datos
+    personales. Si se indica unit_id, agrega bajo esa unidad (previa autoridad);
+    si no, bajo las raíces de autoridad del admin."""
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+
+    if unit_id is not None:
+        if not org_service.can_manage_unit(db, admin, unit_id):
+            raise HTTPException(403, "No autorizado sobre esa unidad")
+        parents = [db.query(OrgUnit).get(unit_id)]
+    else:
+        parents = org_service.authorized_root_units(db, admin)
+
+    result = []
+    for parent in parents:
+        if not parent:
+            continue
+        children = db.query(OrgUnit).filter(OrgUnit.parent_id == parent.id).order_by(OrgUnit.name).all()
+        result.append({
+            "unit": org_service.serialize_unit(db, parent, include_counts=True),
+            "children": [org_service.serialize_unit(db, c, include_counts=True) for c in children],
+        })
+    return result
+
+
 @app.post("/admin/org/units")
 def org_create_unit(
     data: OrgUnitCreate,
@@ -968,6 +999,7 @@ def geo_create_city(
 
 @app.get("/admin/users")
 def admin_list_users(
+    unit_id: int | None = Query(None),
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
     db: Session = Depends(get_db)
 ):
@@ -977,8 +1009,17 @@ def admin_list_users(
     if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag))):
         raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
-    all_users = db.query(User).order_by(func.lower(User.email)).all()
-    users = [u for u in all_users if _can_admin_manage_user(admin, u, db)]
+    # Si se pide una unidad concreta: verificar autoridad y auditar el acceso
+    # cuando quien consulta es un nivel ancestro (no la unidad propia asignada).
+    if unit_id is not None:
+        if not org_service.can_manage_unit(db, admin, unit_id):
+            raise HTTPException(403, "No autorizado sobre esa unidad")
+        if org_service.requires_drill_down_log(db, admin, unit_id):
+            org_service.log_drill_down(db, admin, unit_id, "users")
+        users = db.query(User).filter(User.org_unit_id == unit_id).order_by(func.lower(User.email)).all()
+    else:
+        all_users = db.query(User).order_by(func.lower(User.email)).all()
+        users = [u for u in all_users if _can_admin_manage_user(admin, u, db)]
 
     return [
         {
@@ -988,6 +1029,7 @@ def admin_list_users(
             "role": u.role,
             "group_tag": u.group_tag,
             "group_tags": _parse_group_tags(u.group_tag),
+            "org_unit_id": u.org_unit_id,
         }
         for u in users
     ]
