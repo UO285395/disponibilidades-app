@@ -1,8 +1,8 @@
-from fastapi import FastAPI, Depends, HTTPException, Body
+from fastapi import FastAPI, Depends, HTTPException, Body, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from sqlalchemy import func, inspect, text
+from sqlalchemy import func, inspect, or_, text
 from sqlalchemy.exc import IntegrityError
 from jose import jwt, JWTError
 from passlib.context import CryptContext
@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 
 import base64
 import csv
+import hashlib
 import io
 import importlib
 import json
@@ -32,6 +33,8 @@ from models import (
     Event,
     EventResponse,
     EventCompanion,
+    GuestResponse,
+    GuestPolicy,
     CensusConfig,
     CensusField,
     Survey,
@@ -39,8 +42,10 @@ from models import (
     SurveyResponse,
     DeviceToken,
     NotificationDispatch,
+    InstanceLog,
 )
 from database import SessionLocal, engine
+from services.calendar_service import generate_ics
 
 
 # =========================================================
@@ -61,6 +66,36 @@ def ensure_legacy_schema_compatibility():
                 with engine.begin() as conn:
                     conn.execute(text("ALTER TABLE events ADD COLUMN allowed_domain VARCHAR"))
                 print("✅ Columna events.allowed_domain añadida para compatibilidad")
+            with engine.begin() as conn:
+                if "visibility" not in event_columns:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN visibility VARCHAR DEFAULT 'internal'"))
+                    print("✅ Columna events.visibility añadida")
+                if "event_type" not in event_columns:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN event_type VARCHAR DEFAULT 'participativo'"))
+                    print("✅ Columna events.event_type añadida")
+                if "location" not in event_columns:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN location VARCHAR"))
+                    print("✅ Columna events.location añadida")
+                if "external_url" not in event_columns:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN external_url VARCHAR"))
+                    print("✅ Columna events.external_url añadida")
+                if "metadata" not in event_columns:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN metadata VARCHAR"))
+                    print("✅ Columna events.metadata añadida")
+                if "is_recurring" not in event_columns:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN is_recurring INTEGER DEFAULT 0"))
+                    print("✅ Columna events.is_recurring añadida")
+                if "recurrence_rule" not in event_columns:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN recurrence_rule VARCHAR"))
+                    print("✅ Columna events.recurrence_rule añadida")
+                if "updated_at" not in event_columns:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN updated_at VARCHAR"))
+                    print("✅ Columna events.updated_at añadida")
+                if "deleted_at" not in event_columns:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN deleted_at VARCHAR"))
+                    print("✅ Columna events.deleted_at añadida")
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_events_visibility ON events(visibility)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_events_date ON events(date)"))
 
         if "domain_policies" in table_names:
             policy_columns = {column["name"] for column in inspector.get_columns("domain_policies")}
@@ -87,6 +122,23 @@ def ensure_legacy_schema_compatibility():
                 with engine.begin() as conn:
                     conn.execute(text("ALTER TABLE users ADD COLUMN group_tag VARCHAR"))
                 print("✅ Columna users.group_tag añadida para compatibilidad")
+
+        if "device_tokens" in table_names:
+            device_token_columns = {column["name"] for column in inspector.get_columns("device_tokens")}
+            with engine.begin() as conn:
+                if "device_identifier" not in device_token_columns:
+                    conn.execute(text("ALTER TABLE device_tokens ADD COLUMN device_identifier VARCHAR"))
+                    print("✅ Columna device_tokens.device_identifier añadida")
+                if "user_role" not in device_token_columns:
+                    conn.execute(text("ALTER TABLE device_tokens ADD COLUMN user_role VARCHAR DEFAULT 'user'"))
+                    print("✅ Columna device_tokens.user_role añadida")
+                if "domain_tag" not in device_token_columns:
+                    conn.execute(text("ALTER TABLE device_tokens ADD COLUMN domain_tag VARCHAR"))
+                    print("✅ Columna device_tokens.domain_tag añadida")
+                if "last_used" not in device_token_columns:
+                    conn.execute(text("ALTER TABLE device_tokens ADD COLUMN last_used VARCHAR"))
+                    print("✅ Columna device_tokens.last_used añadida")
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_device_tokens_device_identifier ON device_tokens(device_identifier)"))
 
         # Deduplicar y reforzar unicidad (event_id, user_id) en respuestas y acompañantes.
         # Se hace de forma aditiva e idempotente: no borra datos legítimos (solo duplicados
@@ -115,6 +167,18 @@ def ensure_legacy_schema_compatibility():
                     "ON event_companions(event_id, user_id)"
                 ))
             print("✅ Índice único event_companions(event_id, user_id) verificado")
+
+        if "guest_responses" in table_names:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ux_guest_responses_event_guest "
+                    "ON guest_responses(event_id, guest_identifier)"
+                ))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_guest_responses_event_id "
+                    "ON guest_responses(event_id)"
+                ))
+            print("✅ Índices guest_responses verificados")
     except Exception as exc:
         print(f"⚠️ No se pudo verificar compatibilidad de esquema: {exc}")
 
@@ -293,6 +357,9 @@ class DeviceTokenRegister(BaseModel):
     token: str
     platform: str = "android"
     device_id: str | None = None
+    device_identifier: str | None = None
+    user_role: str | None = None
+    domain_tag: str | None = None
 
 
 class AdminNotificationSend(BaseModel):
@@ -313,6 +380,13 @@ class EventCreate(BaseModel):
     date: str
     start_time: str | None
     allowed_domain: str | None
+    visibility: str | None = None
+    event_type: str | None = None
+    location: str | None = None
+    external_url: str | None = None
+    metadata: dict | None = None
+    is_recurring: bool | None = False
+    recurrence_rule: str | None = None
 
 class EventResponseCreate(BaseModel):
     answer: str
@@ -363,6 +437,23 @@ class DomainPolicyCreate(BaseModel):
     census_enabled: bool = False
     surveys_enabled: bool = False
     notifications_enabled: bool = False
+
+
+class GuestPolicyCreate(BaseModel):
+    domain_tag: str
+    guest_responses_enabled: bool = True
+    guest_surveys_enabled: bool = False
+    guest_census_enabled: bool = False
+    guest_notifications_enabled: bool = True
+    max_guest_responses_per_event: int | None = None
+
+
+class GuestResponseCreate(BaseModel):
+    guest_name: str | None = None
+    guest_email: str | None = None
+    answer: str = "saved"
+    companions: int = 0
+    guest_identifier: str | None = None
 
 class SpaceCreate(BaseModel):
     name: str
@@ -878,6 +969,115 @@ def delete_domain_policy(
     return {"ok": True}
 
 
+@app.get("/admin/guest-policies")
+def admin_list_guest_policies(
+    domain_tag: str | None = None,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_superadmin_module_access(admin, db, "domain_policies")
+
+    query = db.query(models.GuestPolicy)
+    if domain_tag:
+        query = query.filter(models.GuestPolicy.domain_tag == domain_tag.strip().lower())
+
+    policies = query.order_by(models.GuestPolicy.domain_tag.asc()).all()
+    return [_guest_policy_to_dict(policy) for policy in policies]
+
+
+@app.post("/admin/guest-policies")
+def admin_create_guest_policy(
+    data: GuestPolicyCreate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_superadmin_module_access(admin, db, "domain_policies")
+
+    normalized_domain_tag = (data.domain_tag or "").strip().lower()
+    if not normalized_domain_tag:
+        raise HTTPException(400, "domain_tag obligatorio")
+
+    existing = db.query(models.GuestPolicy).filter(models.GuestPolicy.domain_tag == normalized_domain_tag).first()
+    if existing:
+        raise HTTPException(400, "Ya existe una guest policy para ese domain_tag")
+
+    now_iso = datetime.utcnow().isoformat()
+    policy = models.GuestPolicy(
+        domain_tag=normalized_domain_tag,
+        guest_responses_enabled=1 if data.guest_responses_enabled else 0,
+        guest_surveys_enabled=1 if data.guest_surveys_enabled else 0,
+        guest_census_enabled=1 if data.guest_census_enabled else 0,
+        guest_notifications_enabled=1 if data.guest_notifications_enabled else 0,
+        max_guest_responses_per_event=data.max_guest_responses_per_event,
+        created_at=now_iso,
+        updated_at=now_iso,
+        updated_by=admin.id,
+    )
+    db.add(policy)
+    db.commit()
+    db.refresh(policy)
+    return _guest_policy_to_dict(policy)
+
+
+@app.put("/admin/guest-policies/{policy_id}")
+def admin_update_guest_policy(
+    policy_id: int,
+    data: GuestPolicyCreate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_superadmin_module_access(admin, db, "domain_policies")
+
+    policy = db.query(models.GuestPolicy).filter(models.GuestPolicy.id == policy_id).first()
+    if not policy:
+        raise HTTPException(404, "Guest policy no encontrada")
+
+    normalized_domain_tag = (data.domain_tag or "").strip().lower()
+    if not normalized_domain_tag:
+        raise HTTPException(400, "domain_tag obligatorio")
+
+    conflict = (
+        db.query(models.GuestPolicy)
+        .filter(models.GuestPolicy.domain_tag == normalized_domain_tag, models.GuestPolicy.id != policy_id)
+        .first()
+    )
+    if conflict:
+        raise HTTPException(400, "Ya existe una guest policy para ese domain_tag")
+
+    policy.domain_tag = normalized_domain_tag
+    policy.guest_responses_enabled = 1 if data.guest_responses_enabled else 0
+    policy.guest_surveys_enabled = 1 if data.guest_surveys_enabled else 0
+    policy.guest_census_enabled = 1 if data.guest_census_enabled else 0
+    policy.guest_notifications_enabled = 1 if data.guest_notifications_enabled else 0
+    policy.max_guest_responses_per_event = data.max_guest_responses_per_event
+    policy.updated_at = datetime.utcnow().isoformat()
+    policy.updated_by = admin.id
+    db.commit()
+    db.refresh(policy)
+    return _guest_policy_to_dict(policy)
+
+
+@app.delete("/admin/guest-policies/{policy_id}")
+def admin_delete_guest_policy(
+    policy_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    admin = get_user_from_token(cred.credentials, db)
+    _require_superadmin_module_access(admin, db, "domain_policies")
+
+    policy = db.query(models.GuestPolicy).filter(models.GuestPolicy.id == policy_id).first()
+    if not policy:
+        raise HTTPException(404, "Guest policy no encontrada")
+
+    db.delete(policy)
+    db.commit()
+    return {"ok": True}
+
+
 # =========================================================
 # EVENTOS
 # =========================================================
@@ -897,12 +1097,28 @@ def create_event(
     if allowed_domain in ["todos", "all"]:
         allowed_domain = None
 
+    visibility = (data.visibility or "internal").strip().lower()
+    if visibility not in ["public", "internal", "private"]:
+        raise HTTPException(400, "visibility inválida: usa public, internal o private")
+
+    event_type = (data.event_type or "participativo").strip().lower()
+    if event_type not in ["informativo", "participativo"]:
+        raise HTTPException(400, "event_type inválido: usa informativo o participativo")
+
     ev = Event(
         title=data.title,
         description=data.description,
         date=data.date,
         start_time=data.start_time,
         allowed_domain=allowed_domain,
+        visibility=visibility,
+        event_type=event_type,
+        location=(data.location or None),
+        external_url=(data.external_url or None),
+        metadata_json=json.dumps(data.metadata) if data.metadata else None,
+        is_recurring=1 if data.is_recurring else 0,
+        recurrence_rule=(data.recurrence_rule or None),
+        updated_at=datetime.utcnow().isoformat(),
         created_by=admin.id
     )
     db.add(ev)
@@ -910,13 +1126,14 @@ def create_event(
     db.refresh(ev)
 
     try:
+        notif_title = f"Nuevo evento: {ev.title}"
+        notif_body = f"Publicado para {ev.date}" + (f" · {ev.start_time}" if ev.start_time else "")
+
         target_user_ids = _event_target_user_ids(db, ev.allowed_domain)
-        _notify_users_by_ids(
-            db,
-            target_user_ids,
-            f"Nuevo evento: {ev.title}",
-            f"Publicado para {ev.date}" + (f" · {ev.start_time}" if ev.start_time else ""),
-        )
+        _notify_users_by_ids(db, target_user_ids, notif_title, notif_body, data={"recipient_type": "authenticated"})
+
+        # Decisión #4 del plan: los visitantes (guests) solo se enteran de eventos públicos.
+        _notify_guest_tokens_for_event(db, ev, notif_title, notif_body)
     except Exception as exc:
         print(f"⚠️ No se pudo enviar notificación automática de evento: {exc}")
 
@@ -927,12 +1144,143 @@ def create_event(
         "date": ev.date,
         "start_time": ev.start_time,
         "allowed_domain": ev.allowed_domain,
+        "visibility": ev.visibility,
+        "event_type": ev.event_type,
+        "location": ev.location,
+        "external_url": ev.external_url,
+        "metadata": json.loads(ev.metadata_json) if ev.metadata_json else None,
+        "is_recurring": bool(ev.is_recurring),
+        "recurrence_rule": ev.recurrence_rule,
         "created_by": ev.created_by,
+    }
+
+
+def _parse_requested_visibilities(visibility: str | None) -> set[str] | None:
+    if not visibility:
+        return None
+
+    requested = {
+        value.strip().lower()
+        for value in visibility.split(",")
+        if value.strip()
+    }
+    invalid = requested - {"public", "internal", "private"}
+    if invalid:
+        raise HTTPException(400, "visibility inválida: usa public, internal o private")
+    return requested
+
+
+def _visible_events_for_user(
+    events: list[Event],
+    user: User | None,
+    user_domain: str | None,
+    requested_visibilities: set[str] | None,
+) -> list[Event]:
+    filtered = []
+
+    for e in events:
+        e_visibility = (e.visibility or "internal").strip().lower()
+
+        if requested_visibilities is not None and e_visibility not in requested_visibilities:
+            continue
+
+        if user is None:
+            if e_visibility != "public":
+                continue
+
+            # Compatibilidad histórica: eventos con allowed_domain solo para autenticados.
+            if e.allowed_domain:
+                continue
+
+            filtered.append(e)
+            continue
+
+        if e_visibility == "private":
+            if user.role != "superadmin" and e.created_by != user.id:
+                continue
+        elif e_visibility == "internal":
+            if e.allowed_domain:
+                event_domain = e.allowed_domain.strip().lower()
+                if user.role != "superadmin" and event_domain != user_domain:
+                    continue
+
+            if user.role == "admin" and e.allowed_domain:
+                event_domain = e.allowed_domain.strip().lower()
+                if event_domain != user_domain:
+                    continue
+
+            filtered.append(e)
+            continue
+        else:
+            # public
+            if e.allowed_domain:
+                event_domain = e.allowed_domain.strip().lower()
+                if user.role != "superadmin" and event_domain != user_domain:
+                    continue
+
+            if user.role == "admin" and e.allowed_domain:
+                event_domain = e.allowed_domain.strip().lower()
+                if event_domain != user_domain:
+                    continue
+
+        filtered.append(e)
+
+    return filtered
+
+
+def _serialize_event_with_counts(db: Session, e: Event) -> dict:
+    yes_count = (
+        db.query(EventResponse)
+        .filter(
+            EventResponse.event_id == e.id,
+            func.lower(EventResponse.answer).in_(["yes", "si"]),
+        )
+        .count()
+    )
+
+    no_count = (
+        db.query(EventResponse)
+        .filter(
+            EventResponse.event_id == e.id,
+            func.lower(EventResponse.answer) == "no",
+        )
+        .count()
+    )
+
+    companions_total = (
+        db.query(func.coalesce(func.sum(EventCompanion.count), 0))
+        .filter(EventCompanion.event_id == e.id)
+        .scalar()
+    ) or 0
+
+    attendees_total = yes_count + companions_total
+
+    return {
+        "id": e.id,
+        "title": e.title,
+        "description": e.description,
+        "date": e.date,
+        "start_time": e.start_time,
+        # `Event` no tiene `end_time` en el modelo actual; mantenemos el campo para compatibilidad.
+        "end_time": None,
+        "allowed_domain": e.allowed_domain,
+        "visibility": e.visibility,
+        "event_type": e.event_type,
+        "location": e.location,
+        "external_url": e.external_url,
+        "metadata": json.loads(e.metadata_json) if e.metadata_json else None,
+        "is_recurring": bool(e.is_recurring),
+        "recurrence_rule": e.recurrence_rule,
+        "yes_count": yes_count,
+        "no_count": no_count,
+        "companions_total": companions_total,
+        "attendees_total": attendees_total,
     }
 
 
 @app.get("/events")
 def list_events(
+    visibility: str | None = Query(None),
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
     db: Session = Depends(get_db)
 ):
@@ -949,73 +1297,35 @@ def list_events(
         raise HTTPException(403, "Eventos deshabilitados para tu dominio")
 
     events = db.query(Event).all()
+    requested_visibilities = _parse_requested_visibilities(visibility)
+    filtered = _visible_events_for_user(events, user, user_domain, requested_visibilities)
 
-    filtered = []
+    return [_serialize_event_with_counts(db, e) for e in filtered]
 
-    for e in events:
-        if e.allowed_domain:
-            if user is None:
-                continue
 
-            event_domain = e.allowed_domain.strip().lower()
-            if user.role != "superadmin" and event_domain != user_domain:
-                continue
+@app.get("/events/{event_id}/public")
+def get_event_public(
+    event_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    """Detalle de evento accesible sin sesión (solo públicos) o con sesión
+    (públicos + internos/privados según el mismo criterio de GET /events).
+    Distinto del GET /events/{event_id} de administración, que exige rol admin."""
+    user = None
+    if cred and cred.credentials:
+        try:
+            user = get_user_from_token(cred.credentials, db)
+        except HTTPException:
+            user = None
 
-        # Si el usuario es admin de dominio limpio, mantiene la misma lógica (superadmin no filtra).
-        if user and user.role == "admin":
-            if e.allowed_domain:
-                event_domain = e.allowed_domain.strip().lower()
-                if event_domain != user_domain:
-                    continue
+    user_domain = _get_domain(user.email) if user else None
 
-        filtered.append(e)
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    if not ev or not _visible_events_for_user([ev], user, user_domain, None):
+        raise HTTPException(404, "Evento no encontrado")
 
-    result = []
-    for e in filtered:
-        yes_count = (
-            db.query(EventResponse)
-            .filter(
-                EventResponse.event_id == e.id,
-                func.lower(EventResponse.answer).in_(["yes", "si"]),
-            )
-            .count()
-        )
-
-        no_count = (
-            db.query(EventResponse)
-            .filter(
-                EventResponse.event_id == e.id,
-                func.lower(EventResponse.answer) == "no",
-            )
-            .count()
-        )
-
-        companions_total = (
-            db.query(func.coalesce(func.sum(EventCompanion.count), 0))
-            .filter(EventCompanion.event_id == e.id)
-            .scalar()
-        ) or 0
-
-        attendees_total = yes_count + companions_total
-
-        result.append(
-            {
-                "id": e.id,
-                "title": e.title,
-                "description": e.description,
-                "date": e.date,
-                "start_time": e.start_time,
-                # `Event` no tiene `end_time` en el modelo actual; mantenemos el campo para compatibilidad.
-                "end_time": None,
-                "allowed_domain": e.allowed_domain,
-                "yes_count": yes_count,
-                "no_count": no_count,
-                "companions_total": companions_total,
-                "attendees_total": attendees_total,
-            }
-        )
-
-    return result
+    return _serialize_event_with_counts(db, ev)
 
 
 @app.get("/events/{event_id}")
@@ -1040,8 +1350,75 @@ def get_event(
         "date": ev.date,
         "start_time": ev.start_time,
         # `Event` no tiene `end_time` en el modelo actual; mantenemos el campo para compatibilidad.
-        "end_time": None
+        "end_time": None,
+        "allowed_domain": ev.allowed_domain,
+        "visibility": ev.visibility,
+        "event_type": ev.event_type,
+        "location": ev.location,
+        "external_url": ev.external_url,
+        "metadata": json.loads(ev.metadata_json) if ev.metadata_json else None,
+        "is_recurring": bool(ev.is_recurring),
+        "recurrence_rule": ev.recurrence_rule,
     }
+
+
+# =========================================================
+# CALENDARIO (export iCalendar)
+# =========================================================
+@app.get("/calendar/export.ics")
+def export_calendar_ics(
+    visibility: str | None = Query(None),
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    user = None
+    if cred and cred.credentials:
+        try:
+            user = get_user_from_token(cred.credentials, db)
+        except HTTPException:
+            user = None
+
+    user_domain = _get_domain(user.email) if user else None
+    requested_visibilities = _parse_requested_visibilities(visibility)
+
+    if user is None:
+        # Visitantes sin sesión solo exportan eventos públicos, sin importar el filtro pedido.
+        requested_visibilities = {"public"}
+
+    events = db.query(Event).all()
+    visible_events = _visible_events_for_user(events, user, user_domain, requested_visibilities)
+
+    creator_ids = {e.created_by for e in visible_events if e.created_by}
+    creators = {}
+    if creator_ids:
+        for creator in db.query(User).filter(User.id.in_(creator_ids)).all():
+            creators[creator.id] = creator
+
+    event_dicts = []
+    for e in visible_events:
+        creator = creators.get(e.created_by)
+        event_dicts.append({
+            "id": e.id,
+            "title": e.title,
+            "description": e.description,
+            "date": e.date,
+            "start_time": e.start_time,
+            "location": e.location,
+            "external_url": e.external_url,
+            "visibility": e.visibility,
+            "organizer_email": creator.email if creator else None,
+            "organizer_name": creator.full_name if creator else None,
+            "updated_at": e.updated_at,
+        })
+
+    calendar_name = "Eventos públicos" if user is None else "Mis eventos"
+    ics_content = generate_ics(event_dicts, calendar_name=calendar_name)
+
+    return Response(
+        content=ics_content,
+        media_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=eventos.ics"},
+    )
 
 
 @app.get("/events/{event_id}/responses")
@@ -1153,6 +1530,104 @@ def respond_event(
         raise HTTPException(400, "Ya has votado en este evento")
 
     return {"ok": True}
+
+
+@app.post("/events/{event_id}/responses/guest")
+def respond_event_guest(
+    event_id: int,
+    data: GuestResponseCreate,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(404, "Evento no encontrado")
+
+    event_visibility = (event.visibility or "internal").strip().lower()
+    if event_visibility != "public":
+        raise HTTPException(403, "Solo los eventos públicos aceptan respuestas de visitantes")
+
+    domain_tag = _resolve_guest_domain_tag_from_event(event)
+    policy = db.query(GuestPolicy).filter(GuestPolicy.domain_tag == domain_tag).first()
+    if policy and not bool(policy.guest_responses_enabled):
+        raise HTTPException(403, "Respuestas de visitantes deshabilitadas para este dominio")
+
+    raw_answer = (data.answer or "saved").strip().lower()
+    if raw_answer in ["si", "sí", "yes"]:
+        normalized_answer = "si"
+    elif raw_answer in ["no"]:
+        normalized_answer = "no"
+    elif raw_answer in ["abstain", "abstener", "abstencion", "abstención"]:
+        normalized_answer = "abstain"
+    elif raw_answer in ["saved", "guardar", "recordar"]:
+        normalized_answer = "saved"
+    else:
+        raise HTTPException(400, "answer inválida (usa si, no, abstain o saved)")
+
+    companions = int(data.companions or 0)
+    if companions < 0:
+        raise HTTPException(400, "companions no puede ser negativo")
+    if companions > 20:
+        raise HTTPException(400, "Máximo 20 acompañantes")
+
+    if policy and policy.max_guest_responses_per_event is not None:
+        current_count = db.query(GuestResponse).filter(GuestResponse.event_id == event_id).count()
+        if current_count >= int(policy.max_guest_responses_per_event):
+            raise HTTPException(403, "Límite de respuestas de visitantes alcanzado")
+
+    guest_identifier_raw = (data.guest_identifier or "").strip()
+    if not guest_identifier_raw:
+        ip_part = request.client.host if request.client and request.client.host else "no-ip"
+        name_part = (data.guest_name or "anon").strip().lower()
+        email_part = (data.guest_email or "").strip().lower()
+        guest_identifier_raw = f"{ip_part}|{name_part}|{email_part}|{event_id}"
+
+    guest_identifier = hashlib.sha256(guest_identifier_raw.encode("utf-8")).hexdigest()
+
+    existing = (
+        db.query(GuestResponse)
+        .filter(GuestResponse.event_id == event_id, GuestResponse.guest_identifier == guest_identifier)
+        .first()
+    )
+
+    now_iso = datetime.utcnow().isoformat()
+    if existing:
+        existing.guest_name = data.guest_name
+        existing.guest_email = data.guest_email
+        existing.answer = normalized_answer
+        existing.companions = companions
+        existing.updated_at = now_iso
+        db.commit()
+        db.refresh(existing)
+        return {
+            "ok": True,
+            "id": existing.id,
+            "event_id": existing.event_id,
+            "updated": True,
+            "export_token": None,
+        }
+
+    guest_response = GuestResponse(
+        event_id=event_id,
+        guest_name=data.guest_name,
+        guest_email=data.guest_email,
+        answer=normalized_answer,
+        companions=companions,
+        guest_identifier=guest_identifier,
+        created_at=now_iso,
+        updated_at=now_iso,
+    )
+    db.add(guest_response)
+    db.commit()
+    db.refresh(guest_response)
+
+    return {
+        "ok": True,
+        "id": guest_response.id,
+        "event_id": guest_response.event_id,
+        "updated": False,
+        "export_token": None,
+    }
 
 
 @app.get("/my-event-responses")
@@ -2211,6 +2686,27 @@ def _domain_policy_to_dict(policy: models.DomainPolicy) -> dict:
     }
 
 
+def _guest_policy_to_dict(policy: models.GuestPolicy) -> dict:
+    return {
+        "id": policy.id,
+        "domain_tag": policy.domain_tag,
+        "guest_responses_enabled": bool(policy.guest_responses_enabled),
+        "guest_surveys_enabled": bool(policy.guest_surveys_enabled),
+        "guest_census_enabled": bool(policy.guest_census_enabled),
+        "guest_notifications_enabled": bool(policy.guest_notifications_enabled),
+        "max_guest_responses_per_event": policy.max_guest_responses_per_event,
+        "created_at": policy.created_at,
+        "updated_at": policy.updated_at,
+        "updated_by": policy.updated_by,
+    }
+
+
+def _resolve_guest_domain_tag_from_event(event: Event) -> str:
+    if event.allowed_domain:
+        return event.allowed_domain.strip().lower()
+    return "public"
+
+
 def _can_admin_manage_policy_target(admin: User, storage_key: str, db: Session) -> bool:
     if admin.role == "superadmin":
         return True
@@ -2351,7 +2847,7 @@ def _get_fcm_v1_access_token(service_account_info: dict):
         return None, "fcm_auth_error", f"No se pudo obtener access token FCM: {exc}"
 
 
-def _send_fcm_notification_legacy(tokens: list[str], title: str, body: str, server_key: str):
+def _send_fcm_notification_legacy(tokens: list[str], title: str, body: str, server_key: str, data: dict | None = None):
     endpoint = os.getenv("FCM_ENDPOINT", "https://fcm.googleapis.com/fcm/send").strip()
 
     payload = {
@@ -2363,6 +2859,8 @@ def _send_fcm_notification_legacy(tokens: list[str], title: str, body: str, serv
         },
         "priority": "high",
     }
+    if data:
+        payload["data"] = {str(k): str(v) for k, v in data.items()}
 
     req = urllib.request.Request(
         endpoint,
@@ -2386,7 +2884,7 @@ def _send_fcm_notification_legacy(tokens: list[str], title: str, body: str, serv
         return {"sent": 0, "failed": len(tokens), "reason": str(exc), "message": str(exc)}
 
 
-def _send_fcm_notification_v1(tokens: list[str], title: str, body: str):
+def _send_fcm_notification_v1(tokens: list[str], title: str, body: str, data: dict | None = None):
     service_account_info, project_id, reason, message = _load_fcm_service_account()
     if reason:
         print(f"⚠️ Configuración FCM v1 incompleta: {message}")
@@ -2419,6 +2917,8 @@ def _send_fcm_notification_v1(tokens: list[str], title: str, body: str):
                 },
             }
         }
+        if data:
+            payload["message"]["data"] = {str(k): str(v) for k, v in data.items()}
 
         req = urllib.request.Request(
             endpoint,
@@ -2452,29 +2952,41 @@ def _send_fcm_notification_v1(tokens: list[str], title: str, body: str):
     return {"sent": sent, "failed": failed, "reason": "fcm_v1_error", "message": last_error}
 
 
-def _send_fcm_notification(tokens: list[str], title: str, body: str):
+def _send_fcm_notification(tokens: list[str], title: str, body: str, data: dict | None = None):
     if not tokens:
         return {"sent": 0, "failed": 0, "reason": "no_tokens"}
 
     server_key = os.getenv("FCM_SERVER_KEY", "").strip()
     if server_key:
-        return _send_fcm_notification_legacy(tokens, title, body, server_key)
+        return _send_fcm_notification_legacy(tokens, title, body, server_key, data=data)
 
-    return _send_fcm_notification_v1(tokens, title, body)
+    return _send_fcm_notification_v1(tokens, title, body, data=data)
 
 
-def _notify_users_by_ids(db: Session, user_ids: list[int], title: str, body: str):
+def _device_token_freshness_filter():
+    # Tokens sin `last_used` (columna nueva, aún no repoblada por una
+    # re-registración del cliente) se tratan como frescos: no penalizamos
+    # dispositivos reales solo porque el campo todavía no se ha rellenado.
+    cutoff = (datetime.utcnow() - timedelta(days=30)).isoformat()
+    return or_(DeviceToken.last_used.is_(None), DeviceToken.last_used >= cutoff)
+
+
+def _notify_users_by_ids(db: Session, user_ids: list[int], title: str, body: str, data: dict | None = None):
     if not user_ids:
         return {"target_users": 0, "tokens": 0, "sent": 0, "failed": 0, "reason": "no_users"}
 
     token_rows = (
         db.query(DeviceToken)
-        .filter(DeviceToken.user_id.in_(user_ids), DeviceToken.active == 1)
+        .filter(
+            DeviceToken.user_id.in_(user_ids),
+            DeviceToken.active == 1,
+            _device_token_freshness_filter(),
+        )
         .all()
     )
     unique_tokens = sorted({row.token for row in token_rows if row.token})
 
-    result = _send_fcm_notification(unique_tokens, title, body)
+    result = _send_fcm_notification(unique_tokens, title, body, data=data)
     return {
         "target_users": len(set(user_ids)),
         "tokens": len(unique_tokens),
@@ -2492,37 +3004,99 @@ def _event_target_user_ids(db: Session, allowed_domain: str | None):
     return [u.id for u in users]
 
 
+def _notify_guest_tokens_for_event(db: Session, event: Event, title: str, body: str):
+    """Notifica a los invitados (sin cuenta) suscritos a push cuando un
+    evento es público. Los militantes se notifican aparte via
+    _notify_users_by_ids; esta función implementa la Decisión #4 del plan
+    de escalado: los guests solo reciben notificaciones de eventos públicos."""
+    if (event.visibility or "internal").strip().lower() != "public":
+        return {"target_tokens": 0, "sent": 0, "failed": 0, "reason": "not_public"}
+
+    domain_tag = _resolve_guest_domain_tag_from_event(event)
+    policy = db.query(GuestPolicy).filter(GuestPolicy.domain_tag == domain_tag).first()
+    if policy and not bool(policy.guest_notifications_enabled):
+        return {"target_tokens": 0, "sent": 0, "failed": 0, "reason": "guest_notifications_disabled"}
+
+    token_rows = (
+        db.query(DeviceToken)
+        .filter(
+            DeviceToken.user_role == "guest",
+            DeviceToken.active == 1,
+            DeviceToken.domain_tag.in_({domain_tag, "public"}),
+            _device_token_freshness_filter(),
+        )
+        .all()
+    )
+    unique_tokens = sorted({row.token for row in token_rows if row.token})
+
+    result = _send_fcm_notification(unique_tokens, title, body, data={"recipient_type": "guest"})
+    return {
+        "target_tokens": len(unique_tokens),
+        "sent": result["sent"],
+        "failed": result["failed"],
+        "reason": result["reason"],
+    }
+
+
 @app.post("/device-tokens/register")
 def register_device_token(
     data: DeviceTokenRegister,
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
     db: Session = Depends(get_db)
 ):
-    user = get_user_from_token(cred.credentials if cred else None, db)
+    user = None
+    if cred and cred.credentials:
+        try:
+            user = get_user_from_token(cred.credentials, db)
+        except HTTPException:
+            user = None
+
     token_value = (data.token or "").strip()
     if not token_value:
         raise HTTPException(400, "Token de dispositivo obligatorio")
 
-    collective = _get_domain(user.email)
+    requested_role = (data.user_role or "").strip().lower()
+    if requested_role and requested_role not in ["guest", "user", "admin", "superadmin"]:
+        raise HTTPException(400, "user_role inválido")
+
+    if user:
+        effective_role = user.role
+        collective = _get_domain(user.email)
+        domain_tag = data.domain_tag or collective
+    else:
+        effective_role = requested_role or "guest"
+        if effective_role != "guest":
+            raise HTTPException(401, "Token de autenticación requerido para registrar roles no guest")
+        collective = (data.domain_tag or "public").strip().lower()
+        domain_tag = collective
+
     now_iso = datetime.utcnow().isoformat()
 
     existing = db.query(DeviceToken).filter(DeviceToken.token == token_value).first()
     if existing:
-        existing.user_id = user.id
+        existing.user_id = user.id if user else None
         existing.platform = (data.platform or "android").strip().lower()
         existing.device_id = data.device_id
+        existing.device_identifier = data.device_identifier
+        existing.user_role = effective_role
+        existing.domain_tag = domain_tag
         existing.collective = collective
         existing.active = 1
         existing.updated_at = now_iso
+        existing.last_used = now_iso
     else:
         db.add(DeviceToken(
-            user_id=user.id,
+            user_id=user.id if user else None,
             token=token_value,
             platform=(data.platform or "android").strip().lower(),
             device_id=data.device_id,
+            device_identifier=data.device_identifier,
+            user_role=effective_role,
+            domain_tag=domain_tag,
             collective=collective,
             active=1,
             updated_at=now_iso,
+            last_used=now_iso,
         ))
 
     db.commit()
@@ -2574,7 +3148,7 @@ def send_admin_notification(
                 if not _can_admin_manage_user(admin, target_user, db):
                     raise HTTPException(403, "No autorizado para notificar a usuarios fuera de tu alcance")
 
-    notify_result = _notify_users_by_ids(db, target_user_ids, title, body)
+    notify_result = _notify_users_by_ids(db, target_user_ids, title, body, data={"recipient_type": "authenticated"})
 
     dispatch = NotificationDispatch(
         created_by=admin.id,
@@ -2947,13 +3521,45 @@ def edit_event(
     if allowed_domain in ["todos", "all"]:
         allowed_domain = None
 
+    visibility = (data.visibility or ev.visibility or "internal").strip().lower()
+    if visibility not in ["public", "internal", "private"]:
+        raise HTTPException(400, "visibility inválida: usa public, internal o private")
+
+    event_type = (data.event_type or ev.event_type or "participativo").strip().lower()
+    if event_type not in ["informativo", "participativo"]:
+        raise HTTPException(400, "event_type inválido: usa informativo o participativo")
+
+    was_public = (ev.visibility or "internal").strip().lower() == "public"
+
     ev.title = data.title
     ev.description = data.description
     ev.date = data.date
     ev.start_time = data.start_time
     ev.allowed_domain = allowed_domain
+    ev.visibility = visibility
+    ev.event_type = event_type
+    ev.location = data.location or None
+    ev.external_url = data.external_url or None
+    ev.metadata_json = json.dumps(data.metadata) if data.metadata else None
+    ev.is_recurring = 1 if data.is_recurring else 0
+    ev.recurrence_rule = data.recurrence_rule or None
+    ev.updated_at = datetime.utcnow().isoformat()
     db.commit()
     db.refresh(ev)
+
+    # Si el evento pasa a ser público por primera vez, avisamos a los guests
+    # suscritos (igual que en la creación); si ya era público no repetimos
+    # el aviso en cada edición menor para no saturar a nadie.
+    if visibility == "public" and not was_public:
+        try:
+            _notify_guest_tokens_for_event(
+                db,
+                ev,
+                f"Nuevo evento público: {ev.title}",
+                f"Publicado para {ev.date}" + (f" · {ev.start_time}" if ev.start_time else ""),
+            )
+        except Exception as exc:
+            print(f"⚠️ No se pudo notificar a invitados tras editar evento: {exc}")
 
     return {
         "id": ev.id,
@@ -2962,6 +3568,13 @@ def edit_event(
         "date": ev.date,
         "start_time": ev.start_time,
         "allowed_domain": ev.allowed_domain,
+        "visibility": ev.visibility,
+        "event_type": ev.event_type,
+        "location": ev.location,
+        "external_url": ev.external_url,
+        "metadata": json.loads(ev.metadata_json) if ev.metadata_json else None,
+        "is_recurring": bool(ev.is_recurring),
+        "recurrence_rule": ev.recurrence_rule,
         "created_by": ev.created_by,
     }
 

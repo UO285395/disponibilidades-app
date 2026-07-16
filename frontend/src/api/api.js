@@ -107,6 +107,24 @@ export async function clearToken() {
   emitAuthChange();
 }
 
+// ------------------- IDENTIDAD DE INVITADO -------------------
+// UUID persistente en localStorage para deduplicar respuestas de visitantes
+// sin cuenta. Mucho más fiable que el fallback IP+nombre+email del backend.
+const GUEST_ID_KEY = "guest_identifier";
+
+export function getOrCreateGuestId() {
+  try {
+    let guestId = localStorage.getItem(GUEST_ID_KEY);
+    if (!guestId) {
+      guestId = crypto.randomUUID();
+      localStorage.setItem(GUEST_ID_KEY, guestId);
+    }
+    return guestId;
+  } catch {
+    return crypto.randomUUID();
+  }
+}
+
 // ------------------- REQUEST WRAPPER -------------------
 
 export async function request(endpoint, method = "GET", body = null, includeAuth = true) {
@@ -169,6 +187,38 @@ export const authAPI = {
   }
 };
 
+// Decodifica el JWT actual y, si le quedan menos de 24h de vida, lo refresca
+// en segundo plano contra /auth/refresh. Devuelve false solo si no hay token,
+// el token es ilegible, ya expiró, o el refresco falló (sesión realmente muerta).
+export async function ensureTokenValid() {
+  const token = getToken();
+  if (!token) return false;
+
+  let payload;
+  try {
+    const base64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    payload = JSON.parse(atob(base64));
+  } catch {
+    return false;
+  }
+
+  if (!payload?.exp) return true;
+
+  const msUntilExpiry = payload.exp * 1000 - Date.now();
+  if (msUntilExpiry <= 0) return false;
+
+  const hoursUntilExpiry = msUntilExpiry / (1000 * 60 * 60);
+  if (hoursUntilExpiry < 24) {
+    try {
+      await authAPI.refresh();
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 export const userAPI = {
   me() {
     return request("/me");
@@ -176,11 +226,12 @@ export const userAPI = {
 };
 
 export const deviceAPI = {
-  registerToken(token, platform = "android", deviceId = null) {
+  registerToken(token, platform = "android", deviceId = null, userRole = null) {
     return request("/device-tokens/register", "POST", {
       token,
       platform,
       device_id: deviceId,
+      user_role: userRole || undefined,
     });
   },
 };
@@ -188,8 +239,9 @@ export const deviceAPI = {
 // ------------------- EVENTS (usuario) -------------------
 
 export const eventsAPI = {
-  list() {
-    return request("/events");
+  list(visibility = null) {
+    const qs = visibility ? `?visibility=${encodeURIComponent(visibility)}` : "";
+    return request(`/events${qs}`);
   },
 
   respond(event_id, answer, justification) {
@@ -209,7 +261,53 @@ export const eventsAPI = {
 
   updateMyCompanions(event_id, count) {
     return request(`/events/${event_id}/companions/my`, "PUT", { count });
-  }
+  },
+
+  // ------------------- PÚBLICO / INVITADOS -------------------
+
+  listPublic() {
+    return request("/events?visibility=public", "GET", null, false);
+  },
+
+  getPublicDetail(event_id) {
+    return request(`/events/${event_id}/public`, "GET", null, false);
+  },
+
+  respondGuest(event_id, { guestName, answer, companions }) {
+    return request(`/events/${event_id}/responses/guest`, "POST", {
+      guest_name: guestName || null,
+      answer,
+      companions: companions || 0,
+      guest_identifier: getOrCreateGuestId(),
+    }, false);
+  },
+};
+
+// ------------------- CALENDARIO (export iCalendar) -------------------
+
+export const calendarAPI = {
+  async download(visibility = null) {
+    const qs = visibility ? `?visibility=${encodeURIComponent(visibility)}` : "";
+    const opts = { method: "GET", headers: {} };
+    const token = getToken();
+    if (token) opts.headers["Authorization"] = "Bearer " + token;
+
+    const res = await fetch(`${API_URL}/calendar/export.ics${qs}`, opts);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status} - ${text}`);
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "eventos.ics";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  },
 };
 
 

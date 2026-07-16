@@ -7,7 +7,10 @@ import AdminDashboard from "./pages/AdminDashboard.jsx";
 import AdminEventResponses from "./pages/AdminEventResponses.jsx";
 import CensusForm from "./pages/CensusForm.jsx";
 import SurveyForm from "./pages/SurveyForm.jsx";
+import PublicHome from "./pages/PublicHome.jsx";
+import EventDetail from "./pages/EventDetail.jsx";
 import { getToken, initializeAuthStorage, subscribeAuthChanges } from "./api/api.js";
+import { initMobileNotifications } from "./services/mobileNotifications.js";
 
 export default function App() {
   const [ready, setReady] = useState(false);
@@ -25,6 +28,10 @@ export default function App() {
       } finally {
         setReady(true);
       }
+
+      initMobileNotifications().catch((error) => {
+        console.error("No se pudo inicializar push móvil", error);
+      });
     })();
 
     const unsubscribe = subscribeAuthChanges((nextHasSession) => {
@@ -45,14 +52,16 @@ export default function App() {
     <RouterComponent>
       <Routes>
 
-        <Route path="/" element={hasSession ? <Navigate to="/dashboard" replace /> : <Login />} />
+        <Route path="/" element={hasSession ? <Navigate to="/dashboard" replace /> : <PublicHome />} />
+        <Route path="/login" element={hasSession ? <Navigate to="/dashboard" replace /> : <Login />} />
 
         <Route path="/dashboard" element={hasSession ? <Dashboard /> : <Navigate to="/" replace />} />
 
         <Route path="/admin" element={hasSession ? <AdminDashboard /> : <Navigate to="/" replace />} />
         <Route path="/admin/event/:id" element={hasSession ? <AdminEventResponses /> : <Navigate to="/" replace />} />
 
-        {/* Ruta pública de censo — sin autenticación */}
+        {/* Rutas públicas — sin autenticación */}
+        <Route path="/eventos/:id" element={<EventDetail />} />
         <Route path="/censo/:token" element={<CensusForm />} />
         <Route path="/encuesta/:token" element={<SurveyForm />} />
         <Route path="*" element={<Navigate to="/" replace />} />

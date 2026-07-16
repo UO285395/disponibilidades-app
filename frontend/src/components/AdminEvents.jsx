@@ -1,7 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Card, Button, TextInput, Title, Textarea, Text, Group } from "@mantine/core";
+import { Card, Button, TextInput, Title, Textarea, Text, Group, Select, Badge } from "@mantine/core";
 import { adminAPI } from "../api/adminApi.js";
 import { useNavigate } from "react-router-dom";
+
+const VISIBILITY_OPTIONS = [
+  { value: "internal", label: "Interno (solo militantes de tu dominio)" },
+  { value: "public", label: "Público (visible sin cuenta)" },
+  { value: "private", label: "Privado (solo tú/superadmin)" },
+];
+
+const EVENT_TYPE_OPTIONS = [
+  { value: "participativo", label: "Participativo (pide respuesta sí/no)" },
+  { value: "informativo", label: "Informativo" },
+];
+
+const VISIBILITY_BADGE = {
+  public: { label: "Público", color: "teal" },
+  internal: { label: "Interno", color: "blue" },
+  private: { label: "Privado", color: "gray" },
+};
 
 export default function AdminEvents() {
   const [events, setEvents] = useState([]);
@@ -10,12 +27,20 @@ export default function AdminEvents() {
   const [date, setDate] = useState(null);
   const [startTime, setStartTime] = useState("");
   const [allowedDomain, setAllowedDomain] = useState("");
+  const [visibility, setVisibility] = useState("internal");
+  const [eventType, setEventType] = useState("participativo");
+  const [location, setLocation] = useState("");
+  const [externalUrl, setExternalUrl] = useState("");
   const [editingEventId, setEditingEventId] = useState(null);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editDate, setEditDate] = useState("");
   const [editStartTime, setEditStartTime] = useState("");
   const [editAllowedDomain, setEditAllowedDomain] = useState("");
+  const [editVisibility, setEditVisibility] = useState("internal");
+  const [editEventType, setEditEventType] = useState("participativo");
+  const [editLocation, setEditLocation] = useState("");
+  const [editExternalUrl, setEditExternalUrl] = useState("");
   const [creating, setCreating] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
@@ -76,6 +101,10 @@ export default function AdminEvents() {
         date: isoDate,
         start_time: startTime || null,
         allowed_domain: domainToSend,
+        visibility,
+        event_type: eventType,
+        location: location || null,
+        external_url: externalUrl || null,
       });
 
       setTitle("");
@@ -83,6 +112,10 @@ export default function AdminEvents() {
       setDate(null);
       setStartTime("");
       setAllowedDomain("");
+      setVisibility("internal");
+      setEventType("participativo");
+      setLocation("");
+      setExternalUrl("");
       await reload();
     } catch (e) {
       console.error("Error creando evento", e);
@@ -117,6 +150,10 @@ export default function AdminEvents() {
     setEditDate(ev.date || "");
     setEditStartTime(ev.start_time || "");
     setEditAllowedDomain(ev.allowed_domain || "");
+    setEditVisibility(ev.visibility || "internal");
+    setEditEventType(ev.event_type || "participativo");
+    setEditLocation(ev.location || "");
+    setEditExternalUrl(ev.external_url || "");
   }
 
   function cancelEdit() {
@@ -126,6 +163,10 @@ export default function AdminEvents() {
     setEditDate("");
     setEditStartTime("");
     setEditAllowedDomain("");
+    setEditVisibility("internal");
+    setEditEventType("participativo");
+    setEditLocation("");
+    setEditExternalUrl("");
   }
 
   async function saveEdit() {
@@ -142,6 +183,10 @@ export default function AdminEvents() {
         date: editDate,
         start_time: editStartTime || null,
         allowed_domain: domainToSend,
+        visibility: editVisibility,
+        event_type: editEventType,
+        location: editLocation || null,
+        external_url: editExternalUrl || null,
       });
       cancelEdit();
       await reload();
@@ -191,6 +236,36 @@ export default function AdminEvents() {
           description="Dejar vacío o escribir 'Todos' para evento general."
           value={allowedDomain}
           onChange={(e) => setAllowedDomain(e.target.value)}
+          mb="sm"
+        />
+        <Select
+          label="Visibilidad"
+          data={VISIBILITY_OPTIONS}
+          value={visibility}
+          onChange={(v) => setVisibility(v || "internal")}
+          allowDeselect={false}
+          mb="sm"
+        />
+        <Select
+          label="Tipo de evento"
+          data={EVENT_TYPE_OPTIONS}
+          value={eventType}
+          onChange={(v) => setEventType(v || "participativo")}
+          allowDeselect={false}
+          mb="sm"
+        />
+        <TextInput
+          label="Ubicación (opcional)"
+          placeholder="Plaza Mayor, Madrid"
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+          mb="sm"
+        />
+        <TextInput
+          label="Enlace externo (opcional)"
+          placeholder="https://…"
+          value={externalUrl}
+          onChange={(e) => setExternalUrl(e.target.value)}
           mb="sm"
         />
 
@@ -246,13 +321,52 @@ export default function AdminEvents() {
                   onChange={(e) => setEditAllowedDomain(e.target.value)}
                   mb="sm"
                 />
+                <Select
+                  label="Visibilidad"
+                  data={VISIBILITY_OPTIONS}
+                  value={editVisibility}
+                  onChange={(v) => setEditVisibility(v || "internal")}
+                  allowDeselect={false}
+                  mb="sm"
+                />
+                <Select
+                  label="Tipo de evento"
+                  data={EVENT_TYPE_OPTIONS}
+                  value={editEventType}
+                  onChange={(v) => setEditEventType(v || "participativo")}
+                  allowDeselect={false}
+                  mb="sm"
+                />
+                <TextInput
+                  label="Ubicación (opcional)"
+                  value={editLocation}
+                  onChange={(e) => setEditLocation(e.target.value)}
+                  mb="sm"
+                />
+                <TextInput
+                  label="Enlace externo (opcional)"
+                  value={editExternalUrl}
+                  onChange={(e) => setEditExternalUrl(e.target.value)}
+                  mb="sm"
+                />
               </>
             ) : (
               <>
-                <div><b>{ev.title}</b> - {ev.date}</div>
+                <Group gap="xs" align="center">
+                  <b>{ev.title}</b>
+                  <Text span>- {ev.date}</Text>
+                  <Badge size="sm" color={(VISIBILITY_BADGE[ev.visibility] || VISIBILITY_BADGE.internal).color}>
+                    {(VISIBILITY_BADGE[ev.visibility] || VISIBILITY_BADGE.internal).label}
+                  </Badge>
+                </Group>
                 {ev.allowed_domain && (
                   <p style={{ margin: "4px 0", color: "#555" }}>
                     Colectivo: <strong>{ev.allowed_domain}</strong>
+                  </p>
+                )}
+                {ev.location && (
+                  <p style={{ margin: "4px 0", color: "#555" }}>
+                    Ubicación: <strong>{ev.location}</strong>
                   </p>
                 )}
                 {ev.description && <p>{ev.description}</p>}

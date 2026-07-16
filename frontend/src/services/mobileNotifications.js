@@ -1,11 +1,33 @@
 import { Capacitor } from "@capacitor/core";
-import { deviceAPI } from "../api/api.js";
+import { deviceAPI, getToken, subscribeAuthChanges } from "../api/api.js";
 
-let initialized = false;
+let listenersAttached = false;
+let lastToken = null;
 
+async function registerCurrentToken() {
+  if (!lastToken) return;
+
+  try {
+    // Con sesión, el backend infiere rol y dominio del propio usuario.
+    // Sin sesión, hay que declarar explícitamente user_role=guest.
+    const userRole = getToken() ? null : "guest";
+    await deviceAPI.registerToken(lastToken, "android", null, userRole);
+  } catch (error) {
+    console.error("No se pudo registrar el token push en backend", error);
+  }
+}
+
+// Se puede llamar sin sesión (invitado navegando la APK) o con sesión
+// (militante). Los listeners del plugin nativo solo se registran una vez;
+// en cada cambio de sesión (login/logout) se reenvía el mismo token para
+// que el backend actualice a quién pertenece.
 export async function initMobileNotifications() {
-  if (initialized) return;
   if (!Capacitor.isNativePlatform()) return;
+
+  if (listenersAttached) {
+    await registerCurrentToken();
+    return;
+  }
 
   let PushNotifications;
   try {
@@ -15,14 +37,11 @@ export async function initMobileNotifications() {
     return;
   }
 
-  initialized = true;
+  listenersAttached = true;
 
   PushNotifications.addListener("registration", async (token) => {
-    try {
-      await deviceAPI.registerToken(token.value, "android", null);
-    } catch (error) {
-      console.error("No se pudo registrar el token push en backend", error);
-    }
+    lastToken = token.value;
+    await registerCurrentToken();
   });
 
   PushNotifications.addListener("registrationError", (error) => {
@@ -35,6 +54,10 @@ export async function initMobileNotifications() {
 
   PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
     console.log("Push action", action);
+  });
+
+  subscribeAuthChanges(() => {
+    registerCurrentToken();
   });
 
   const permission = await PushNotifications.requestPermissions();

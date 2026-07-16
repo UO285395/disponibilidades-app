@@ -40,6 +40,15 @@ class Event(Base):
     date = Column(String, nullable=False)
     start_time = Column(String)
     allowed_domain = Column(String, nullable=True)  # si null visible para todos
+    visibility = Column(String, nullable=False, default="internal")  # public | internal | private
+    event_type = Column(String, nullable=False, default="participativo")  # informativo | participativo
+    location = Column(String, nullable=True)
+    external_url = Column(String, nullable=True)
+    metadata_json = Column("metadata", String, nullable=True)  # JSON serializado
+    is_recurring = Column(Integer, nullable=False, default=0)
+    recurrence_rule = Column(String, nullable=True)
+    updated_at = Column(String, nullable=True)
+    deleted_at = Column(String, nullable=True)
 
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
 
@@ -74,6 +83,23 @@ class DomainPolicy(Base):
     notifications_enabled = Column(Integer, default=0)
 
 
+class GuestPolicy(Base):
+    __tablename__ = "guest_policies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    domain_tag = Column(String, unique=True, nullable=False)
+    guest_responses_enabled = Column(Integer, default=1)
+    guest_surveys_enabled = Column(Integer, default=0)
+    guest_census_enabled = Column(Integer, default=0)
+    guest_notifications_enabled = Column(Integer, default=1)
+    max_guest_responses_per_event = Column(Integer, nullable=True)
+    created_at = Column(String, nullable=True)
+    updated_at = Column(String, nullable=True)
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    updater = relationship("User")
+
+
 
 class EventResponse(Base):
     __tablename__ = "event_responses"
@@ -105,6 +131,25 @@ class EventCompanion(Base):
 
     event = relationship("Event", back_populates="companions")
     user = relationship("User")
+
+
+class GuestResponse(Base):
+    __tablename__ = "guest_responses"
+    __table_args__ = (
+        UniqueConstraint("event_id", "guest_identifier", name="ux_guest_responses_event_guest"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    guest_name = Column(String, nullable=True)
+    guest_email = Column(String, nullable=True)
+    answer = Column(String, nullable=False, default="saved")
+    companions = Column(Integer, nullable=False, default=0)
+    guest_identifier = Column(String, nullable=False)
+    created_at = Column(String, nullable=True)
+    updated_at = Column(String, nullable=True)
+
+    event = relationship("Event")
 
 
 class Space(Base):
@@ -217,13 +262,17 @@ class DeviceToken(Base):
     __tablename__ = "device_tokens"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     token = Column(String, unique=True, nullable=False)
     platform = Column(String, nullable=False, default="android")
     device_id = Column(String, nullable=True)
+    device_identifier = Column(String, nullable=True)
+    user_role = Column(String, nullable=False, default="user")  # guest | user | admin | superadmin
+    domain_tag = Column(String, nullable=True)
     collective = Column(String, nullable=True)
     active = Column(Integer, nullable=False, default=1)
     updated_at = Column(String, nullable=False)
+    last_used = Column(String, nullable=True)
 
     user = relationship("User")
 
@@ -243,3 +292,17 @@ class NotificationDispatch(Base):
     created_at = Column(String, nullable=False)
 
     creator = relationship("User")
+
+
+class InstanceLog(Base):
+    __tablename__ = "instance_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action = Column(String, nullable=False)
+    entity_type = Column(String, nullable=False)
+    entity_id = Column(String, nullable=False)
+    instance_origin = Column(String, nullable=False, default="central")
+    payload = Column(String, nullable=True)  # JSON serializado
+    sync_to_instances = Column(String, nullable=True)  # JSON serializado
+    synced_at = Column(String, nullable=True)
+    created_at = Column(String, nullable=False)

@@ -11,6 +11,7 @@ import AdminDomainPolicies from "../components/AdminDomainPolicies.jsx";
 import AdminCensus from "../components/AdminCensus.jsx";
 import AdminNotifications from "../components/AdminNotifications.jsx";
 import AdminSurveys from "../components/AdminSurveys.jsx";
+import SessionExpiredModal from "../components/SessionExpiredModal.jsx";
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState(null);
@@ -52,7 +53,7 @@ export default function AdminDashboard() {
     setActiveTab(nextOrder[0] ?? null);
   }, [buildAvailableTabValues]);
 
-  const { user, ready } = useSessionUser({ requireAdmin: true, onLoaded: initializeTabOrder });
+  const { user, ready, sessionExpired } = useSessionUser({ requireAdmin: true, onLoaded: initializeTabOrder });
 
   async function logout() {
     await clearToken();
@@ -131,6 +132,8 @@ export default function AdminDashboard() {
       </Box>
     );
   }
+
+  if (sessionExpired) return <SessionExpiredModal opened />;
 
   if (!user) return null;
 

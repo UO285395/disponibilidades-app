@@ -1,22 +1,39 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { authAPI, clearToken, getToken, userAPI } from "../api/api.js";
+import { authAPI, ensureTokenValid, getToken, userAPI } from "../api/api.js";
 
 // Centraliza el bootstrap de sesion que antes estaba duplicado en
 // Dashboard.jsx y AdminDashboard.jsx: valida token -> GET /me -> si falla,
-// intenta /auth/refresh y reintenta /me una sola vez -> si sigue fallando,
-// limpia la sesion y redirige a login una unica vez.
+// intenta /auth/refresh y reintenta /me una sola vez. Si la sesion no
+// existia (nunca hubo token), redirige a "/" en silencio: no es una
+// interrupcion, es el estado normal de un visitante. Si la sesion SI existia
+// y ha expirado de verdad, no redirige sola -> expone `sessionExpired` para
+// que la pagina muestre un modal ("Sesión expirada") y el usuario decida
+// cuando volver a loguearse, en vez de un salto brusco a otra pantalla.
 //
-// Devuelve { user, ready }. `ready` pasa a true en cuanto termina el intento
-// inicial (exito o fallo), para que la pantalla pueda mostrar un estado breve
-// de "comprobando sesion" en vez de quedarse en blanco.
+// Ademas revalida el token (refresco silencioso si quedan <24h) cada vez que
+// la pestaña/app vuelve a primer plano, para sesiones APK de larga duracion.
+//
+// Devuelve { user, ready, sessionExpired }. `ready` pasa a true en cuanto
+// termina el intento inicial (exito o fallo), para que la pantalla pueda
+// mostrar un estado breve de "comprobando sesion" en vez de quedarse en blanco.
 export function useSessionUser({ requireAdmin = false, adminRedirectTo = "/dashboard", onLoaded } = {}) {
   const [user, setUser] = useState(null);
   const [ready, setReady] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const navigate = useNavigate();
   const mountedRef = useRef(true);
   const onLoadedRef = useRef(onLoaded);
   onLoadedRef.current = onLoaded;
+
+  const resolveUser = useCallback(async () => {
+    const u = await userAPI.me();
+    if (requireAdmin && u.role !== "admin" && u.role !== "superadmin") {
+      navigate(adminRedirectTo);
+      return null;
+    }
+    return u;
+  }, [requireAdmin, adminRedirectTo, navigate]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -26,15 +43,6 @@ export function useSessionUser({ requireAdmin = false, adminRedirectTo = "/dashb
       return () => {
         mountedRef.current = false;
       };
-    }
-
-    async function resolveUser() {
-      const u = await userAPI.me();
-      if (requireAdmin && u.role !== "admin" && u.role !== "superadmin") {
-        navigate(adminRedirectTo);
-        return null;
-      }
-      return u;
     }
 
     (async () => {
@@ -55,8 +63,7 @@ export function useSessionUser({ requireAdmin = false, adminRedirectTo = "/dashb
             onLoadedRef.current?.(u);
           }
         } catch {
-          await clearToken();
-          if (mountedRef.current) navigate("/");
+          if (mountedRef.current) setSessionExpired(true);
         }
       } finally {
         if (mountedRef.current) setReady(true);
@@ -66,7 +73,25 @@ export function useSessionUser({ requireAdmin = false, adminRedirectTo = "/dashb
     return () => {
       mountedRef.current = false;
     };
-  }, [navigate, requireAdmin, adminRedirectTo]);
+  }, [navigate, resolveUser]);
 
-  return { user, ready };
+  useEffect(() => {
+    function handleFocusOrVisible() {
+      if (document.visibilityState && document.visibilityState !== "visible") return;
+      if (!getToken()) return;
+
+      ensureTokenValid().then((stillValid) => {
+        if (mountedRef.current && !stillValid) setSessionExpired(true);
+      });
+    }
+
+    window.addEventListener("focus", handleFocusOrVisible);
+    document.addEventListener("visibilitychange", handleFocusOrVisible);
+    return () => {
+      window.removeEventListener("focus", handleFocusOrVisible);
+      document.removeEventListener("visibilitychange", handleFocusOrVisible);
+    };
+  }, []);
+
+  return { user, ready, sessionExpired };
 }

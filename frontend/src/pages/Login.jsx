@@ -33,6 +33,9 @@ export default function Login() {
   return (
     <div style={{ maxWidth: 400, margin: "80px auto" }}>
       <Card shadow="md" padding="lg" radius="md">
+        <Button variant="subtle" size="xs" mb="sm" onClick={() => navigate("/")}>
+          ← Volver a eventos
+        </Button>
         <Title order={2} align="center" mb="lg">
           Iniciar sesión
         </Title>

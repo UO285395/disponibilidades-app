@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Card, Button, TextInput, Title, Text, Group, Modal, NumberInput } from "@mantine/core";
-import { eventsAPI } from "../api/api.js";
+import { Card, Button, TextInput, Title, Text, Group, Modal, NumberInput, Badge } from "@mantine/core";
+import { eventsAPI, calendarAPI } from "../api/api.js";
+
+const VISIBILITY_LABELS = {
+  public: { label: "Público", color: "teal" },
+  internal: { label: "Interno", color: "blue" },
+  private: { label: "Privado", color: "gray" },
+};
 
 function isNotFoundError(error) {
   return typeof error?.message === "string" && error.message.startsWith("HTTP 404");
@@ -16,8 +22,12 @@ export default function EventsSection() {
   const [activeCompanionEvent, setActiveCompanionEvent] = useState(null);
   const [companionCountDraft, setCompanionCountDraft] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [visibilityFilter, setVisibilityFilter] = useState(null);
+  const [exporting, setExporting] = useState(false);
   const mountedRef = useRef(true);
   const loadingRef = useRef(false);
+  const visibilityFilterRef = useRef(visibilityFilter);
+  visibilityFilterRef.current = visibilityFilter;
 
   const loadAll = useCallback(async (silent = false) => {
     if (loadingRef.current) return;
@@ -26,7 +36,7 @@ export default function EventsSection() {
 
     try {
       const [eventsResult, votesResult, companionsResult] = await Promise.allSettled([
-        eventsAPI.list(),
+        eventsAPI.list(visibilityFilterRef.current),
         eventsAPI.myResponses(),
         eventsAPI.myCompanions(),
       ]);
@@ -74,7 +84,18 @@ export default function EventsSection() {
     return () => {
       mountedRef.current = false;
     };
-  }, [loadAll]);
+  }, [loadAll, visibilityFilter]);
+
+  async function exportCalendar() {
+    try {
+      setExporting(true);
+      await calendarAPI.download(visibilityFilter);
+    } catch (e) {
+      alert(e?.message || "No se pudo exportar el calendario");
+    } finally {
+      setExporting(false);
+    }
+  }
 
   // Refresco silencioso al volver a la pestaña/app: evita que un evento
   // borrado por un admin siga apareciendo hasta que el usuario recargue.
@@ -192,9 +213,36 @@ export default function EventsSection() {
 
   return (
     <Card shadow="md" p="lg" radius="md">
-      <Title order={4} mb="md">
-        Eventos
-      </Title>
+      <Group justify="space-between" align="center" mb="sm">
+        <Title order={4}>Eventos</Title>
+        <Button size="xs" variant="outline" loading={exporting} onClick={exportCalendar}>
+          Exportar (.ics)
+        </Button>
+      </Group>
+
+      <Group mb="md">
+        <Button
+          size="xs"
+          variant={visibilityFilter === null ? "filled" : "outline"}
+          onClick={() => setVisibilityFilter(null)}
+        >
+          Todos
+        </Button>
+        <Button
+          size="xs"
+          variant={visibilityFilter === "public" ? "filled" : "outline"}
+          onClick={() => setVisibilityFilter("public")}
+        >
+          Públicos
+        </Button>
+        <Button
+          size="xs"
+          variant={visibilityFilter === "internal" ? "filled" : "outline"}
+          onClick={() => setVisibilityFilter("internal")}
+        >
+          Internos
+        </Button>
+      </Group>
 
       {events.length === 0 && (
         <Text size="sm" c="dimmed">
@@ -208,11 +256,15 @@ export default function EventsSection() {
         const disabled = voted || sending === eventId;
         const myCompanions = companionsByEvent.get(eventId) ?? 0;
         const companionsButtonLabel = myCompanions > 0 ? `Acompañantes (${myCompanions})` : "Acompañantes";
+        const visibilityInfo = VISIBILITY_LABELS[ev.visibility] || VISIBILITY_LABELS.internal;
 
         return (
           <Card key={ev.id} shadow="sm" p="md" radius="md" mb="md">
             <Group justify="space-between" align="flex-start" mb="xs">
-              <Text fw={700}>{ev.title}</Text>
+              <Group gap="xs">
+                <Text fw={700}>{ev.title}</Text>
+                <Badge size="sm" color={visibilityInfo.color}>{visibilityInfo.label}</Badge>
+              </Group>
               <Button size="xs" variant="outline" onClick={() => openCompanionModal(ev)}>
                 {companionsButtonLabel}
               </Button>

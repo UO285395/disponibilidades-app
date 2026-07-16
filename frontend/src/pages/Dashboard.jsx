@@ -1,30 +1,35 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Title, Button, Box, Text, Divider, Group, Tabs, Card } from "@mantine/core";
-import { clearToken } from "../api/api.js";
+import { clearToken, calendarAPI } from "../api/api.js";
 import { useSessionUser } from "../hooks/useSessionUser.js";
 import MobileWeekCalendar from "../components/MobileWeekCalendar.jsx";
 import EventsSection from "../components/EventsSection.jsx";
 import SpaceReservations from "../components/SpaceReservations.jsx";
-import { initMobileNotifications } from "../services/mobileNotifications.js";
 import ChangePasswordModal from "../components/ChangePasswordModal.jsx";
+import SessionExpiredModal from "../components/SessionExpiredModal.jsx";
 
 export default function Dashboard() {
-  const { user, ready } = useSessionUser();
+  const { user, ready, sessionExpired } = useSessionUser();
   const [offsetWeeks, setOffsetWeeks] = useState(0);
   const navigate = useNavigate();
   const [changePasswordOpened, setChangePasswordOpened] = useState(false);
-
-  useEffect(() => {
-    if (!user) return;
-    initMobileNotifications().catch((e) => {
-      console.error("No se pudo inicializar push móvil", e);
-    });
-  }, [user]);
+  const [exportingCalendar, setExportingCalendar] = useState(false);
 
   async function logout() {
     await clearToken();
     navigate("/");
+  }
+
+  async function exportCalendar() {
+    try {
+      setExportingCalendar(true);
+      await calendarAPI.download();
+    } catch (e) {
+      alert(e?.message || "No se pudo exportar el calendario");
+    } finally {
+      setExportingCalendar(false);
+    }
   }
 
   if (!ready) {
@@ -34,6 +39,8 @@ export default function Dashboard() {
       </Box>
     );
   }
+
+  if (sessionExpired) return <SessionExpiredModal opened />;
 
   if (!user) return null;
 
@@ -69,6 +76,9 @@ export default function Dashboard() {
               Ir al panel admin
             </Button>
           )}
+                    <Button variant="outline" loading={exportingCalendar} onClick={exportCalendar}>
+                      Exportar calendario (.ics)
+                    </Button>
                     <Button variant="outline" onClick={() => setChangePasswordOpened(true)}>
                       Cambiar contraseña
                     </Button>

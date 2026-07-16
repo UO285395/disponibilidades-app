@@ -89,8 +89,14 @@ Esta rama incluye integración con Capacitor en:
 
 - Node.js 20.19+
 - Android Studio
-- JDK 17
+- JDK 17 (para Android Studio/el IDE) **y** JDK 21 o 22 (para el daemon de Gradle en línea de comandos — ver nota abajo)
 - Android SDK instalado desde Android Studio
+
+> **JDK del daemon de Gradle**: `android/gradle.properties` fija `org.gradle.java.home` porque
+> Capacitor 8 compila con `--release 21`, así que el JDK del daemon debe ser >=21 (JDK 17 falla con
+> `invalid source release: 21`). Pero Gradle 8.14.3 tampoco arranca su propio daemon sobre JDK 25+
+> (falla con `Unsupported class file major version 69`, su Groovy/ASM interno no reconoce bytecode
+> tan nuevo). El punto que funciona en la práctica es JDK 21 o 22 — evita fijar JDK 17 o JDK 25+ ahí.
 
 ### Flujo para generar APK actualizada
 
@@ -98,8 +104,8 @@ Esta rama incluye integración con Capacitor en:
 1. Desde `frontend/`: `npm install`
 2. `npm run build:mobile` (ejecuta `vite build` y luego `npx cap sync android`, copiando los assets nuevos a `android/app/src/main/assets/public`)
 3. Si la APK se va a distribuir (no solo debug local), incrementar `versionCode` y `versionName` en `frontend/android/app/build.gradle` antes de compilar.
-4. `npm run cap:open`
-5. En Android Studio: `Build > Build APK(s)`
+4. Opción A — Android Studio: `npm run cap:open` y luego `Build > Build APK(s)`.
+   Opción B — línea de comandos: desde `frontend/android/`, `./gradlew.bat assembleDebug` (usa el JDK fijado en `gradle.properties`, ver nota arriba).
 
 El APK se genera en:
 
