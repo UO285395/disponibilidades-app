@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -12,6 +12,9 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     role = Column(String, default="user")
     group_tag = Column(String, nullable=True)
+    # Unidad organizativa "hogar" del usuario (colectivo donde milita). La
+    # autoridad real de un admin no sale de aquí, sino de AdminAssignment.
+    org_unit_id = Column(Integer, ForeignKey("org_units.id"), nullable=True, index=True)
 
     # Relaciones
     availabilities = relationship("Availability", back_populates="user")
@@ -49,6 +52,10 @@ class Event(Base):
     recurrence_rule = Column(String, nullable=True)
     updated_at = Column(String, nullable=True)
     deleted_at = Column(String, nullable=True)
+    # Unidad propietaria + modo de distribución (unit_only | subtree | custom).
+    # Conviven con allowed_domain (legacy) durante la transición.
+    org_unit_id = Column(Integer, ForeignKey("org_units.id"), nullable=True, index=True)
+    distribution_mode = Column(String, nullable=True, default="unit_only")
 
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
 
@@ -81,6 +88,9 @@ class DomainPolicy(Base):
     census_enabled = Column(Integer, default=0)
     surveys_enabled = Column(Integer, default=0)
     notifications_enabled = Column(Integer, default=0)
+    # Unidad organizativa a la que aplica la política (reemplaza el storage-key
+    # domain / tag: durante la transición).
+    org_unit_id = Column(Integer, ForeignKey("org_units.id"), nullable=True, index=True)
 
 
 class GuestPolicy(Base):
@@ -96,6 +106,8 @@ class GuestPolicy(Base):
     created_at = Column(String, nullable=True)
     updated_at = Column(String, nullable=True)
     updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Unidad organizativa a la que aplica (reemplaza domain_tag en transición).
+    org_unit_id = Column(Integer, ForeignKey("org_units.id"), nullable=True, index=True)
 
     updater = relationship("User")
 
@@ -159,6 +171,8 @@ class Space(Base):
     name = Column(String, nullable=False, unique=True)
     description = Column(String)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    org_unit_id = Column(Integer, ForeignKey("org_units.id"), nullable=True, index=True)
+    distribution_mode = Column(String, nullable=True, default="unit_only")
 
     creator = relationship("User")
     reservations = relationship("SpaceReservation", back_populates="space")
@@ -185,6 +199,8 @@ class CensusConfig(Base):
     id = Column(Integer, primary_key=True, index=True)
     email_to = Column(String, nullable=False)
     url_token = Column(String, unique=True, nullable=False)
+    org_unit_id = Column(Integer, ForeignKey("org_units.id"), nullable=True, index=True)
+    distribution_mode = Column(String, nullable=True, default="subtree")
 
     fields = relationship(
         "CensusField",
@@ -218,6 +234,8 @@ class Survey(Base):
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     is_active = Column(Integer, nullable=False, default=1)
     created_at = Column(String, nullable=False)
+    org_unit_id = Column(Integer, ForeignKey("org_units.id"), nullable=True, index=True)
+    distribution_mode = Column(String, nullable=True, default="unit_only")
 
     creator = relationship("User")
     fields = relationship(
@@ -270,6 +288,7 @@ class DeviceToken(Base):
     user_role = Column(String, nullable=False, default="user")  # guest | user | admin | superadmin
     domain_tag = Column(String, nullable=True)
     collective = Column(String, nullable=True)
+    org_unit_id = Column(Integer, ForeignKey("org_units.id"), nullable=True, index=True)
     active = Column(Integer, nullable=False, default=1)
     updated_at = Column(String, nullable=False)
     last_used = Column(String, nullable=True)
@@ -306,3 +325,144 @@ class InstanceLog(Base):
     sync_to_instances = Column(String, nullable=True)  # JSON serializado
     synced_at = Column(String, nullable=True)
     created_at = Column(String, nullable=False)
+
+
+# =========================================================
+# ORGANIGRAMA / ESTRUCTURA ORGANIZATIVA
+# =========================================================
+# Modelo jerárquico de la organización. En la UI se denomina "Organigrama" /
+# "Estructura". El catálogo de tipos y la matriz de parentesco son datos
+# (tablas), no lógica de Python, para poder ampliar niveles sin tocar código.
+
+
+class OrgLevelType(Base):
+    """Catálogo de tipos de nivel (consejo central, comité regional, comité
+    local, comité sectorial, colectivo). Extensible por datos."""
+    __tablename__ = "org_level_types"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, unique=True, nullable=False)   # central | regional | local | sectorial | colectivo
+    label = Column(String, nullable=False)               # etiqueta legible
+    is_leaf = Column(Integer, nullable=False, default=0)  # colectivo=1: nada cuelga de él
+    is_root_only = Column(Integer, nullable=False, default=0)  # central=1: única instancia, sin padre
+    sort_order = Column(Integer, nullable=False, default=0)
+
+
+class OrgLevelParentRule(Base):
+    """Matriz padre→hijo permitida, como datos. parent_level_type_id NULL = regla
+    de creación de la raíz (qué tipo puede existir sin padre)."""
+    __tablename__ = "org_level_parent_rules"
+    __table_args__ = (
+        UniqueConstraint("parent_level_type_id", "child_level_type_id", name="ux_org_level_parent_rules"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    parent_level_type_id = Column(Integer, ForeignKey("org_level_types.id"), nullable=True)
+    child_level_type_id = Column(Integer, ForeignKey("org_level_types.id"), nullable=False)
+
+
+class OrgUnit(Base):
+    """Nodo real del árbol. Usa ruta materializada (path) para consultas de
+    subárbol baratas vía LIKE 'prefijo%', portables entre SQLite y Postgres."""
+    __tablename__ = "org_units"
+    __table_args__ = (
+        Index("ix_org_units_path", "path"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    level_type_id = Column(Integer, ForeignKey("org_level_types.id"), nullable=False)
+    parent_id = Column(Integer, ForeignKey("org_units.id"), nullable=True)
+    name = Column(String, nullable=False)
+    slug = Column(String, nullable=True)
+    path = Column(String, nullable=False, default="")   # p.ej. "0000000001.0000000007."
+    depth = Column(Integer, nullable=False, default=0)
+    is_active = Column(Integer, nullable=False, default=1)
+    legacy_domain = Column(String, nullable=True, index=True)  # trazabilidad del backfill
+    created_at = Column(String, nullable=True)
+    updated_at = Column(String, nullable=True)
+    deactivated_at = Column(String, nullable=True)
+
+    level_type = relationship("OrgLevelType")
+    parent = relationship("OrgUnit", remote_side=[id])
+
+
+class AdminAssignment(Base):
+    """Concesión explícita y auditable de autoridad de un usuario sobre una
+    unidad (y todo su subárbol). Sustituye el hack de delegación por group_tag."""
+    __tablename__ = "admin_assignments"
+    __table_args__ = (
+        UniqueConstraint("user_id", "org_unit_id", name="ux_admin_assignments_user_unit"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    org_unit_id = Column(Integer, ForeignKey("org_units.id"), nullable=False, index=True)
+    granted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(String, nullable=True)
+    is_active = Column(Integer, nullable=False, default=1)
+
+    user = relationship("User", foreign_keys=[user_id])
+    org_unit = relationship("OrgUnit")
+
+
+class ContentDistributionTarget(Base):
+    """Destinos explícitos del modo de distribución 'custom', reutilizando el
+    convenio entity_type/entity_id (content_type, content_id)."""
+    __tablename__ = "content_distribution_targets"
+    __table_args__ = (
+        UniqueConstraint("content_type", "content_id", "org_unit_id", name="ux_content_distribution_target"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    content_type = Column(String, nullable=False)  # event | census_config | survey | space
+    content_id = Column(Integer, nullable=False)
+    org_unit_id = Column(Integer, ForeignKey("org_units.id"), nullable=False)
+
+
+# =========================================================
+# GEOGRAFÍA (para el filtro público por provincia)
+# =========================================================
+# División administrativa real de España, estática y pública. Ortogonal al
+# árbol organizativo: sirve solo para clasificar ubicación de cara al visitante
+# sin desvelar la estructura interna.
+
+
+class AutonomousCommunity(Base):
+    __tablename__ = "autonomous_communities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+
+
+class Province(Base):
+    __tablename__ = "provinces"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    autonomous_community_id = Column(Integer, ForeignKey("autonomous_communities.id"), nullable=False)
+
+    community = relationship("AutonomousCommunity")
+
+
+class City(Base):
+    __tablename__ = "cities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    province_id = Column(Integer, ForeignKey("provinces.id"), nullable=False)
+
+    province = relationship("Province")
+
+
+class OrgUnitTerritory(Base):
+    """Asociación muchos-a-muchos entre una unidad y sus ámbitos territoriales.
+    Un sectorial puede tener varias ciudades; un colectivo normalmente una."""
+    __tablename__ = "org_unit_territories"
+    __table_args__ = (
+        UniqueConstraint("org_unit_id", "territory_type", "territory_id", name="ux_org_unit_territory"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    org_unit_id = Column(Integer, ForeignKey("org_units.id"), nullable=False, index=True)
+    territory_type = Column(String, nullable=False)  # ciudad | provincia | comunidad_autonoma
+    territory_id = Column(Integer, nullable=False)

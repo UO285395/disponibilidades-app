@@ -46,6 +46,7 @@ from models import (
 )
 from database import SessionLocal, engine
 from services.calendar_service import generate_ics
+from services import org_service
 
 
 # =========================================================
@@ -184,6 +185,7 @@ def ensure_legacy_schema_compatibility():
 
 
 ensure_legacy_schema_compatibility()
+org_service.ensure_org_hierarchy_schema_compatibility(engine, SessionLocal)
 
 
 # =========================================================
