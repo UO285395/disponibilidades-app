@@ -352,5 +352,257 @@ Crear:
 
 ---
 
+## ANEXO: PLAN DE FEDERACIÓN MULTI-TERRITORIO (propuesta, NO implementada)
+
+> Estado: **diseño aprobado a nivel de propuesta, pendiente de implementación**. Sustituye conceptualmente a la
+> "FASE 6" aparcada más arriba (que solo dejaba campos `instance_origin`/`region_tag` sin usar). Este anexo
+> reemplaza esa idea original por un modelo jerárquico real y completo. No ejecutar ningún cambio de código de
+> este anexo sin autorización explícita — es un documento de arquitectura, no un changelog de trabajo hecho.
+
+### Contexto y motivación
+
+Actualmente cada territorio del partido corre su propio servidor/base de datos, y el "dominio" de cada
+militante es un fix implícito: la parte del email tras la `@` (`_get_domain(email)`, `backend/main.py`). Esto
+genera tres problemas reales, ya confirmados en el código:
+
+1. **Tres niveles de comprobación de autoridad inconsistentes** conviviendo en `backend/main.py`
+   (`_can_admin_manage_domain` con delegación vía `group_tag` con prefijos mágicos `domain:`/`manage:`,
+   comparaciones estrictas de dominio sin delegación, y `_can_admin_manage_user` con lógica mixta) — endpoints
+   equivalentes (p.ej. poder listar una reserva vs. poder borrarla) pueden dar respuestas distintas para el
+   mismo administrador y el mismo recurso.
+2. **Census, Surveys y Spaces son 100% globales**, sin ningún scoping territorial, inconsistente con
+   Users/Events/Availabilities.
+3. **No existe un modelo de estructura organizativa real**: no hay forma de crear/eliminar niveles intermedios
+   (autonomía, provincia, ciudad...), ni de delegar autoridad de forma auditable — solo el hack de `group_tag`.
+
+En el futuro todos los territorios se consolidarán en un servidor central compartido (esa migración de datos en
+sí queda **fuera de alcance** de este plan); el objetivo aquí es construir el modelo de datos y motor de
+permisos que esa consolidación necesitará, y que ya permite planificar eventos estatales desde el nivel central
+hoy mismo, sin esperar a esa consolidación.
+
+### Decisiones de diseño ya confirmadas con el usuario
+
+1. **Visibilidad de datos**: por defecto, un administrador de nivel superior ve **datos agregados** (recuentos
+   por unidad hija). El acceso a datos personales en crudo (PII) requiere un "drill-down" explícito a una unidad
+   concreta, y ese drill-down queda **auditado** (reutilizando la tabla `InstanceLog` ya existente pero sin uso)
+   cuando quien accede es un administrador de un nivel ancestro (no el administrador propio de esa unidad).
+2. **Vocabulario de niveles**: controlado y extensible por datos (tabla de tipos + tabla de reglas
+   padre→hijo), nunca hardcodeado en Python ni en texto libre.
+3. **Jerarquía exacta de tipos de nivel** (fija, no genérica — debe respetarse literalmente):
+   - **consejo central** (raíz, única instancia)
+   - **comité regional**
+   - **comité local**
+   - **comité sectorial** (eje temático/sectorial, no solo geográfico — puede colgar directamente del consejo
+     central o de cualquier comité regional, como subárbol independiente)
+   - **colectivo** (hoja — donde realmente están los militantes/`User`)
+
+   Reglas de parentesco: bajo **consejo central** o **comité regional**, los hijos pueden ser comité local,
+   comité sectorial o colectivo directamente (cualquier combinación, se pueden saltar niveles). Bajo **comité
+   local** o **comité sectorial**, los hijos solo pueden ser **colectivo**. Bajo **colectivo** no hay nada
+   (siempre hoja). Profundidad: de 2 (central→colectivo) a 4 (central→regional→local/sectorial→colectivo).
+4. **Census, Surveys y Spaces se territorializan también**, con el mismo mecanismo que Events (unidad
+   propietaria + modo de distribución), incluyendo soporte para una instancia central/"estatal" visible por
+   todos.
+
+### 1. Modelo de datos nuevo (`backend/models.py`)
+
+- **`OrgLevelType`**: tabla de referencia de los 5 tipos de nivel (`code`, `label`, `is_leaf`, `is_root_only`,
+  `sort_order`). Extensible por datos — un 6º tipo de nivel es una fila nueva, no un cambio de código.
+- **`OrgLevelParentRule`**: la matriz padre→hijo permitida, como **datos**, no como lógica: filas
+  `(parent_level_type_id, child_level_type_id)`, con `parent_level_type_id = NULL` representando la regla de
+  creación de la raíz. Esta tabla es literalmente la especificación de la jerarquía del punto 3 de arriba,
+  editable sin tocar código.
+- **`OrgUnit`**: nodos del árbol real (`level_type_id`, `parent_id`, `name`, `slug`, `path`, `depth`,
+  `is_active`, `legacy_domain` para trazabilidad del backfill). Usa **ruta materializada** (`path`) en formato
+  de segmentos de 10 dígitos separados por `.` (p.ej. `0000000001.0000000007.0000000042.`) para poder hacer
+  consultas de subárbol con un simple `LIKE 'prefijo%'`, funcionando igual en SQLite y Postgres sin CTEs
+  recursivas. Reparentar una unidad solo reescribe las rutas del subárbol movido, no de todo el árbol.
+- **`AdminAssignment`**: sustituye por completo el hack de delegación vía `group_tag`
+  (`_extra_domains_from_admin_tags`, que se **elimina**, no se deprecia — cerraba un hueco de escalado de
+  privilegios). `(user_id, org_unit_id, granted_by, is_active)`. La autoridad de un admin = unión de los
+  subárboles de todas sus asignaciones activas.
+- **`ContentDistributionTarget`**: tabla genérica `(content_type, content_id, org_unit_id)` para el modo de
+  distribución "custom" (destinos explícitos), reutilizada por Events/Census/Surveys/Spaces en vez de crear
+  cuatro tablas de unión distintas.
+- **Columnas aditivas nullable** en `users`, `events` (+ `distribution_mode`), `domain_policies`,
+  `guest_policies`, `device_tokens`, `census_configs` (+ `distribution_mode`), `surveys` (+ `distribution_mode`),
+  `spaces` (+ `distribution_mode`): todas `org_unit_id`. `group_tag` se mantiene intacto como etiqueta de
+  segmentación no territorial (su uso legítimo), solo se elimina su interpretación como hack de delegación.
+- **Desactivación, nunca borrado duro** de `OrgUnit`: por integridad referencial (users/events/census/etc.
+  ya apuntan a `org_unit_id`) y porque es un dato sensible de auditoría. `is_active` es ortogonal al motor de
+  autoridad (que solo mira `path`), y solo oculta la unidad de selectores de "trabajo nuevo"; nada se revoca
+  silenciosamente ni se cascada a hijos/usuarios.
+
+### 2. Motor único de autoridad (reemplaza las 3 comprobaciones inconsistentes)
+
+Un único primitivo estructural, usado tanto para "¿puedo administrar esta unidad?" como para "¿este contenido
+me alcanza a mí?", basado en comparación de prefijos de `path`:
+
+```python
+def _can_manage_unit(db, admin, target_unit_id) -> bool:
+    # True si target_unit_id es la propia unidad asignada al admin, o un descendiente
+    # estructural de cualquiera de sus AdminAssignment activas. superadmin -> True siempre.
+
+def _unit_in_reach(db, viewer_unit, owning_unit_id, distribution_mode, content_type, content_id) -> bool:
+    # unit_only -> igualdad exacta; subtree -> prefijo de path; custom -> unidad propietaria
+    # + subárboles de cada ContentDistributionTarget explícito.
+```
+
+Esto sustituye, en un único punto, a `_can_admin_manage_domain`, `_can_admin_manage_user`,
+`_can_admin_manage_policy_target`, `_ensure_event_domain_access`, `_extra_domains_from_admin_tags` y las
+comparaciones de dominio estrictas repetidas en `_visible_events_for_user`, `event_responses` y
+`_event_target_user_ids`. Al quedar un solo primitivo, la inconsistencia entre endpoints equivalentes deja de
+ser posible por construcción.
+
+`_is_feature_enabled` pasa de "cualquier política que haga match, gana" a un **recorrido de la cadena de
+ancestros de la unidad (self → raíz)**, donde la primera unidad de esa cadena con una política propia gana
+(más específico siempre pisa a lo heredado), y solo si ninguna unidad de la cadena tiene política se cae a los
+valores por defecto por rol de hoy.
+
+### 3. Modelo de distribución de contenido (Events, Census, Surveys, Spaces)
+
+Cada contenido territorial gana `org_unit_id` (unidad propietaria) + `distribution_mode`
+(`unit_only | subtree | custom`) + filas opcionales en `ContentDistributionTarget`:
+
+- **Evento estatal** (nivel central → todos los territorios): `org_unit_id = consejo central`,
+  `distribution_mode = subtree` → alcanza a todo el árbol.
+- **Central envía solo a 3 regiones concretas**: `org_unit_id = consejo central`,
+  `distribution_mode = custom`, 3 filas en `ContentDistributionTarget` apuntando a esas regiones → alcanza a
+  central + los subárboles completos de esas 3 regiones.
+- **Evento local de hoy** (comportamiento actual, sin cambios): `org_unit_id = el colectivo`,
+  `distribution_mode = unit_only`.
+
+Census/Surveys/Spaces reutilizan exactamente el mismo mecanismo (incluida la instancia "estatal" visible por
+todos = `org_unit_id = raíz, distribution_mode = subtree`), sin inventar un concepto aparte.
+
+### 4. Minimización de datos, agregación y auditoría
+
+- Todo listado administrativo (`/admin/users`, `/admin/availability`, `/admin/reservations`,
+  `/events/{id}/responses`, futuros listados de Census/Surveys) gana un parámetro `unit_id` opcional:
+  - **Sin `unit_id`** → modo agregado por defecto: un resumen por unidad hija directa (recuentos, sin
+    nombres/emails), en la misma línea que ya hace hoy `_serialize_event_with_counts`.
+  - **Con `unit_id=X`** → modo crudo, igual que las respuestas de hoy, pero exigiendo `_can_manage_unit(X)`.
+- **Auditoría de drill-down**: se registra una fila en `InstanceLog` (tabla ya existente, sin consumidor hasta
+  ahora) únicamente cuando la unidad propia del admin es **ancestro estricto** de la unidad consultada — nunca
+  cuando un admin consulta su propia unidad asignada directamente.
+
+### 5. Migración/backfill (aditiva e idempotente, mismo patrón que `ensure_legacy_schema_compatibility()`)
+
+Nueva función `ensure_org_hierarchy_schema_compatibility()`: crea las tablas nuevas, añade columnas nullable,
+siembra los 5 tipos de nivel + la matriz de reglas, crea la única unidad raíz ("Consejo Central"), crea un
+`colectivo` por cada dominio de email distinto hoy existente (`legacy_domain`), asigna `users.org_unit_id`
+según ese mapeo, crea `AdminAssignment` para cada admin/superadmin existente (preservando su autoridad actual
+sin re-otorgar nada a mano), y migra `DomainPolicy`/`GuestPolicy`/`DeviceToken`/`Event`/`CensusConfig`/
+`Survey`/`Space` a la nueva estructura preservando exactamente el comportamiento visible actual (p.ej. un
+evento sin `allowed_domain` hoy = visible por todos → pasa a `org_unit_id=raíz, distribution_mode=subtree`).
+Las políticas legacy con destino `tag:` (sin equivalente de unidad) se reportan para revisión manual, no se
+reinterpretan solas.
+
+### 6. Cambios en frontend
+
+- Nuevo hook `useOrgScope.js` + endpoint `GET /me/org-scope`: estado compartido de "ámbito actual" que hoy
+  **no existe en ningún sitio** (confirmado: ningún componente lee `user.domain` pese a que el backend ya lo
+  calcula).
+- Nueva barra persistente `OrgScopeBar.jsx` (breadcrumb + selector de árbol) en `AdminDashboard.jsx`, para que
+  el admin nunca pierda de vista en qué ámbito está operando (requisito explícito del usuario).
+- `AdminUsers.jsx`, `AdminEvents.jsx`, `AdminDomainPolicies.jsx`, `AdminAvailabilitiesCalendar.jsx`,
+  `AdminSpaces.jsx`, `AdminCensus.jsx`, `AdminSurveys.jsx`, `AdminNotifications.jsx`: cada uno sustituye su
+  input de texto libre / substring por un selector real de unidad organizativa (+ selector de modo de
+  distribución donde aplique).
+- Nueva pantalla `AdminOrgStructure.jsx` (solo superadmin o módulo dedicado): árbol navegable, crear/renombrar/
+  mover/desactivar unidades (validado contra la matriz de reglas, sin ciclos), y gestión de `AdminAssignment`
+  por unidad.
+
+### 6.bis Filtro de territorio para visitantes públicos (sin exponer la estructura interna)
+
+Requisito adicional: un visitante sin sesión (en `PublicHome`/`/eventos/:id`) debe poder elegir de qué
+territorio quiere ver eventos disponibles, pero **sin que el selector revele la existencia concreta de
+estructuras internas** (nombres de comités, ni siquiera si existe o no estructura en una zona dada). El
+workaround es que el visitante elige **provincia** de una lista pública y fija (geografía real de España, no
+derivada de qué unidades existen), y esa elección se traduce internamente a qué unidades organizativas
+alcanzan esa provincia.
+
+**Modelo de datos** (geografía, independiente y ortogonal al árbol `OrgUnit` — el árbol es de
+autoridad/administración; esto es solo clasificación pública de ubicación):
+
+- Tablas de referencia estáticas, sembradas una vez y de solo lectura: `AutonomousCommunity(id, name)`,
+  `Province(id, name, autonomous_community_id)`, `City(id, name, province_id)` — la división administrativa
+  real de España, no inventada por unidad organizativa.
+- Tabla de asociación `OrgUnitTerritory(org_unit_id, territory_type: 'ciudad'|'provincia'|'comunidad_autonoma',
+  territory_id)`, **muchos-a-muchos** (una unidad puede tener varias filas). Así:
+  - Un **colectivo** típico tiene una fila (`ciudad`, su ciudad) — de ahí se deriva su provincia.
+  - Un **comité local** tiene normalmente una fila (`ciudad` o `provincia`, según su alcance real).
+  - Un **comité sectorial** puede tener **varias filas** (p.ej. varias `ciudad` distintas), precisamente porque
+    actúa sobre ámbitos concretos que no tienen por qué ser un único territorio contiguo — el caso que motivó
+    que esta tabla sea muchos-a-muchos y no una columna única.
+  - Un **comité regional** normalmente tiene una fila `comunidad_autonoma` (o varias `provincia` si cubre solo
+    parte de una autonomía).
+  - **Consejo central no tiene filas** — está exento del filtro por completo (ver más abajo).
+- Resolución "¿la unidad U corresponde a la provincia P seleccionada?" (`_unit_matches_province`): cualquier
+  fila de `OrgUnitTerritory` de U hace match si (a) es `provincia` y coincide con P, (b) es
+  `comunidad_autonoma` y P pertenece a esa autonomía, o (c) es `ciudad` y la provincia de esa ciudad es P.
+
+**Resolución de visibilidad con filtro de provincia** (nuevo query param `province_id` opcional en
+`GET /events?visibility=public`, `GET /calendar/export.ics` para invitados, y el listado de `PublicHome`):
+
+- Los eventos **centrales** (`org_unit_id = raíz`, `distribution_mode = subtree`, es decir "estatales") se
+  muestran **siempre**, sin importar la provincia seleccionada o si no se ha seleccionado ninguna — es el
+  requisito explícito de que lo estatal es independiente de ámbito.
+- Para el resto: se calcula el conjunto de unidades que hacen match con la provincia elegida
+  (`_org_units_for_province(db, province_id)` — una consulta barata sobre `OrgUnitTerritory`, no sobre todo el
+  árbol), y un evento no-central se incluye si **alguna** unidad de ese conjunto está dentro del alcance del
+  evento (reutilizando `_unit_in_reach` ya definido en la sección 2.3, sin lógica nueva de alcance).
+
+**Por qué el picker es una lista fija y no un desplegable derivado de la estructura real**: si el desplegable
+solo mostrase provincias donde existe efectivamente una unidad, un visitante podría inferir "el partido no
+tiene estructura en esta provincia" simplemente por su ausencia en la lista — una fuga de información
+organizativa a través de un control de UI aparentemente inocuo. La solución es que el picker sea **siempre la
+lista completa y pública de las provincias de España**, cargada como constante estática en el frontend
+(`frontend/src/data/provinces.js`, sin llamada a backend — así no hay ni siquiera un endpoint que pudiera
+devolver una lista filtrada por error en el futuro). Seleccionar una provincia sin estructura real
+simplemente devuelve "no hay eventos disponibles en este territorio", exactamente la misma respuesta que una
+provincia con estructura pero sin eventos activos en ese momento — indistinguibles para el visitante.
+
+**Frontend**: `PublicHome.jsx` gana un `Select` "Selecciona tu provincia" (lista estática), persistido en
+`localStorage` igual que `guest_identifier` (`frontend/src/api/api.js`) para recordarlo entre visitas, y
+propagado como `province_id` a `eventsAPI.listPublic()` y a la descarga global `calendarAPI.download()`. La
+vista de detalle (`EventDetail.jsx`) no necesita el selector (ya se navegó a un evento concreto), pero si el
+evento no es alcanzable desde la provincia guardada igualmente se muestra (se accede por URL directa, no por
+el listado filtrado).
+
+### 7. Fases de implementación (secuenciales, cada una desplegable de forma independiente)
+
+| Fase | Foco | Riesgo |
+|------|------|--------|
+| 1 | Fundación de esquema (tablas nuevas, columnas nullable, backfill) — el motor viejo sigue gobernando el acceso real, cero cambio de comportamiento | Bajo, reversible |
+| 2 | UI de estructura organizativa (gestionar el árbol, aún no conectado a la autoridad real) | Bajo |
+| 3 | **Cutover del motor de permisos** — migrar cada grupo de endpoints en modo "sombra" (calcular ambas decisiones, aplicar solo la vieja, loguear discrepancias) antes de activar el motor nuevo | **Alto — fase crítica** |
+| 4 | Modos de distribución (subtree/custom) + territorializar Census/Surveys/Spaces | Medio |
+| 5 | Agregación por defecto + auditoría de drill-down | Medio |
+| 6 | Pulido de frontend: `OrgScopeBar` y selectores de unidad en todos los paneles admin | Bajo |
+| 7 (opcional) | Retirar columnas legacy (`allowed_domain`, `domain_tag`, etc.) tras periodo de gracia sin lecturas | Bajo, diferible indefinidamente |
+
+La Fase 3 es la de mayor riesgo: no existe suite de tests automatizados en este repositorio, así que el modo
+"sombra" (loguear discrepancias antes de aplicar el motor nuevo) es el mecanismo de mitigación en su ausencia.
+
+### Explícitamente fuera de alcance
+
+- La consolidación real de los servidores/bases de datos hoy separados por territorio en uno solo compartido
+  (deduplicar militantes que puedan existir en varias BDs, resolver colisiones de dominio entre territorios).
+- Logística de apagado de los servidores territoriales actuales.
+- Retomar el trabajo de replicación/sync de la "Fase 6" aparcada — `InstanceLog` se reutiliza aquí solo como
+  log de auditoría de drill-down, no como mecanismo de sincronización.
+
+### Archivos críticos a modificar
+
+- `backend/models.py`
+- `backend/main.py`
+- `frontend/src/pages/AdminDashboard.jsx`
+- `frontend/src/hooks/useSessionUser.js`
+- `frontend/src/api/api.js`
+- `frontend/PLAN_ESCALADO.md` (este archivo)
+
+---
+
 *Fin del Plan - Documento generado como prompt para futuras instancias IA*
 

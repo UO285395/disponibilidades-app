@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, Button, TextInput, Title, Text, Group, Modal, NumberInput, Badge } from "@mantine/core";
 import { eventsAPI, calendarAPI } from "../api/api.js";
+import AddToCalendarButton from "./AddToCalendarButton.jsx";
 
 const VISIBILITY_LABELS = {
   public: { label: "Público", color: "teal" },
@@ -265,9 +266,12 @@ export default function EventsSection() {
                 <Text fw={700}>{ev.title}</Text>
                 <Badge size="sm" color={visibilityInfo.color}>{visibilityInfo.label}</Badge>
               </Group>
-              <Button size="xs" variant="outline" onClick={() => openCompanionModal(ev)}>
-                {companionsButtonLabel}
-              </Button>
+              <Group gap="xs">
+                <AddToCalendarButton event={ev} />
+                <Button size="xs" variant="outline" onClick={() => openCompanionModal(ev)}>
+                  {companionsButtonLabel}
+                </Button>
+              </Group>
             </Group>
 
             {/* Fecha normal + hora en negrita */}

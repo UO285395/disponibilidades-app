@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Box, Title, Text, Card, Badge, Group, Button } from "@mantine/core";
 import { eventsAPI, getToken } from "../api/api.js";
 import GuestEventResponse from "../components/GuestEventResponse.jsx";
+import AddToCalendarButton from "../components/AddToCalendarButton.jsx";
 
 export default function EventDetail() {
   const { id } = useParams();
@@ -70,6 +71,10 @@ export default function EventDetail() {
             </a>
           </Text>
         )}
+
+        <Group justify="flex-end" mt="md">
+          <AddToCalendarButton event={event} size="sm" variant="light" />
+        </Group>
       </Card>
 
       {hasSession ? (

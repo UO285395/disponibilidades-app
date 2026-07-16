@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Box, Title, Text, Card, Button, Group, Badge, Stack } from "@mantine/core";
 import { eventsAPI, calendarAPI } from "../api/api.js";
+import AddToCalendarButton from "../components/AddToCalendarButton.jsx";
 
 export default function PublicHome() {
   const [events, setEvents] = useState([]);
@@ -38,7 +39,7 @@ export default function PublicHome() {
           mb="md"
           onClick={() => calendarAPI.download("public").catch((e) => alert(e.message))}
         >
-          Suscribirse a estos eventos (.ics)
+          Añadir todos a mi calendario (.ics)
         </Button>
       )}
 
@@ -76,6 +77,10 @@ export default function PublicHome() {
                 {ev.description}
               </Text>
             )}
+
+            <Group justify="flex-end" mt="xs">
+              <AddToCalendarButton event={ev} />
+            </Group>
           </Card>
         ))}
       </Stack>

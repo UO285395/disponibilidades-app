@@ -285,28 +285,36 @@ export const eventsAPI = {
 
 // ------------------- CALENDARIO (export iCalendar) -------------------
 
+async function downloadIcsFromEndpoint(endpoint, filename) {
+  const opts = { method: "GET", headers: {} };
+  const token = getToken();
+  if (token) opts.headers["Authorization"] = "Bearer " + token;
+
+  const res = await fetch(`${API_URL}${endpoint}`, opts);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`HTTP ${res.status} - ${text}`);
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export const calendarAPI = {
-  async download(visibility = null) {
+  download(visibility = null) {
     const qs = visibility ? `?visibility=${encodeURIComponent(visibility)}` : "";
-    const opts = { method: "GET", headers: {} };
-    const token = getToken();
-    if (token) opts.headers["Authorization"] = "Bearer " + token;
+    return downloadIcsFromEndpoint(`/calendar/export.ics${qs}`, "eventos.ics");
+  },
 
-    const res = await fetch(`${API_URL}/calendar/export.ics${qs}`, opts);
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`HTTP ${res.status} - ${text}`);
-    }
-
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "eventos.ics";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+  downloadEvent(eventId) {
+    return downloadIcsFromEndpoint(`/events/${eventId}/calendar.ics`, `evento-${eventId}.ics`);
   },
 };
 

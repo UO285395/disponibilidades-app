@@ -1421,6 +1421,52 @@ def export_calendar_ics(
     )
 
 
+@app.get("/events/{event_id}/calendar.ics")
+def export_event_ics(
+    event_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    """Exporta un único evento como .ics. Mismo criterio de visibilidad que
+    GET /events/{event_id}/public: sin sesión solo eventos públicos."""
+    user = None
+    if cred and cred.credentials:
+        try:
+            user = get_user_from_token(cred.credentials, db)
+        except HTTPException:
+            user = None
+
+    user_domain = _get_domain(user.email) if user else None
+
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    if not ev or not _visible_events_for_user([ev], user, user_domain, None):
+        raise HTTPException(404, "Evento no encontrado")
+
+    creator = db.query(User).filter(User.id == ev.created_by).first() if ev.created_by else None
+
+    event_dict = {
+        "id": ev.id,
+        "title": ev.title,
+        "description": ev.description,
+        "date": ev.date,
+        "start_time": ev.start_time,
+        "location": ev.location,
+        "external_url": ev.external_url,
+        "visibility": ev.visibility,
+        "organizer_email": creator.email if creator else None,
+        "organizer_name": creator.full_name if creator else None,
+        "updated_at": ev.updated_at,
+    }
+
+    ics_content = generate_ics([event_dict], calendar_name=ev.title)
+
+    return Response(
+        content=ics_content,
+        media_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename=evento-{ev.id}.ics"},
+    )
+
+
 @app.get("/events/{event_id}/responses")
 def event_responses(
     event_id: int,
