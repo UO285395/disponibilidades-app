@@ -4,9 +4,8 @@ import { adminAPI } from "../api/adminApi.js";
 import { useNavigate } from "react-router-dom";
 
 const VISIBILITY_OPTIONS = [
-  { value: "internal", label: "Interno (solo militantes de tu dominio)" },
+  { value: "internal", label: "Interno (tu dominio, o el colectivo que indiques abajo)" },
   { value: "public", label: "Público (visible sin cuenta)" },
-  { value: "private", label: "Privado (solo tú/superadmin)" },
 ];
 
 const EVENT_TYPE_OPTIONS = [
@@ -233,7 +232,7 @@ export default function AdminEvents() {
         />
         <TextInput
           label="Colectivo (parte después de @)"
-          description="Dejar vacío o escribir 'Todos' para evento general."
+          description="Interno: vacío = solo tu dominio; rellena para acotar a un colectivo concreto. Público: vacío = todos."
           value={allowedDomain}
           onChange={(e) => setAllowedDomain(e.target.value)}
           mb="sm"
@@ -317,6 +316,7 @@ export default function AdminEvents() {
                 />
                 <TextInput
                   label="Colectivo"
+                  description="Interno: vacío = solo tu dominio; rellena para acotar a un colectivo concreto. Público: vacío = todos."
                   value={editAllowedDomain}
                   onChange={(e) => setEditAllowedDomain(e.target.value)}
                   mb="sm"

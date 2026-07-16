@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Title, Button, Box, Text, Divider, Group, Tabs, Card } from "@mantine/core";
-import { clearToken, calendarAPI } from "../api/api.js";
+import { clearToken } from "../api/api.js";
 import { useSessionUser } from "../hooks/useSessionUser.js";
 import MobileWeekCalendar from "../components/MobileWeekCalendar.jsx";
 import EventsSection from "../components/EventsSection.jsx";
@@ -14,22 +14,10 @@ export default function Dashboard() {
   const [offsetWeeks, setOffsetWeeks] = useState(0);
   const navigate = useNavigate();
   const [changePasswordOpened, setChangePasswordOpened] = useState(false);
-  const [exportingCalendar, setExportingCalendar] = useState(false);
 
   async function logout() {
     await clearToken();
     navigate("/");
-  }
-
-  async function exportCalendar() {
-    try {
-      setExportingCalendar(true);
-      await calendarAPI.download();
-    } catch (e) {
-      alert(e?.message || "No se pudo exportar el calendario");
-    } finally {
-      setExportingCalendar(false);
-    }
   }
 
   if (!ready) {
@@ -76,9 +64,6 @@ export default function Dashboard() {
               Ir al panel admin
             </Button>
           )}
-                    <Button variant="outline" loading={exportingCalendar} onClick={exportCalendar}>
-                      Exportar calendario (.ics)
-                    </Button>
                     <Button variant="outline" onClick={() => setChangePasswordOpened(true)}>
                       Cambiar contraseña
                     </Button>

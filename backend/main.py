@@ -1101,6 +1101,12 @@ def create_event(
     if visibility not in ["public", "internal", "private"]:
         raise HTTPException(400, "visibility inválida: usa public, internal o private")
 
+    # Un evento "interno" nunca debe quedar abierto a todos los dominios por
+    # defecto: sin colectivo explícito, se acota al propio dominio del admin
+    # creador. Solo superadmin puede dejarlo sin acotar (alcance central).
+    if visibility == "internal" and not allowed_domain and admin.role != "superadmin":
+        allowed_domain = _get_domain(admin.email)
+
     event_type = (data.event_type or "participativo").strip().lower()
     if event_type not in ["informativo", "participativo"]:
         raise HTTPException(400, "event_type inválido: usa informativo o participativo")
@@ -3570,6 +3576,11 @@ def edit_event(
     visibility = (data.visibility or ev.visibility or "internal").strip().lower()
     if visibility not in ["public", "internal", "private"]:
         raise HTTPException(400, "visibility inválida: usa public, internal o private")
+
+    # Misma regla que en la creación: "interno" sin colectivo explícito se
+    # acota al dominio del admin que edita, nunca queda abierto a todos.
+    if visibility == "internal" and not allowed_domain and admin.role != "superadmin":
+        allowed_domain = _get_domain(admin.email)
 
     event_type = (data.event_type or ev.event_type or "participativo").strip().lower()
     if event_type not in ["informativo", "participativo"]:
