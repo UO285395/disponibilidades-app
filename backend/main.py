@@ -335,6 +335,7 @@ class AdminUserCreate(BaseModel):
     password: str
     group_tag: str | None = None
     group_tags: list[str] | None = None
+    org_unit_id: int | None = None
 
 
 class AdminUserGroupTagUpdate(BaseModel):
@@ -1034,12 +1035,25 @@ def admin_create_user(
             seen_initial_tags.add(tag)
             deduped_initial_tags.append(tag)
 
+    # Resolver la unidad organizativa del nuevo usuario. Preferir la indicada
+    # (si el admin tiene autoridad sobre ella); si no, el colectivo del dominio
+    # del email (creándolo si no existe) para mantener coherencia.
+    target_unit_id = None
+    if data.org_unit_id is not None:
+        if admin.role != "superadmin" and not org_service.can_manage_unit(db, admin, data.org_unit_id):
+            raise HTTPException(403, "No autorizado sobre esa unidad")
+        target_unit_id = data.org_unit_id
+    else:
+        colectivo = org_service.ensure_colectivo_for_domain(db, _get_domain(email))
+        target_unit_id = colectivo.id if colectivo else None
+
     user = User(
         email=email,
         full_name=full_name,
         hashed_password=hash_password(password),
         role="user",
         group_tag=_serialize_group_tags(deduped_initial_tags),
+        org_unit_id=target_unit_id,
     )
     db.add(user)
     db.commit()
@@ -1052,6 +1066,7 @@ def admin_create_user(
         "role": user.role,
         "group_tag": user.group_tag,
         "group_tags": _parse_group_tags(user.group_tag),
+        "org_unit_id": user.org_unit_id,
     }
 
 
@@ -3216,68 +3231,29 @@ def _same_domain_or_superadmin(user: User, target_user: User, db: Session | None
     return _can_admin_manage_user(user, target_user, db)
 
 
-def _extra_domains_from_admin_tags(admin: User) -> set[str]:
-    extra_domains = set()
-    for tag in _parse_group_tags(admin.group_tag):
-        if tag.startswith("domain:"):
-            candidate = tag.split(":", 1)[1].strip().lower()
-            if candidate:
-                extra_domains.add(candidate)
-        elif tag.startswith("dominio:"):
-            candidate = tag.split(":", 1)[1].strip().lower()
-            if candidate:
-                extra_domains.add(candidate)
-        elif tag.startswith("manage-domain:"):
-            candidate = tag.split(":", 1)[1].strip().lower()
-            if candidate:
-                extra_domains.add(candidate)
-        elif tag.startswith("manage:"):
-            candidate = tag.split(":", 1)[1].strip().lower()
-            if candidate:
-                extra_domains.add(candidate)
-    return extra_domains
-
-
 def _can_admin_manage_domain(admin: User, target_domain: str, db: Session) -> bool:
+    """Autoridad sobre un dominio. Ahora delega en el organigrama: la autoridad
+    de un admin es el subárbol de sus unidades asignadas (que incluye su propio
+    colectivo tras el backfill). Sustituye el antiguo hack de delegación por
+    prefijos mágicos en group_tag."""
     if admin.role == "superadmin":
         return True
-
-    admin_domain = _get_domain(admin.email)
-    admin_tags = set(_parse_group_tags(admin.group_tag))
-    normalized_target_domain = (target_domain or "").strip().lower()
-
-    if normalized_target_domain == admin_domain:
-        return True
-
-    # Solo admins con politica habilitada pueden gestionar fuera de su dominio.
-    if not _is_feature_enabled(db, admin_domain, "domain_policies", admin.role, admin_tags):
-        return False
-
-    return normalized_target_domain in _extra_domains_from_admin_tags(admin)
+    if db is None:
+        return _get_domain(admin.email) == (target_domain or "").strip().lower()
+    return org_service.can_manage_legacy_domain(db, admin, target_domain)
 
 
 def _can_admin_manage_user(admin: User, target_user: User, db: Session | None = None) -> bool:
+    """Autoridad sobre un usuario, vía su unidad organizativa (subárbol)."""
     if admin.role == "superadmin":
         return True
-
-    target_domain = _get_domain(target_user.email)
-    if _get_domain(admin.email) == target_domain:
-        return True
-
     if db is None:
-        return False
-
-    admin_tags = set(_parse_group_tags(admin.group_tag))
-
-    # Politica habilitada + etiqueta compartida o dominio delegado por tag
-    if not _is_feature_enabled(db, _get_domain(admin.email), "domain_policies", admin.role, admin_tags):
-        return False
-
-    target_tags = set(_parse_group_tags(target_user.group_tag))
-    if admin_tags.intersection(target_tags):
-        return True
-
-    return target_domain in _extra_domains_from_admin_tags(admin)
+        return _get_domain(admin.email) == _get_domain(target_user.email)
+    # Si el usuario destino ya tiene unidad, decide el organigrama.
+    if target_user.org_unit_id is not None:
+        return org_service.can_manage_user(db, admin, target_user)
+    # Sin unidad (dato heredado): fallback por dominio del email.
+    return org_service.can_manage_legacy_domain(db, admin, _get_domain(target_user.email))
 
 
 def _load_fcm_service_account():
@@ -3660,6 +3636,13 @@ def _ensure_event_domain_access(user: User, event: Event, db: Session | None = N
     if user.role == "superadmin":
         return
 
+    # Preferir el organigrama: autoridad = subárbol de la unidad del admin.
+    if db is not None and event.org_unit_id is not None:
+        if not org_service.can_manage_unit(db, user, event.org_unit_id):
+            raise HTTPException(403, "No autorizado para operar eventos de otra unidad")
+        return
+
+    # Fallback legacy (evento sin unidad todavía): criterio por dominio.
     if event.allowed_domain:
         event_domain = event.allowed_domain.strip().lower()
         user_domain = _get_domain(user.email)

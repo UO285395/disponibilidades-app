@@ -482,6 +482,55 @@ def get_root_unit(db: Session) -> OrgUnit | None:
     return db.query(OrgUnit).filter(OrgUnit.parent_id.is_(None)).first()
 
 
+def unit_id_for_legacy_domain(db: Session, domain: str | None) -> int | None:
+    """Resuelve un dominio legacy (p.ej. 'gmail.com') a su colectivo. Puente
+    durante la transición desde el modelo de dominios por email."""
+    if not domain:
+        return None
+    key = domain.strip().lower()
+    unit = db.query(OrgUnit).filter(OrgUnit.legacy_domain == key).first()
+    return unit.id if unit else None
+
+
+def ensure_colectivo_for_domain(db: Session, domain: str | None) -> OrgUnit | None:
+    """Devuelve el colectivo asociado a un dominio; lo crea bajo la raíz si no
+    existe. Mantiene coherente el modelo dominio→colectivo en la transición."""
+    if not domain:
+        return None
+    key = domain.strip().lower()
+    unit = db.query(OrgUnit).filter(OrgUnit.legacy_domain == key).first()
+    if unit:
+        return unit
+    root = get_root_unit(db)
+    if not root:
+        return None
+    colectivo_type_id = _colectivo_type_id(db)
+    now = datetime.utcnow().isoformat()
+    unit = OrgUnit(
+        level_type_id=colectivo_type_id, parent_id=root.id, name=key, slug=key,
+        path="", depth=0, is_active=1, legacy_domain=key, created_at=now,
+    )
+    db.add(unit)
+    db.flush()
+    finalize_unit_path(db, unit)
+    db.flush()
+    return unit
+
+
+def can_manage_legacy_domain(db: Session, admin: User, domain: str | None) -> bool:
+    """Autoridad sobre un dominio legacy, vía su colectivo en el organigrama.
+    Si el dominio no tiene unidad equivalente (dato huérfano), cae al criterio
+    conservador: solo el propio dominio del admin."""
+    if admin.role == "superadmin":
+        return True
+    unit_id = unit_id_for_legacy_domain(db, domain)
+    if unit_id is not None:
+        return can_manage_unit(db, admin, unit_id)
+    # Fallback conservador: mismo dominio que el admin.
+    admin_domain = _domain_of_email(admin.email)
+    return bool(domain) and domain.strip().lower() == admin_domain
+
+
 def authorized_root_units(db: Session, admin: User) -> list[OrgUnit]:
     """Unidades con AdminAssignment directa del admin (sus raíces de autoridad).
     Superadmin ostenta implícitamente la raíz."""
