@@ -390,6 +390,10 @@ class EventCreate(BaseModel):
     metadata: dict | None = None
     is_recurring: bool | None = False
     recurrence_rule: str | None = None
+    # Organigrama: unidad propietaria + modo de distribución.
+    org_unit_id: int | None = None
+    distribution_mode: str | None = None  # unit_only | subtree | custom
+    target_unit_ids: list[int] | None = None
 
 class EventResponseCreate(BaseModel):
     answer: str
@@ -1555,6 +1559,15 @@ def create_event(
     if event_type not in ["informativo", "participativo"]:
         raise HTTPException(400, "event_type inválido: usa informativo o participativo")
 
+    # Organigrama: resolver unidad propietaria y modo de distribución.
+    try:
+        owning_unit_id = org_service.resolve_owning_unit(db, admin, data.org_unit_id)
+        distribution_mode = org_service.validate_distribution(
+            db, admin, owning_unit_id, data.distribution_mode or "unit_only", data.target_unit_ids
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
     ev = Event(
         title=data.title,
         description=data.description,
@@ -1568,12 +1581,18 @@ def create_event(
         metadata_json=json.dumps(data.metadata) if data.metadata else None,
         is_recurring=1 if data.is_recurring else 0,
         recurrence_rule=(data.recurrence_rule or None),
+        org_unit_id=owning_unit_id,
+        distribution_mode=distribution_mode,
         updated_at=datetime.utcnow().isoformat(),
         created_by=admin.id
     )
     db.add(ev)
     db.commit()
     db.refresh(ev)
+
+    if distribution_mode == "custom":
+        org_service.set_content_distribution_targets(db, "event", ev.id, data.target_unit_ids)
+        db.commit()
 
     try:
         notif_title = f"Nuevo evento: {ev.title}"
@@ -1601,6 +1620,8 @@ def create_event(
         "metadata": json.loads(ev.metadata_json) if ev.metadata_json else None,
         "is_recurring": bool(ev.is_recurring),
         "recurrence_rule": ev.recurrence_rule,
+        "org_unit_id": ev.org_unit_id,
+        "distribution_mode": ev.distribution_mode,
         "created_by": ev.created_by,
     }
 
@@ -1625,7 +1646,20 @@ def _visible_events_for_user(
     user: User | None,
     user_domain: str | None,
     requested_visibilities: set[str] | None,
+    db: Session | None = None,
+    province_id: int | None = None,
 ) -> list[Event]:
+    """Visibilidad de eventos:
+    - private: solo creador/superadmin.
+    - internal: territorial — solo usuarios dentro del alcance del evento
+      (subárbol de la unidad propietaria, según su modo de distribución).
+    - public: visible por todos (visitantes y autenticados). Para visitantes
+      puede filtrarse opcionalmente por provincia.
+    """
+    viewer_unit = None
+    if db is not None and user is not None and user.org_unit_id is not None:
+        viewer_unit = db.query(models.OrgUnit).get(user.org_unit_id)
+
     filtered = []
 
     for e in events:
@@ -1634,45 +1668,43 @@ def _visible_events_for_user(
         if requested_visibilities is not None and e_visibility not in requested_visibilities:
             continue
 
+        # ---- Visitante sin sesión ----
         if user is None:
             if e_visibility != "public":
                 continue
+            if province_id is not None and db is not None:
+                if not org_service.event_matches_province(db, e, province_id):
+                    continue
+            filtered.append(e)
+            continue
 
-            # Compatibilidad histórica: eventos con allowed_domain solo para autenticados.
-            if e.allowed_domain:
-                continue
-
+        # ---- Usuario autenticado ----
+        if user.role == "superadmin":
             filtered.append(e)
             continue
 
         if e_visibility == "private":
-            if user.role != "superadmin" and e.created_by != user.id:
-                continue
-        elif e_visibility == "internal":
-            if e.allowed_domain:
-                event_domain = e.allowed_domain.strip().lower()
-                if user.role != "superadmin" and event_domain != user_domain:
-                    continue
+            if e.created_by == user.id:
+                filtered.append(e)
+            continue
 
-            if user.role == "admin" and e.allowed_domain:
-                event_domain = e.allowed_domain.strip().lower()
-                if event_domain != user_domain:
-                    continue
-
+        if e_visibility == "public":
+            # Público: visible por cualquiera con sesión.
             filtered.append(e)
             continue
-        else:
-            # public
-            if e.allowed_domain:
-                event_domain = e.allowed_domain.strip().lower()
-                if user.role != "superadmin" and event_domain != user_domain:
-                    continue
 
-            if user.role == "admin" and e.allowed_domain:
-                event_domain = e.allowed_domain.strip().lower()
-                if event_domain != user_domain:
-                    continue
+        # internal: territorial por alcance
+        if db is not None and e.org_unit_id is not None:
+            if viewer_unit is not None and org_service.unit_in_reach(
+                db, viewer_unit, e.org_unit_id, e.distribution_mode or "unit_only", "event", e.id
+            ):
+                filtered.append(e)
+            continue
 
+        # Fallback legacy por dominio (evento sin unidad todavía).
+        if e.allowed_domain:
+            if e.allowed_domain.strip().lower() != user_domain:
+                continue
         filtered.append(e)
 
     return filtered
@@ -1721,6 +1753,8 @@ def _serialize_event_with_counts(db: Session, e: Event) -> dict:
         "metadata": json.loads(e.metadata_json) if e.metadata_json else None,
         "is_recurring": bool(e.is_recurring),
         "recurrence_rule": e.recurrence_rule,
+        "org_unit_id": e.org_unit_id,
+        "distribution_mode": e.distribution_mode,
         "yes_count": yes_count,
         "no_count": no_count,
         "companions_total": companions_total,
@@ -1731,6 +1765,7 @@ def _serialize_event_with_counts(db: Session, e: Event) -> dict:
 @app.get("/events")
 def list_events(
     visibility: str | None = Query(None),
+    province_id: int | None = Query(None),
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
     db: Session = Depends(get_db)
 ):
@@ -1748,7 +1783,7 @@ def list_events(
 
     events = db.query(Event).all()
     requested_visibilities = _parse_requested_visibilities(visibility)
-    filtered = _visible_events_for_user(events, user, user_domain, requested_visibilities)
+    filtered = _visible_events_for_user(events, user, user_domain, requested_visibilities, db=db, province_id=province_id)
 
     return [_serialize_event_with_counts(db, e) for e in filtered]
 
@@ -1772,7 +1807,7 @@ def get_event_public(
     user_domain = _get_domain(user.email) if user else None
 
     ev = db.query(Event).filter(Event.id == event_id).first()
-    if not ev or not _visible_events_for_user([ev], user, user_domain, None):
+    if not ev or not _visible_events_for_user([ev], user, user_domain, None, db=db):
         raise HTTPException(404, "Evento no encontrado")
 
     return _serialize_event_with_counts(db, ev)
@@ -1809,6 +1844,8 @@ def get_event(
         "metadata": json.loads(ev.metadata_json) if ev.metadata_json else None,
         "is_recurring": bool(ev.is_recurring),
         "recurrence_rule": ev.recurrence_rule,
+        "org_unit_id": ev.org_unit_id,
+        "distribution_mode": ev.distribution_mode,
     }
 
 
@@ -1818,6 +1855,7 @@ def get_event(
 @app.get("/calendar/export.ics")
 def export_calendar_ics(
     visibility: str | None = Query(None),
+    province_id: int | None = Query(None),
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
     db: Session = Depends(get_db)
 ):
@@ -1836,7 +1874,7 @@ def export_calendar_ics(
         requested_visibilities = {"public"}
 
     events = db.query(Event).all()
-    visible_events = _visible_events_for_user(events, user, user_domain, requested_visibilities)
+    visible_events = _visible_events_for_user(events, user, user_domain, requested_visibilities, db=db, province_id=province_id)
 
     creator_ids = {e.created_by for e in visible_events if e.created_by}
     creators = {}
@@ -1889,7 +1927,7 @@ def export_event_ics(
     user_domain = _get_domain(user.email) if user else None
 
     ev = db.query(Event).filter(Event.id == event_id).first()
-    if not ev or not _visible_events_for_user([ev], user, user_domain, None):
+    if not ev or not _visible_events_for_user([ev], user, user_domain, None, db=db):
         raise HTTPException(404, "Evento no encontrado")
 
     creator = db.query(User).filter(User.id == ev.created_by).first() if ev.created_by else None
@@ -4000,6 +4038,24 @@ def edit_event(
 
     was_public = (ev.visibility or "internal").strip().lower() == "public"
 
+    # Organigrama: si se envía unidad/modo, revalidar; si no, conservar los actuales.
+    if data.org_unit_id is not None or data.distribution_mode is not None:
+        try:
+            owning_unit_id = org_service.resolve_owning_unit(
+                db, admin, data.org_unit_id if data.org_unit_id is not None else ev.org_unit_id
+            )
+            distribution_mode = org_service.validate_distribution(
+                db, admin, owning_unit_id,
+                data.distribution_mode or ev.distribution_mode or "unit_only",
+                data.target_unit_ids,
+            )
+            ev.org_unit_id = owning_unit_id
+            ev.distribution_mode = distribution_mode
+            if distribution_mode == "custom" and data.target_unit_ids is not None:
+                org_service.set_content_distribution_targets(db, "event", ev.id, data.target_unit_ids)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
     ev.title = data.title
     ev.description = data.description
     ev.date = data.date
@@ -4044,6 +4100,8 @@ def edit_event(
         "metadata": json.loads(ev.metadata_json) if ev.metadata_json else None,
         "is_recurring": bool(ev.is_recurring),
         "recurrence_rule": ev.recurrence_rule,
+        "org_unit_id": ev.org_unit_id,
+        "distribution_mode": ev.distribution_mode,
         "created_by": ev.created_by,
     }
 

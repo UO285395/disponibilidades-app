@@ -589,6 +589,52 @@ def authorized_subtree_unit_ids(db: Session, admin: User) -> list[int] | None:
 
 
 # =========================================================
+# DISTRIBUCIÓN DE CONTENIDO (unidad propietaria + modo)
+# =========================================================
+
+def resolve_owning_unit(db: Session, admin: User, requested_unit_id: int | None) -> int | None:
+    """Unidad propietaria de un contenido creado por `admin`. Si se indica una,
+    exige autoridad; si no, usa la unidad hogar del admin (o su colectivo)."""
+    if requested_unit_id is not None:
+        if admin.role != "superadmin" and not can_manage_unit(db, admin, requested_unit_id):
+            raise ValueError("No autorizado sobre esa unidad")
+        return requested_unit_id
+    if admin.org_unit_id is not None:
+        return admin.org_unit_id
+    colectivo = ensure_colectivo_for_domain(db, _domain_of_email(admin.email))
+    return colectivo.id if colectivo else (get_root_unit(db).id if get_root_unit(db) else None)
+
+
+def validate_distribution(db: Session, admin: User, owning_unit_id: int, mode: str,
+                          target_unit_ids: list[int] | None) -> str:
+    mode = (mode or "unit_only").strip().lower()
+    if mode not in DISTRIBUTION_MODES:
+        raise ValueError("Modo de distribución inválido")
+    # Solo superadmin puede difundir a todo el árbol desde la raíz de forma
+    # amplia; un admin normal puede usar subtree dentro de su propio subárbol.
+    if mode == "custom":
+        owning = db.query(OrgUnit).get(owning_unit_id)
+        for tid in (target_unit_ids or []):
+            target = db.query(OrgUnit).get(tid)
+            if target is None or not (owning and target.path.startswith(owning.path)):
+                raise ValueError("Los destinos deben ser descendientes de la unidad propietaria")
+    return mode
+
+
+def set_content_distribution_targets(db: Session, content_type: str, content_id: int,
+                                     target_unit_ids: list[int] | None):
+    db.query(ContentDistributionTarget).filter(
+        ContentDistributionTarget.content_type == content_type,
+        ContentDistributionTarget.content_id == content_id,
+    ).delete()
+    for tid in (target_unit_ids or []):
+        db.add(ContentDistributionTarget(
+            content_type=content_type, content_id=content_id, org_unit_id=tid,
+        ))
+    db.flush()
+
+
+# =========================================================
 # MOTOR DE ALCANCE (¿este contenido llega a esta unidad?)
 # =========================================================
 
@@ -730,3 +776,30 @@ def org_units_for_province(db: Session, province_id: int) -> list[int]:
             matching_ids.add(row.org_unit_id)
 
     return list(matching_ids)
+
+
+def event_matches_province(db: Session, event, province_id: int) -> bool:
+    """¿Un evento debe mostrarse al visitante que ha elegido esta provincia?
+    Los eventos centrales/estatales (raíz + subtree) se muestran siempre. El
+    resto, solo si alguna unidad de esa provincia está dentro de su alcance."""
+    owning_id = getattr(event, "org_unit_id", None)
+    if owning_id is None:
+        # Sin unidad: no filtrar (comportamiento visitante histórico).
+        return True
+    owning = db.query(OrgUnit).get(owning_id)
+    if owning is None:
+        return True
+    mode = getattr(event, "distribution_mode", None) or "unit_only"
+
+    # Estatal: raíz + subtree -> siempre visible.
+    if owning.parent_id is None and mode == "subtree":
+        return True
+
+    province_unit_ids = org_units_for_province(db, province_id)
+    if not province_unit_ids:
+        return False
+    for uid in province_unit_ids:
+        vunit = db.query(OrgUnit).get(uid)
+        if unit_in_reach(db, vunit, owning_id, mode, "event", event.id):
+            return True
+    return False
