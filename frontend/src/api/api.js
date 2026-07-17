@@ -79,31 +79,36 @@ export function getToken() {
   return cachedToken;
 }
 
-export async function setToken(token) {
+// Persistencia nativa best-effort y NO bloqueante. En algunos dispositivos el
+// puente de Capacitor Preferences puede quedarse colgado; el token ya está en
+// cache + localStorage, así que la sesión funciona igual. Antes, setToken hacía
+// `await Preferences.set(...)` sin protección y el login se quedaba congelado
+// (el spinner no terminaba nunca). initializeAuthStorage ya evitaba esto con un
+// timeout; aquí lo evitamos no esperando a la escritura nativa.
+function persistTokenToPreferences(token) {
+  getPreferences()
+    .then((Preferences) => {
+      if (!Preferences) return null;
+      return token === null
+        ? Preferences.remove({ key: TOKEN_KEY })
+        : Preferences.set({ key: TOKEN_KEY, value: token });
+    })
+    .catch(() => {
+      // La sesión local (cache + localStorage) ya quedó consistente.
+    });
+}
+
+export function setToken(token) {
   cachedToken = token;
   localStorage.setItem(TOKEN_KEY, token);
-
-  const Preferences = await getPreferences();
-  if (Preferences) {
-    await Preferences.set({ key: TOKEN_KEY, value: token });
-  }
-
+  persistTokenToPreferences(token);
   emitAuthChange();
 }
 
-export async function clearToken() {
+export function clearToken() {
   cachedToken = null;
   localStorage.removeItem(TOKEN_KEY);
-
-  try {
-    const Preferences = await getPreferences();
-    if (Preferences) {
-      await Preferences.remove({ key: TOKEN_KEY });
-    }
-  } catch {
-    // Best-effort: la sesion local ya quedo limpia aunque falle el storage nativo.
-  }
-
+  persistTokenToPreferences(null);
   emitAuthChange();
 }
 
