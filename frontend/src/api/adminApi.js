@@ -68,6 +68,10 @@ export const adminAPI = {
     return request(`/events/${eventId}/responses`);
   },
 
+  getEventGuestResponses(eventId) {
+    return request(`/events/${eventId}/guest-responses`);
+  },
+
   // Disponibilidades de todos (unitId acota a esa unidad y su rama)
   listAvailabilities(unitId = null) {
     const qs = unitId ? `?unit_id=${unitId}` : "";

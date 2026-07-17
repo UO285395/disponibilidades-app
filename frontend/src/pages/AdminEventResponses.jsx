@@ -41,7 +41,9 @@ function formatRespuesta(answer) {
 export default function AdminEventResponses() {
   const { id } = useParams();
   const [responses, setResponses] = useState([]);
+  const [guestResponses, setGuestResponses] = useState([]);
   const [eventName, setEventName] = useState("");
+  const [isPublic, setIsPublic] = useState(false);
   const [filterDomain, setFilterDomain] = useState("");
   const [loadError, setLoadError] = useState("");
   const navigate = useNavigate();
@@ -51,7 +53,7 @@ export default function AdminEventResponses() {
 
     (async () => {
       try {
-        // 1) Obtener respuestas
+        // 1) Obtener respuestas de militantes
         const resp = await adminAPI.getEventResponses(id);
         if (cancelled) return;
         setResponses(resp);
@@ -59,7 +61,16 @@ export default function AdminEventResponses() {
 
         // 2) Obtener título del evento
         const ev = await adminAPI.getEvent(id);
-        if (!cancelled) setEventName(ev.title);
+        if (!cancelled) {
+          setEventName(ev.title);
+          setIsPublic(ev.visibility === "public");
+        }
+
+        // 3) Respuestas de visitantes (solo tienen sentido en eventos públicos)
+        if (ev.visibility === "public") {
+          const guests = await adminAPI.getEventGuestResponses(id);
+          if (!cancelled) setGuestResponses(guests);
+        }
 
       } catch (e) {
         console.error("Error cargando respuestas", e);
@@ -93,6 +104,24 @@ export default function AdminEventResponses() {
 
   const { si, no } = resumirVotos(filteredResponses);
   const simpas = filteredResponses.reduce((acc, r) => acc + Number(r.companions_count || 0), 0);
+
+  // Los visitantes se resumen aparte: no son militantes y hay que poder
+  // distinguirlos al contar la asistencia.
+  const guestSummary = useMemo(() => {
+    let gsi = 0;
+    let gno = 0;
+    let companions = 0;
+    for (const g of guestResponses) {
+      const a = normalizeAnswer(g.answer);
+      if (a === "si") {
+        gsi++;
+        companions += Number(g.companions || 0);
+      } else if (a === "no") {
+        gno++;
+      }
+    }
+    return { si: gsi, no: gno, companions };
+  }, [guestResponses]);
 
   if (loadError) {
     return (
@@ -130,17 +159,54 @@ export default function AdminEventResponses() {
       />
 
       {/* ========================================
-          RESUMEN DE VOTOS
+          RESUMEN DE VOTOS (militancia y visitantes por separado)
          ======================================== */}
       <Card shadow="sm" p="lg" mb="lg" style={{ background: "#eef6ff" }}>
         <Title order={4} mb="sm">Resumen de votos</Title>
+
+        <Text fw={600} mt="xs">Militancia</Text>
         <Text><b>Sí:</b> {si}</Text>
         <Text><b>No:</b> {no}</Text>
         <Text><b>+ Simpas:</b> {simpas}</Text>
+        <Text c="dimmed" size="sm">Subtotal asistencia: {si + simpas}</Text>
+
+        {isPublic && (
+          <>
+            <Text fw={600} mt="md">Visitantes (sin cuenta)</Text>
+            <Text><b>Sí:</b> {guestSummary.si}</Text>
+            <Text><b>No:</b> {guestSummary.no}</Text>
+            <Text><b>+ Acompañantes:</b> {guestSummary.companions}</Text>
+            <Text c="dimmed" size="sm">Subtotal asistencia: {guestSummary.si + guestSummary.companions}</Text>
+          </>
+        )}
+
+        <Text fw={700} mt="md">
+          Asistencia total: {si + simpas + (isPublic ? guestSummary.si + guestSummary.companions : 0)}
+        </Text>
       </Card>
 
+      {/* ========================================
+          RESPUESTAS DE VISITANTES
+         ======================================== */}
+      {isPublic && (
+        <Card shadow="sm" p="lg" mb="lg">
+          <Title order={4} mb="sm">Visitantes sin cuenta ({guestResponses.length})</Title>
+          {guestResponses.length === 0 ? (
+            <Text size="sm" c="dimmed">Ningún visitante ha respondido todavía.</Text>
+          ) : (
+            guestResponses.map((g) => (
+              <Text key={g.id} size="sm">
+                {g.guest_name || "Anónimo"} — <b>{formatRespuesta(g.answer)}</b>
+                {g.companions > 0 && ` · +${g.companions} acompañante(s)`}
+              </Text>
+            ))
+          )}
+        </Card>
+      )}
+
+      <Title order={4} mb="sm">Militancia</Title>
       {filteredResponses.length === 0 && (
-        <Text>No hay respuestas todavía.</Text>
+        <Text>No hay respuestas de militantes todavía.</Text>
       )}
 
       {filteredResponses.map((r, idx) => (

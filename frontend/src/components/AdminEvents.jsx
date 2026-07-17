@@ -439,13 +439,27 @@ export default function AdminEvents() {
               </>
             )}
 
-            {/* Resumen de votos Sí / No */}
+            {/* Resumen de votos: militantes y visitantes por separado */}
             <div style={{ marginTop: "10px" }}>
-              <b>Resumen de votos:</b>
+              <b>Militancia:</b>
               <div>Sí: {ev.yes_count ?? 0}</div>
               <div>No: {ev.no_count ?? 0}</div>
               <div>+ Simpas: {ev.companions_total ?? 0}</div>
-              <div>Asistencia total: {(ev.yes_count ?? 0) + (ev.companions_total ?? 0)}</div>
+              <div>Subtotal: {ev.attendees_total ?? 0}</div>
+
+              {ev.visibility === "public" && (
+                <>
+                  <b style={{ display: "block", marginTop: "8px" }}>Visitantes (sin cuenta):</b>
+                  <div>Sí: {ev.guest_yes_count ?? 0}</div>
+                  <div>No: {ev.guest_no_count ?? 0}</div>
+                  <div>+ Acompañantes: {ev.guest_companions_total ?? 0}</div>
+                  <div>Subtotal: {ev.guest_attendees_total ?? 0}</div>
+                </>
+              )}
+
+              <div style={{ marginTop: "8px" }}>
+                <b>Asistencia total: {ev.attendees_grand_total ?? ev.attendees_total ?? 0}</b>
+              </div>
             </div>
 
             <Group mt="sm">

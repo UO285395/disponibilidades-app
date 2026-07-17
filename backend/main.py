@@ -1935,6 +1935,34 @@ def _serialize_event_with_counts(db: Session, e: Event) -> dict:
 
     attendees_total = yes_count + companions_total
 
+    # Respuestas de visitantes (sin cuenta). Se contabilizan aparte de las de
+    # militantes para que el admin pueda distinguir unas de otras.
+    guest_yes_count = (
+        db.query(GuestResponse)
+        .filter(
+            GuestResponse.event_id == e.id,
+            func.lower(GuestResponse.answer).in_(["yes", "si"]),
+        )
+        .count()
+    )
+    guest_no_count = (
+        db.query(GuestResponse)
+        .filter(
+            GuestResponse.event_id == e.id,
+            func.lower(GuestResponse.answer) == "no",
+        )
+        .count()
+    )
+    guest_companions_total = (
+        db.query(func.coalesce(func.sum(GuestResponse.companions), 0))
+        .filter(
+            GuestResponse.event_id == e.id,
+            func.lower(GuestResponse.answer).in_(["yes", "si"]),
+        )
+        .scalar()
+    ) or 0
+    guest_attendees_total = guest_yes_count + guest_companions_total
+
     return {
         "id": e.id,
         "title": e.title,
@@ -1953,10 +1981,18 @@ def _serialize_event_with_counts(db: Session, e: Event) -> dict:
         "recurrence_rule": e.recurrence_rule,
         "org_unit_id": e.org_unit_id,
         "distribution_mode": e.distribution_mode,
+        # Militantes
         "yes_count": yes_count,
         "no_count": no_count,
         "companions_total": companions_total,
         "attendees_total": attendees_total,
+        # Visitantes sin cuenta (diferenciados)
+        "guest_yes_count": guest_yes_count,
+        "guest_no_count": guest_no_count,
+        "guest_companions_total": guest_companions_total,
+        "guest_attendees_total": guest_attendees_total,
+        # Suma de ambos
+        "attendees_grand_total": attendees_total + guest_attendees_total,
     }
 
 
@@ -2188,13 +2224,14 @@ def event_responses(
         if domain and responder_domain != domain.strip().lower():
             continue
 
+        # Quién puede ver a quién lo decide la estructura, no el dominio del email.
         if user.role == "superadmin":
             pass
         elif user.role == "admin":
-            if responder_domain != user_domain:
+            if not _can_admin_manage_user(user, u, db):
                 continue
         else:
-            if responder_domain != user_domain:
+            if u.org_unit_id != user.org_unit_id:
                 continue
 
         companion_count = (
@@ -2218,6 +2255,42 @@ def event_responses(
         })
 
     return results
+
+
+@app.get("/events/{event_id}/guest-responses")
+def event_guest_responses(
+    event_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    """Respuestas de visitantes sin cuenta a un evento público. Se sirven aparte
+    de las de militantes para que el admin las vea diferenciadas."""
+    admin = get_user_from_token(cred.credentials, db)
+    require_admin(admin)
+
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    if not ev:
+        raise HTTPException(404, "Evento no encontrado")
+
+    _ensure_event_domain_access(admin, ev, db)
+
+    rows = (
+        db.query(GuestResponse)
+        .filter(GuestResponse.event_id == event_id)
+        .order_by(GuestResponse.created_at)
+        .all()
+    )
+
+    return [
+        {
+            "id": g.id,
+            "guest_name": g.guest_name,
+            "answer": g.answer,
+            "companions": g.companions or 0,
+            "created_at": g.created_at,
+        }
+        for g in rows
+    ]
 
 
 @app.post("/events/{event_id}/responses")
