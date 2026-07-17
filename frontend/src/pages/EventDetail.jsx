@@ -1,9 +1,25 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Box, Title, Text, Card, Badge, Group, Button } from "@mantine/core";
+import {
+  Box, Title, Text, Card, Badge, Group, Button, Stack, Anchor, Center, Loader,
+} from "@mantine/core";
+import {
+  IconArrowLeft, IconCalendarEvent, IconClock, IconMapPin, IconExternalLink,
+  IconAlertTriangle,
+} from "@tabler/icons-react";
 import { eventsAPI, getToken } from "../api/api.js";
 import GuestEventResponse from "../components/GuestEventResponse.jsx";
 import AddToCalendarButton from "../components/AddToCalendarButton.jsx";
+import { formatDate, formatTime } from "../utils/datetime.js";
+
+function InfoRow({ icon, children }) {
+  return (
+    <Group gap={8} wrap="nowrap">
+      {icon}
+      <Text size="sm" c="dimmed">{children}</Text>
+    </Group>
+  );
+}
 
 export default function EventDetail() {
   const { id } = useParams();
@@ -25,69 +41,88 @@ export default function EventDetail() {
 
   if (error) {
     return (
-      <Box p="xl" style={{ maxWidth: 600, margin: "60px auto", textAlign: "center" }}>
-        <Text c="red" fw={600}>{error}</Text>
-        <Button variant="subtle" mt="md" onClick={() => navigate("/")}>
-          Volver a eventos
-        </Button>
+      <Box p="md" style={{ maxWidth: 600, margin: "48px auto" }}>
+        <Center>
+          <Stack align="center" gap="sm">
+            <IconAlertTriangle size={40} color="var(--mantine-color-red-6)" />
+            <Text c="red" fw={600} ta="center">{error}</Text>
+            <Button variant="light" leftSection={<IconArrowLeft size={18} />} onClick={() => navigate("/")}>
+              Volver a eventos
+            </Button>
+          </Stack>
+        </Center>
       </Box>
     );
   }
 
   if (!event) {
-    return (
-      <Box p="xl" style={{ textAlign: "center", marginTop: 80 }}>
-        <Text c="dimmed">Cargando evento…</Text>
-      </Box>
-    );
+    return <Center h="60vh"><Loader /></Center>;
   }
 
   return (
-    <Box p="lg" style={{ maxWidth: 600, margin: "0 auto" }}>
-      <Button variant="subtle" mb="md" onClick={() => navigate("/")}>
-        ← Volver a eventos
+    <Box p="md" pb="xl" style={{ maxWidth: 600, margin: "0 auto" }}>
+      <Button
+        variant="subtle"
+        size="sm"
+        mb="sm"
+        pl={4}
+        leftSection={<IconArrowLeft size={18} />}
+        onClick={() => navigate("/")}
+      >
+        Volver a eventos
       </Button>
 
-      <Card shadow="md" p="lg" radius="md">
-        <Group justify="space-between" align="flex-start" mb="xs">
-          <Title order={3}>{event.title}</Title>
-          <Badge color={event.visibility === "public" ? "teal" : "gray"}>
-            {event.visibility === "public" ? "Público" : "Interno"}
+      <Card shadow="sm" padding="lg">
+        <Group justify="space-between" align="flex-start" mb="sm" wrap="nowrap">
+          <Title order={2} style={{ flex: 1 }}>{event.title}</Title>
+          <Badge variant="light" color={event.event_type === "informativo" ? "blue" : "teal"}>
+            {event.event_type === "informativo" ? "Informativo" : "Participativo"}
           </Badge>
         </Group>
 
-        <Text size="sm" c="dimmed">
-          {event.date}
-          {event.start_time && ` · ${event.start_time}`}
-          {event.location && ` · ${event.location}`}
-        </Text>
+        <Stack gap={6}>
+          <InfoRow icon={<IconCalendarEvent size={18} color="var(--mantine-color-dimmed)" />}>
+            {formatDate(event.date)}
+          </InfoRow>
+          {event.start_time && (
+            <InfoRow icon={<IconClock size={18} color="var(--mantine-color-dimmed)" />}>
+              {formatTime(event.start_time)}
+            </InfoRow>
+          )}
+          {event.location && (
+            <InfoRow icon={<IconMapPin size={18} color="var(--mantine-color-dimmed)" />}>
+              {event.location}
+            </InfoRow>
+          )}
+        </Stack>
 
         {event.description && <Text mt="md">{event.description}</Text>}
 
         {event.external_url && (
-          <Text mt="sm">
-            <a href={event.external_url} target="_blank" rel="noreferrer">
-              Más información
-            </a>
-          </Text>
+          <Anchor href={event.external_url} target="_blank" rel="noreferrer" mt="md" style={{ display: "inline-block" }}>
+            <Group gap={4} wrap="nowrap">
+              <IconExternalLink size={16} />
+              <span>Más información</span>
+            </Group>
+          </Anchor>
         )}
 
-        <Group justify="flex-end" mt="md">
-          <AddToCalendarButton event={event} size="sm" variant="light" />
+        <Group mt="lg">
+          <AddToCalendarButton event={event} size="md" variant="light" />
         </Group>
       </Card>
 
       {hasSession ? (
-        <Card shadow="sm" p="md" radius="md" mt="md">
-          <Text size="sm" c="dimmed">
+        <Card shadow="xs" padding="md" mt="md">
+          <Text size="sm" c="dimmed" mb="sm">
             Has iniciado sesión como militante. Gestiona tu respuesta y acompañantes desde tu panel.
           </Text>
-          <Button mt="sm" onClick={() => navigate("/dashboard")}>
-            Ir a mi panel
-          </Button>
+          <Button onClick={() => navigate("/dashboard")}>Ir a mi panel</Button>
         </Card>
       ) : (
-        <GuestEventResponse eventId={event.id} />
+        <Box mt="md">
+          <GuestEventResponse eventId={event.id} />
+        </Box>
       )}
     </Box>
   );
