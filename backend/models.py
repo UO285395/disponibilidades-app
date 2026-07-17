@@ -313,6 +313,21 @@ class NotificationDispatch(Base):
     creator = relationship("User")
 
 
+class LoginAttempt(Base):
+    """Intentos de acceso fallidos, para frenar la fuerza bruta.
+
+    Va en base de datos y no en memoria a propósito: detrás del proxy no hay una
+    IP de cliente fiable y puede haber varias réplicas del backend, así que un
+    contador en memoria no acumula nada. Se cuenta por email.
+    """
+    __tablename__ = "login_attempts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, nullable=False, index=True)
+    ip = Column(String, nullable=True)
+    created_at = Column(String, nullable=False, index=True)
+
+
 class InstanceLog(Base):
     __tablename__ = "instance_logs"
 

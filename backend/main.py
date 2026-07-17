@@ -223,42 +223,57 @@ pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 # =========================================================
 # FRENO A LA FUERZA BRUTA EN EL LOGIN
 # =========================================================
-# La API es pública (la usa la APK repartida), así que sin esto cualquiera puede
-# probar contraseñas de forma ilimitada contra el correo de un militante.
-# Es un freno en memoria: se pierde al reiniciar y no se comparte entre varias
-# instancias, pero encarece muchísimo un ataque frente a no tener nada.
-_login_failures: dict[str, list[datetime]] = {}
+# La API es pública (la usa la APK repartida): sin esto se pueden probar
+# contraseñas de forma ilimitada contra el correo de un militante.
+#
+# El contador vive en la BASE DE DATOS, no en memoria. Un primer intento en
+# memoria y con clave IP+email NO funcionó en el despliegue real: detrás del
+# proxy no hay una IP de cliente estable, así que la clave cambiaba en cada
+# petición y no acumulaba nunca (verificado: 25 intentos sin bloqueo).
+#
+# Se cuenta por EMAIL, no por IP: así también frena a un atacante que rote de
+# IP. Contrapartida asumida: alguien podría dejar una cuenta bloqueada unos
+# minutos machacándola. Es un mal mucho menor que permitir adivinar contraseñas
+# sin límite, y la ventana es corta.
 _LOGIN_MAX_FAILURES = 8
 _LOGIN_WINDOW = timedelta(minutes=5)
 
 
-def _login_key(email: str | None, request: Request) -> str:
-    ip = request.client.host if request and request.client else "no-ip"
-    return f"{ip}|{(email or '').strip().lower()}"
+def _client_ip(request: Request) -> str:
+    """IP real del cliente. Tras un proxy, request.client.host es el proxy."""
+    forwarded = (request.headers.get("x-forwarded-for") or "").strip()
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request and request.client else "no-ip"
 
 
-def _recent_failures(key: str) -> list[datetime]:
-    cutoff = datetime.utcnow() - _LOGIN_WINDOW
-    recent = [t for t in _login_failures.get(key, []) if t > cutoff]
-    if recent:
-        _login_failures[key] = recent
-    else:
-        _login_failures.pop(key, None)
-    return recent
-
-
-def _ensure_login_allowed(key: str):
-    if len(_recent_failures(key)) >= _LOGIN_MAX_FAILURES:
+def _ensure_login_allowed(db: Session, email: str):
+    cutoff = (datetime.utcnow() - _LOGIN_WINDOW).isoformat()
+    failures = (
+        db.query(models.LoginAttempt)
+        .filter(
+            models.LoginAttempt.email == email,
+            models.LoginAttempt.created_at > cutoff,
+        )
+        .count()
+    )
+    if failures >= _LOGIN_MAX_FAILURES:
         raise HTTPException(429, "Demasiados intentos fallidos. Espera unos minutos e inténtalo de nuevo.")
 
 
-def _record_login_failure(key: str):
-    # Poda periódica: evita que el diccionario crezca sin límite si alguien
-    # prueba con muchos correos/IPs distintos.
-    if len(_login_failures) > 5000:
-        for stale_key in list(_login_failures.keys()):
-            _recent_failures(stale_key)
-    _login_failures.setdefault(key, []).append(datetime.utcnow())
+def _record_login_failure(db: Session, email: str, request: Request):
+    db.add(models.LoginAttempt(
+        email=email,
+        ip=_client_ip(request),
+        created_at=datetime.utcnow().isoformat(),
+    ))
+    db.commit()
+
+
+def _clear_login_failures(db: Session, email: str):
+    db.query(models.LoginAttempt).filter(models.LoginAttempt.email == email).delete(
+        synchronize_session=False)
+    db.commit()
 
 
 # =========================================================
@@ -402,6 +417,13 @@ def cleanup_expired_data(db: Session):
     availability_limit = (today - timedelta(days=14)).strftime("%Y-%m-%d")
     db.query(Availability)\
       .filter(Availability.date < availability_limit)\
+      .delete(synchronize_session=False)
+
+    # --- Intentos de acceso fallidos ya caducados ---
+    # Solo importan durante la ventana del freno; el resto es ruido acumulado.
+    attempts_limit = (datetime.utcnow() - timedelta(days=1)).isoformat()
+    db.query(models.LoginAttempt)\
+      .filter(models.LoginAttempt.created_at < attempts_limit)\
       .delete(synchronize_session=False)
 
     db.commit()
@@ -610,15 +632,15 @@ def register(data: Register, db: Session = Depends(get_db)):
 
 @app.post("/login")
 def login(data: Login, request: Request, db: Session = Depends(get_db)):
-    key = _login_key(data.email, request)
-    _ensure_login_allowed(key)
+    email = (data.email or "").strip().lower()
+    _ensure_login_allowed(db, email)
 
     user = db.query(User).filter(User.email == data.email).first()
     if not user or not verify_password(data.password, user.hashed_password):
-        _record_login_failure(key)
+        _record_login_failure(db, email, request)
         raise HTTPException(400, "Credenciales incorrectas")
 
-    _login_failures.pop(key, None)
+    _clear_login_failures(db, email)
     token = create_token({"sub": str(user.id)})
     return {"access_token": token, "token_type": "bearer"}
 

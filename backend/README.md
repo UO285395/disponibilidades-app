@@ -39,9 +39,18 @@ cada arranque. Es seguro, pero obliga a volver a iniciar sesión cada vez que se
 ## Seguridad
 
 - **Contraseñas**: se guardan con Argon2 (`passlib`), nunca en claro.
-- **Fuerza bruta**: `/login` bloquea tras 8 intentos fallidos por IP+correo en 5 minutos. Es un freno
-  en memoria: se reinicia con el proceso y no se comparte entre instancias, pero encarece mucho un
-  ataque. Si algún día se escala a varias instancias, conviene moverlo a un almacén compartido.
+- **Fuerza bruta**: `/login` bloquea tras **8 intentos fallidos por correo en 5 minutos** (429).
+
+  El contador vive en la **base de datos** (`login_attempts`), no en memoria. Un primer intento en
+  memoria con clave IP+correo **no funcionó en el despliegue real**: detrás del proxy,
+  `request.client.host` no es una IP de cliente estable, así que la clave cambiaba en cada petición y
+  no acumulaba nunca (comprobado en producción: 25 intentos seguidos sin bloqueo). En base de datos
+  funciona también con varias réplicas y sobrevive a los reinicios.
+
+  Se cuenta **por correo, no por IP**, para frenar también a quien rote de IP. **Contrapartida
+  asumida**: alguien podría dejar una cuenta bloqueada unos minutos machacándola. Es un mal mucho
+  menor que permitir adivinar contraseñas sin límite, y la ventana es corta (5 min). Un login
+  correcto limpia el contador.
 - **Autoridad**: la puede gestionar un admin se decide en un único sitio (`org_service.can_manage_unit`):
   su estructura y todas las que dependen de ella. No se deduce del dominio del email.
 
