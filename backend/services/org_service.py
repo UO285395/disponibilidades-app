@@ -83,10 +83,6 @@ def compute_path(parent: OrgUnit | None, unit_id: int) -> str:
     return f"{base}{_pad(unit_id)}"
 
 
-def path_depth(path: str) -> int:
-    return max(0, path.strip(".").count(".") )
-
-
 def ancestor_ids_from_path(path: str) -> list[int]:
     """Cadena de IDs raíz→self derivada de la ruta."""
     parts = [p for p in path.strip(".").split(".") if p]
@@ -599,11 +595,6 @@ def serialize_unit(db: Session, unit: OrgUnit, include_counts: bool = False,
 
 def _request_cache(db: Session) -> dict:
     return db.info.setdefault("_org_cache", {})
-
-
-def invalidate_authority_cache(db: Session) -> None:
-    """A llamar tras cambiar asignaciones de admin dentro de una misma petición."""
-    _request_cache(db).pop("roots", None)
 
 
 def unit_by_id(db: Session, unit_id: int | None) -> OrgUnit | None:

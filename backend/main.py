@@ -3942,10 +3942,18 @@ def _send_fcm_notification(tokens: list[str], title: str, body: str, data: dict 
     if not tokens:
         return {"sent": 0, "failed": 0, "reason": "no_tokens"}
 
+    # La API HTTP v1 (con service account) es la vigente. La API legacy (server
+    # key) fue DESACTIVADA por Google en 2024, asi que solo se usa como ultimo
+    # recurso si no hay service account configurada; nunca debe tapar a v1.
+    _, _, sa_reason, _ = _load_fcm_service_account()
+    if not sa_reason:
+        return _send_fcm_notification_v1(tokens, title, body, data=data)
+
     server_key = os.getenv("FCM_SERVER_KEY", "").strip()
     if server_key:
         return _send_fcm_notification_legacy(tokens, title, body, server_key, data=data)
 
+    # Sin service account ni server key: v1 devuelve el motivo de config faltante.
     return _send_fcm_notification_v1(tokens, title, body, data=data)
 
 

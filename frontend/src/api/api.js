@@ -175,14 +175,6 @@ export const authAPI = {
     return data;
   },
 
-  async register(email, fullName, password) {
-    return request("/register", "POST", {
-      email,
-      full_name: fullName,
-      password
-    });
-  },
-
   changePassword(currentPassword, newPassword, confirmNewPassword) {
     return request("/auth/change-password", "PUT", {
       current_password: currentPassword,
