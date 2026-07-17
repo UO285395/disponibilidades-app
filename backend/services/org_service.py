@@ -13,7 +13,7 @@ términos internos de diseño.
 
 from datetime import datetime
 
-from sqlalchemy import inspect, text, or_
+from sqlalchemy import inspect, text, or_, func
 from sqlalchemy.orm import Session
 
 import models
@@ -516,7 +516,28 @@ def delete_unit(db: Session, unit: OrgUnit) -> dict:
     return {"moved_users": moved_users or 0, "moved_events": moved_events or 0}
 
 
-def serialize_unit(db: Session, unit: OrgUnit, include_counts: bool = False) -> dict:
+def bulk_unit_counts(db: Session, unit_ids: list[int]) -> tuple[dict, dict]:
+    """Personas e hijas por unidad en 2 consultas agregadas, en vez de 2 por
+    unidad al serializar el árbol."""
+    if not unit_ids:
+        return {}, {}
+    members = dict(
+        db.query(User.org_unit_id, func.count())
+        .filter(User.org_unit_id.in_(unit_ids))
+        .group_by(User.org_unit_id)
+        .all()
+    )
+    children = dict(
+        db.query(OrgUnit.parent_id, func.count())
+        .filter(OrgUnit.parent_id.in_(unit_ids))
+        .group_by(OrgUnit.parent_id)
+        .all()
+    )
+    return members, children
+
+
+def serialize_unit(db: Session, unit: OrgUnit, include_counts: bool = False,
+                   counts: tuple[dict, dict] | None = None) -> dict:
     data = {
         "id": unit.id,
         "name": unit.name,
@@ -528,8 +549,13 @@ def serialize_unit(db: Session, unit: OrgUnit, include_counts: bool = False) -> 
         "path": unit.path,
     }
     if include_counts:
-        data["member_count"] = db.query(User).filter(User.org_unit_id == unit.id).count()
-        data["child_count"] = db.query(OrgUnit).filter(OrgUnit.parent_id == unit.id).count()
+        if counts is not None:
+            members, children = counts
+            data["member_count"] = members.get(unit.id, 0)
+            data["child_count"] = children.get(unit.id, 0)
+        else:
+            data["member_count"] = db.query(User).filter(User.org_unit_id == unit.id).count()
+            data["child_count"] = db.query(OrgUnit).filter(OrgUnit.parent_id == unit.id).count()
     return data
 
 
@@ -537,8 +563,39 @@ def serialize_unit(db: Session, unit: OrgUnit, include_counts: bool = False) -> 
 # MOTOR DE AUTORIDAD (¿puedo gestionar esta unidad?)
 # =========================================================
 
+# ---------------------------------------------------------
+# Caché por petición
+# ---------------------------------------------------------
+# La sesión de SQLAlchemy vive exactamente una petición (get_db la crea y la
+# cierra), así que `db.info` es una caché natural con ese mismo alcance. Es lo
+# que evita el N+1: sin esto, comprobar permisos de 60 usuarios re-consultaba
+# las asignaciones del admin 60 veces.
+
+def _request_cache(db: Session) -> dict:
+    return db.info.setdefault("_org_cache", {})
+
+
+def invalidate_authority_cache(db: Session) -> None:
+    """A llamar tras cambiar asignaciones de admin dentro de una misma petición."""
+    _request_cache(db).pop("roots", None)
+
+
+def unit_by_id(db: Session, unit_id: int | None) -> OrgUnit | None:
+    """Unidad por id, cacheada por petición. Las unidades se consultan en bucles
+    (una vez por evento/usuario) y siempre son las mismas pocas."""
+    if unit_id is None:
+        return None
+    cache = _request_cache(db).setdefault("units", {})
+    if unit_id not in cache:
+        cache[unit_id] = db.query(OrgUnit).get(unit_id)
+    return cache[unit_id]
+
+
 def get_root_unit(db: Session) -> OrgUnit | None:
-    return db.query(OrgUnit).filter(OrgUnit.parent_id.is_(None)).first()
+    cache = _request_cache(db)
+    if "root" not in cache:
+        cache["root"] = db.query(OrgUnit).filter(OrgUnit.parent_id.is_(None)).first()
+    return cache["root"]
 
 
 def unit_id_for_legacy_domain(db: Session, domain: str | None) -> int | None:
@@ -592,19 +649,29 @@ def can_manage_legacy_domain(db: Session, admin: User, domain: str | None) -> bo
 
 def authorized_root_units(db: Session, admin: User) -> list[OrgUnit]:
     """Unidades con AdminAssignment directa del admin (sus raíces de autoridad).
-    Superadmin ostenta implícitamente la raíz."""
+    Superadmin ostenta implícitamente la raíz.
+
+    Cacheado por petición: se llama dentro de bucles (una vez por usuario/registro
+    a comprobar) y sin caché era la causa principal de la lentitud.
+    """
+    cache = _request_cache(db).setdefault("roots", {})
+    if admin.id in cache:
+        return cache[admin.id]
+
     if admin.role == "superadmin":
         root = get_root_unit(db)
-        return [root] if root else []
-    unit_ids = [
-        a.org_unit_id for a in db.query(AdminAssignment).filter(
-            AdminAssignment.user_id == admin.id,
-            AdminAssignment.is_active == 1,
-        ).all()
-    ]
-    if not unit_ids:
-        return []
-    return db.query(OrgUnit).filter(OrgUnit.id.in_(unit_ids)).all()
+        result = [root] if root else []
+    else:
+        unit_ids = [
+            a.org_unit_id for a in db.query(AdminAssignment).filter(
+                AdminAssignment.user_id == admin.id,
+                AdminAssignment.is_active == 1,
+            ).all()
+        ]
+        result = db.query(OrgUnit).filter(OrgUnit.id.in_(unit_ids)).all() if unit_ids else []
+
+    cache[admin.id] = result
+    return result
 
 
 def can_manage_unit(db: Session, admin: User, target_unit_id: int | None) -> bool:
@@ -614,7 +681,7 @@ def can_manage_unit(db: Session, admin: User, target_unit_id: int | None) -> boo
         return True
     if target_unit_id is None:
         return False
-    target = db.query(OrgUnit).get(target_unit_id)
+    target = unit_by_id(db, target_unit_id)
     if target is None:
         return False
     for root in authorized_root_units(db, admin):
@@ -625,7 +692,7 @@ def can_manage_unit(db: Session, admin: User, target_unit_id: int | None) -> boo
 
 def subtree_unit_ids(db: Session, unit_id: int) -> list[int]:
     """IDs de una unidad y de todas las que dependen de ella (su rama)."""
-    unit = db.query(OrgUnit).get(unit_id)
+    unit = unit_by_id(db, unit_id)
     if unit is None or not unit.path:
         return []
     rows = db.query(OrgUnit.id).filter(OrgUnit.path.like(f"{unit.path}%")).all()
@@ -640,20 +707,22 @@ def can_manage_user(db: Session, admin: User, target_user: User) -> bool:
 
 def authorized_subtree_unit_ids(db: Session, admin: User) -> list[int] | None:
     """IDs de todas las unidades dentro de la autoridad del admin. None =
-    sin restricción (superadmin)."""
+    sin restricción (superadmin). Cacheado por petición."""
     if admin.role == "superadmin":
         return None
+
+    cache = _request_cache(db).setdefault("subtree", {})
+    if admin.id in cache:
+        return cache[admin.id]
+
     roots = authorized_root_units(db, admin)
-    if not roots:
-        return []
-    clauses = []
-    for r in roots:
-        if r.path:
-            clauses.append(OrgUnit.path.like(f"{r.path}%"))
+    clauses = [OrgUnit.path.like(f"{r.path}%") for r in roots if r.path]
     if not clauses:
+        cache[admin.id] = []
         return []
-    units = db.query(OrgUnit.id).filter(or_(*clauses)).all()
-    return [u.id for u in units]
+    result = [u.id for u in db.query(OrgUnit.id).filter(or_(*clauses)).all()]
+    cache[admin.id] = result
+    return result
 
 
 # =========================================================
@@ -708,7 +777,7 @@ def set_content_distribution_targets(db: Session, content_type: str, content_id:
 
 def reach_root_units(db: Session, owning_unit_id: int, distribution_mode: str,
                      content_type: str, content_id: int) -> tuple[OrgUnit | None, list[OrgUnit]]:
-    owning = db.query(OrgUnit).get(owning_unit_id) if owning_unit_id else None
+    owning = unit_by_id(db, owning_unit_id)
     targets: list[OrgUnit] = []
     if distribution_mode == "custom":
         target_ids = [
@@ -761,6 +830,15 @@ FEATURE_COLUMN = {
 }
 
 
+def all_policies(db: Session) -> list[DomainPolicy]:
+    """Todas las políticas, cargadas UNA vez por petición. Antes se recargaba la
+    tabla entera en cada comprobación de módulo (8 veces solo en /me)."""
+    cache = _request_cache(db)
+    if "policies" not in cache:
+        cache["policies"] = db.query(DomainPolicy).all()
+    return cache["policies"]
+
+
 def feature_decision_for_unit(db: Session, unit_id: int | None, feature: str) -> bool | None:
     """Resuelve un módulo recorriendo la cadena de la unidad (ella misma primero,
     luego sus superiores hasta la raíz). Gana la política más específica.
@@ -772,7 +850,7 @@ def feature_decision_for_unit(db: Session, unit_id: int | None, feature: str) ->
     if not column_name or unit_id is None:
         return None
 
-    unit = db.query(OrgUnit).get(unit_id)
+    unit = unit_by_id(db, unit_id)
     if unit is None or not unit.path:
         return None
 
@@ -781,8 +859,7 @@ def feature_decision_for_unit(db: Session, unit_id: int | None, feature: str) ->
         return None
 
     policies = {
-        p.org_unit_id: p for p in
-        db.query(DomainPolicy).filter(DomainPolicy.org_unit_id.in_(chain)).all()
+        p.org_unit_id: p for p in all_policies(db) if p.org_unit_id is not None
     }
     for candidate_id in chain:
         policy = policies.get(candidate_id)
@@ -843,7 +920,19 @@ def log_drill_down(db: Session, admin: User, target_unit_id: int, module: str):
 # =========================================================
 
 def org_units_for_province(db: Session, province_id: int) -> list[int]:
-    """IDs de unidades cuyo ámbito territorial incluye la provincia dada."""
+    """IDs de unidades cuyo ámbito territorial incluye la provincia dada.
+
+    Cacheado por petición: el filtro público lo consulta una vez por evento y
+    con muchos eventos se convertía en cientos de consultas repetidas."""
+    cache = _request_cache(db).setdefault("province_units", {})
+    if province_id in cache:
+        return cache[province_id]
+    result = _org_units_for_province_uncached(db, province_id)
+    cache[province_id] = result
+    return result
+
+
+def _org_units_for_province_uncached(db: Session, province_id: int) -> list[int]:
     province = db.query(Province).get(province_id)
     if not province:
         return []
@@ -884,7 +973,7 @@ def event_matches_province(db: Session, event, province_id: int) -> bool:
     if owning_id is None:
         # Sin unidad: no filtrar (comportamiento visitante histórico).
         return True
-    owning = db.query(OrgUnit).get(owning_id)
+    owning = unit_by_id(db, owning_id)
     if owning is None:
         return True
     mode = getattr(event, "distribution_mode", None) or "unit_only"
@@ -897,7 +986,7 @@ def event_matches_province(db: Session, event, province_id: int) -> bool:
     if not province_unit_ids:
         return False
     for uid in province_unit_ids:
-        vunit = db.query(OrgUnit).get(uid)
+        vunit = unit_by_id(db, uid)
         if unit_in_reach(db, vunit, owning_id, mode, "event", event.id):
             return True
     return False

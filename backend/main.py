@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, Body, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, inspect, or_, text
 from sqlalchemy.exc import IntegrityError
 from jose import jwt, JWTError
@@ -297,6 +297,28 @@ def require_superadmin(user: User):
 # =========================================================
 # LIMPIEZA AUTOMÁTICA CENTRALIZADA
 # =========================================================
+_last_cleanup_at: datetime | None = None
+_CLEANUP_MIN_INTERVAL_SECONDS = 600
+
+
+def maybe_cleanup_expired_data(db: Session):
+    """Ejecuta la limpieza como mucho una vez cada 10 minutos.
+
+    Antes se llamaba en CADA lectura del calendario, así que una simple consulta
+    hacía borrados y un commit. Sacarlo del camino de lectura evita escrituras
+    innecesarias y acelera el refresco.
+    """
+    global _last_cleanup_at
+    now = datetime.utcnow()
+    if _last_cleanup_at is not None and (now - _last_cleanup_at).total_seconds() < _CLEANUP_MIN_INTERVAL_SECONDS:
+        return
+    _last_cleanup_at = now
+    try:
+        cleanup_expired_data(db)
+    except Exception as exc:
+        print(f"⚠️ Limpieza de datos caducados fallida: {exc}")
+
+
 def cleanup_expired_data(db: Session):
     today = datetime.utcnow().date()
     today_str = today.strftime("%Y-%m-%d")
@@ -313,6 +335,12 @@ def cleanup_expired_data(db: Session):
         db.query(Event)\
           .filter(Event.id.in_(expired_event_ids))\
           .delete(synchronize_session=False)
+
+    # --- Disponibilidades antiguas ---
+    availability_limit = (today - timedelta(days=14)).strftime("%Y-%m-%d")
+    db.query(Availability)\
+      .filter(Availability.date < availability_limit)\
+      .delete(synchronize_session=False)
 
     db.commit()
 
@@ -664,7 +692,9 @@ def org_tree(
         units = db.query(OrgUnit).filter(OrgUnit.id.in_(subtree_ids)).order_by(OrgUnit.path).all()
     else:
         units = []
-    return [org_service.serialize_unit(db, u, include_counts=True) for u in units]
+    # Conteos en bloque: 2 consultas para todo el árbol en vez de 2 por unidad.
+    counts = org_service.bulk_unit_counts(db, [u.id for u in units])
+    return [org_service.serialize_unit(db, u, include_counts=True, counts=counts) for u in units]
 
 
 @app.get("/admin/org/aggregate")
@@ -1063,8 +1093,13 @@ def admin_list_users(
             .all()
         ) if subtree_ids else []
     else:
-        all_users = db.query(User).order_by(func.lower(User.email)).all()
-        users = [u for u in all_users if _can_admin_manage_user(admin, u, db)]
+        # Resolver el ámbito en SQL en vez de comprobar permisos usuario a
+        # usuario: antes esto disparaba ~3 consultas por usuario listado.
+        scope_ids = org_service.authorized_subtree_unit_ids(db, admin)
+        query = db.query(User)
+        if scope_ids is not None:
+            query = query.filter(User.org_unit_id.in_(scope_ids)) if scope_ids else query.filter(False)
+        users = query.order_by(func.lower(User.email)).all()
 
     unit_names = {u.id: u.name for u in db.query(OrgUnit).all()}
 
@@ -1909,59 +1944,82 @@ def _visible_events_for_user(
     return filtered
 
 
-def _serialize_event_with_counts(db: Session, e: Event) -> dict:
-    yes_count = (
-        db.query(EventResponse)
-        .filter(
-            EventResponse.event_id == e.id,
-            func.lower(EventResponse.answer).in_(["yes", "si"]),
-        )
-        .count()
+def _empty_counts() -> dict:
+    return {"yes": 0, "no": 0, "companions": 0, "guest_yes": 0, "guest_no": 0, "guest_companions": 0}
+
+
+def _bulk_event_counts(db: Session, event_ids: list[int]) -> dict[int, dict]:
+    """Conteos de todos los eventos en 3 consultas agregadas, en vez de ~6 por
+    evento. Con 40 eventos eso eran 240 viajes a la base de datos."""
+    counts = {eid: _empty_counts() for eid in event_ids}
+    if not event_ids:
+        return counts
+
+    # Militantes: sí/no por evento
+    rows = (
+        db.query(EventResponse.event_id, func.lower(EventResponse.answer), func.count())
+        .filter(EventResponse.event_id.in_(event_ids))
+        .group_by(EventResponse.event_id, func.lower(EventResponse.answer))
+        .all()
     )
+    for eid, answer, n in rows:
+        if eid not in counts:
+            continue
+        if answer in ("yes", "si"):
+            counts[eid]["yes"] += n
+        elif answer == "no":
+            counts[eid]["no"] += n
 
-    no_count = (
-        db.query(EventResponse)
-        .filter(
-            EventResponse.event_id == e.id,
-            func.lower(EventResponse.answer) == "no",
-        )
-        .count()
+    # Militantes: acompañantes por evento
+    rows = (
+        db.query(EventCompanion.event_id, func.coalesce(func.sum(EventCompanion.count), 0))
+        .filter(EventCompanion.event_id.in_(event_ids))
+        .group_by(EventCompanion.event_id)
+        .all()
     )
+    for eid, total in rows:
+        if eid in counts:
+            counts[eid]["companions"] = int(total or 0)
 
-    companions_total = (
-        db.query(func.coalesce(func.sum(EventCompanion.count), 0))
-        .filter(EventCompanion.event_id == e.id)
-        .scalar()
-    ) or 0
+    # Visitantes: sí/no y acompañantes por evento
+    rows = (
+        db.query(
+            GuestResponse.event_id,
+            func.lower(GuestResponse.answer),
+            func.count(),
+            func.coalesce(func.sum(GuestResponse.companions), 0),
+        )
+        .filter(GuestResponse.event_id.in_(event_ids))
+        .group_by(GuestResponse.event_id, func.lower(GuestResponse.answer))
+        .all()
+    )
+    for eid, answer, n, comp in rows:
+        if eid not in counts:
+            continue
+        if answer in ("yes", "si"):
+            counts[eid]["guest_yes"] += n
+            counts[eid]["guest_companions"] += int(comp or 0)
+        elif answer == "no":
+            counts[eid]["guest_no"] += n
 
+    return counts
+
+
+def _serialize_event_with_counts(db: Session, e: Event, counts: dict | None = None) -> dict:
+    # `counts` precalculado por _bulk_event_counts al serializar listas. Si no
+    # viene (endpoints de un solo evento), se calcula para ese evento.
+    if counts is None:
+        counts = _bulk_event_counts(db, [e.id])[e.id]
+
+    yes_count = counts["yes"]
+    no_count = counts["no"]
+    companions_total = counts["companions"]
     attendees_total = yes_count + companions_total
 
-    # Respuestas de visitantes (sin cuenta). Se contabilizan aparte de las de
-    # militantes para que el admin pueda distinguir unas de otras.
-    guest_yes_count = (
-        db.query(GuestResponse)
-        .filter(
-            GuestResponse.event_id == e.id,
-            func.lower(GuestResponse.answer).in_(["yes", "si"]),
-        )
-        .count()
-    )
-    guest_no_count = (
-        db.query(GuestResponse)
-        .filter(
-            GuestResponse.event_id == e.id,
-            func.lower(GuestResponse.answer) == "no",
-        )
-        .count()
-    )
-    guest_companions_total = (
-        db.query(func.coalesce(func.sum(GuestResponse.companions), 0))
-        .filter(
-            GuestResponse.event_id == e.id,
-            func.lower(GuestResponse.answer).in_(["yes", "si"]),
-        )
-        .scalar()
-    ) or 0
+    # Visitantes sin cuenta: se contabilizan aparte de los militantes.
+    guest_yes_count = counts["guest_yes"]
+    guest_no_count = counts["guest_no"]
+    guest_companions_total = counts["guest_companions"]
     guest_attendees_total = guest_yes_count + guest_companions_total
 
     return {
@@ -2020,7 +2078,9 @@ def list_events(
     requested_visibilities = _parse_requested_visibilities(visibility)
     filtered = _visible_events_for_user(events, user, user_domain, requested_visibilities, db=db, province_id=province_id)
 
-    return [_serialize_event_with_counts(db, e) for e in filtered]
+    # Conteos de todos los eventos en bloque: 3 consultas en vez de ~6 por evento.
+    counts = _bulk_event_counts(db, [e.id for e in filtered])
+    return [_serialize_event_with_counts(db, e, counts.get(e.id)) for e in filtered]
 
 
 @app.get("/events/{event_id}/public")
@@ -2644,32 +2704,31 @@ def admin_all_availability(
     if not _is_feature_enabled(db, _get_domain(admin.email), "availabilities", admin.role, set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
         raise HTTPException(403, "Disponibilidades deshabilitadas para tu dominio")
 
-    cleanup_expired_data(db)
-
-    limit = (datetime.utcnow().date() - timedelta(days=14)).strftime("%Y-%m-%d")
-
-    db.query(Availability)\
-      .filter(Availability.date < limit)\
-      .delete(synchronize_session=False)
-
-    db.commit()
+    # La limpieza ya no ocurre en cada lectura (ver maybe_cleanup_expired_data):
+    # leer el calendario no debe provocar borrados ni commits.
+    maybe_cleanup_expired_data(db)
 
     # Filtro por unidad del organigrama: incluye toda su rama (por niveles),
     # sustituyendo al antiguo filtro por el dominio del email.
-    subtree_ids = None
+    # El ámbito se resuelve en SQL (una consulta con join) en vez de comprobar
+    # permisos franja a franja, que disparaba ~4 consultas por registro.
+    allowed_unit_ids = org_service.authorized_subtree_unit_ids(db, admin)  # None = superadmin
     if unit_id is not None:
         if not org_service.can_manage_unit(db, admin, unit_id):
             raise HTTPException(403, "No autorizado sobre esa unidad")
-        subtree_ids = set(org_service.subtree_unit_ids(db, unit_id))
+        requested = set(org_service.subtree_unit_ids(db, unit_id))
+        allowed_unit_ids = list(requested if allowed_unit_ids is None else requested.intersection(allowed_unit_ids))
 
-    all_items = db.query(Availability).all()
-    items = []
-    for a in all_items:
-        if not _can_admin_manage_user(admin, a.user, db):
-            continue
-        if subtree_ids is not None and a.user.org_unit_id not in subtree_ids:
-            continue
-        items.append(a)
+    # joinedload: sin él, leer a.user en la serialización volvería a consultar
+    # por cada franja.
+    query = (
+        db.query(Availability)
+        .join(User, Availability.user_id == User.id)
+        .options(joinedload(Availability.user))
+    )
+    if allowed_unit_ids is not None:
+        query = query.filter(User.org_unit_id.in_(allowed_unit_ids)) if allowed_unit_ids else query.filter(False)
+    items = query.all()
 
     unit_names = {u.id: u.name for u in db.query(models.OrgUnit).all()}
 
@@ -3462,10 +3521,11 @@ def _matches_policy_target(storage_key: str, domain: str, tags: set[str]) -> boo
 def _get_applicable_policies(db: Session, domain: str, tags: set[str] | None = None):
     normalized_domain = (domain or "").strip().lower()
     normalized_tags = set(tags or set())
-    all_policies = db.query(models.DomainPolicy).all()
+    # Las políticas se cargan una sola vez por petición (antes se releía la tabla
+    # entera en cada comprobación de módulo).
     return [
         policy
-        for policy in all_policies
+        for policy in org_service.all_policies(db)
         if _matches_policy_target(policy.domain, normalized_domain, normalized_tags)
     ]
 
