@@ -10,6 +10,13 @@ pluginManagement {
 	}
 }
 
+// Los plugins de Capacitor 8 (filesystem/share) exigen un toolchain de Java 21.
+// Este resolver permite a Gradle descargar automaticamente el JDK 21 que
+// necesite si no esta instalado, sin depender de la version del JDK local.
+plugins {
+	id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
+
 include ':app'
 include ':capacitor-cordova-android-plugins'
 project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
