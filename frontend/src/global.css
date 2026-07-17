@@ -1,0 +1,37 @@
+/* Ajustes globales de accesibilidad y experiencia táctil (mobile-first). */
+
+:root {
+  -webkit-tap-highlight-color: transparent; /* sin flash gris al tocar */
+}
+
+html,
+body {
+  margin: 0;
+  overscroll-behavior-y: contain; /* evita el "pull to refresh" accidental en la APK */
+}
+
+/* Material recomienda un objetivo táctil mínimo de ~48dp. En pantallas táctiles
+   (punteros gruesos) garantizamos que ningún control interactivo baje de 44px,
+   aunque el componente use un tamaño pequeño. */
+@media (pointer: coarse) {
+  button,
+  a[role="button"],
+  [role="tab"],
+  .mantine-Button-root,
+  .mantine-ActionIcon-root {
+    min-height: 44px;
+  }
+}
+
+/* Foco visible y claro para navegación por teclado (accesibilidad). */
+:focus-visible {
+  outline-offset: 2px;
+}
+
+/* Respeta a quien pide menos animación. */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
