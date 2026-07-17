@@ -139,4 +139,85 @@ export const adminAPI = {
   sendNotification(payload) {
     return request("/admin/notifications/send", "POST", payload);
   },
+
+  // ---- Organigrama / estructura ----
+  orgScope() {
+    return request("/me/org-scope");
+  },
+
+  orgLevelTypes() {
+    return request("/admin/org/level-types");
+  },
+
+  orgTree() {
+    return request("/admin/org/tree");
+  },
+
+  orgAggregate(unitId = null) {
+    const qs = unitId ? `?unit_id=${unitId}` : "";
+    return request(`/admin/org/aggregate${qs}`);
+  },
+
+  orgCreateUnit(payload) {
+    return request("/admin/org/units", "POST", payload);
+  },
+
+  orgRenameUnit(unitId, name) {
+    return request(`/admin/org/units/${unitId}`, "PUT", { name });
+  },
+
+  orgMoveUnit(unitId, newParentId) {
+    return request(`/admin/org/units/${unitId}/move`, "POST", { new_parent_id: newParentId });
+  },
+
+  orgDeactivateUnit(unitId) {
+    return request(`/admin/org/units/${unitId}/deactivate`, "POST");
+  },
+
+  orgReactivateUnit(unitId) {
+    return request(`/admin/org/units/${unitId}/reactivate`, "POST");
+  },
+
+  orgUnitAdmins(unitId) {
+    return request(`/admin/org/units/${unitId}/admins`);
+  },
+
+  orgGrantAdmin(unitId, userId) {
+    return request(`/admin/org/units/${unitId}/admins`, "POST", { user_id: userId });
+  },
+
+  orgRevokeAdmin(assignmentId) {
+    return request(`/admin/org/assignments/${assignmentId}`, "DELETE");
+  },
+
+  orgUnitTerritories(unitId) {
+    return request(`/admin/org/units/${unitId}/territories`);
+  },
+
+  orgAddTerritory(unitId, territoryType, territoryId) {
+    return request(`/admin/org/units/${unitId}/territories`, "POST", {
+      territory_type: territoryType,
+      territory_id: territoryId,
+    });
+  },
+
+  orgDeleteTerritory(territoryRowId) {
+    return request(`/admin/org/territories/${territoryRowId}`, "DELETE");
+  },
+
+  geoCommunities() {
+    return request("/admin/geo/communities");
+  },
+
+  geoProvinces() {
+    return request("/geo/provinces");
+  },
+
+  geoCities(provinceId) {
+    return request(`/admin/geo/cities?province_id=${provinceId}`);
+  },
+
+  usersInUnit(unitId) {
+    return request(`/admin/users?unit_id=${unitId}`);
+  },
 };

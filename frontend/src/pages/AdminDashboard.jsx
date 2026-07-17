@@ -11,6 +11,8 @@ import AdminDomainPolicies from "../components/AdminDomainPolicies.jsx";
 import AdminCensus from "../components/AdminCensus.jsx";
 import AdminNotifications from "../components/AdminNotifications.jsx";
 import AdminSurveys from "../components/AdminSurveys.jsx";
+import AdminOrgStructure from "../components/AdminOrgStructure.jsx";
+import OrgScopeBar from "../components/OrgScopeBar.jsx";
 import SessionExpiredModal from "../components/SessionExpiredModal.jsx";
 
 export default function AdminDashboard() {
@@ -30,6 +32,7 @@ export default function AdminDashboard() {
     if (u.role === "superadmin" || u.census_enabled) values.push("censo");
     if (u.role === "superadmin" || u.surveys_enabled) values.push("surveys");
     if (u.role === "superadmin" || u.notifications_enabled) values.push("notifications");
+    values.push("organigrama");
     return values;
   }, []);
 
@@ -68,6 +71,7 @@ export default function AdminDashboard() {
   const canCensus = Boolean(user && (user.role === "superadmin" || user.census_enabled));
   const canSurveys = Boolean(user && (user.role === "superadmin" || user.surveys_enabled));
   const canNotifications = Boolean(user && (user.role === "superadmin" || user.notifications_enabled));
+  const canOrg = Boolean(user && (user.role === "admin" || user.role === "superadmin"));
 
   const tabDefs = useMemo(
     () => [
@@ -79,8 +83,9 @@ export default function AdminDashboard() {
       canCensus ? { value: "censo", label: "Censo" } : null,
       canSurveys ? { value: "surveys", label: "Encuestas" } : null,
       canNotifications ? { value: "notifications", label: "Notificaciones" } : null,
+      canOrg ? { value: "organigrama", label: "Organigrama" } : null,
     ].filter(Boolean),
-    [canEvents, canAvailabilities, canSpaces, canUsers, canDomainPolicies, canCensus, canSurveys, canNotifications]
+    [canEvents, canAvailabilities, canSpaces, canUsers, canDomainPolicies, canCensus, canSurveys, canNotifications, canOrg]
   );
 
   const storageKey = user ? `admin-tabs-order-${user.id}` : null;
@@ -151,6 +156,8 @@ export default function AdminDashboard() {
         </Group>
       </Group>
 
+      <OrgScopeBar />
+
       <Tabs mt="lg" value={activeTab ?? defaultTab ?? undefined} onChange={setActiveTab}>
         <Tabs.List>
           {renderedTabOrder.map((value) => {
@@ -216,6 +223,12 @@ export default function AdminDashboard() {
         {canUsers && (
           <Tabs.Panel value="users" pt="xl">
             <AdminUsers currentUser={user} />
+          </Tabs.Panel>
+        )}
+
+        {canOrg && (
+          <Tabs.Panel value="organigrama" pt="xl">
+            <AdminOrgStructure />
           </Tabs.Panel>
         )}
 

@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Card, Button, TextInput, Title, Textarea, Text, Group, Select, Badge } from "@mantine/core";
+import { Card, Button, TextInput, Title, Textarea, Text, Group, Select, Badge, MultiSelect } from "@mantine/core";
 import { adminAPI } from "../api/adminApi.js";
 import { useNavigate } from "react-router-dom";
 
 const VISIBILITY_OPTIONS = [
   { value: "internal", label: "Interno (tu dominio, o el colectivo que indiques abajo)" },
   { value: "public", label: "Público (visible sin cuenta)" },
+];
+
+const DISTRIBUTION_OPTIONS = [
+  { value: "unit_only", label: "Solo esta unidad" },
+  { value: "subtree", label: "Esta unidad y todas sus dependientes" },
+  { value: "custom", label: "Unidades específicas" },
 ];
 
 const EVENT_TYPE_OPTIONS = [
@@ -30,6 +36,10 @@ export default function AdminEvents() {
   const [eventType, setEventType] = useState("participativo");
   const [location, setLocation] = useState("");
   const [externalUrl, setExternalUrl] = useState("");
+  const [orgUnits, setOrgUnits] = useState([]);
+  const [orgUnitId, setOrgUnitId] = useState(null);
+  const [distributionMode, setDistributionMode] = useState("unit_only");
+  const [targetUnitIds, setTargetUnitIds] = useState([]);
   const [editingEventId, setEditingEventId] = useState(null);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
@@ -63,6 +73,18 @@ export default function AdminEvents() {
   useEffect(() => {
     mountedRef.current = true;
     reload();
+    // Cargar el árbol de unidades que el admin puede administrar (para elegir
+    // unidad propietaria y modo de distribución del evento).
+    adminAPI.orgTree()
+      .then((units) => {
+        if (!mountedRef.current) return;
+        const active = units.filter((u) => u.is_active);
+        setOrgUnits(active);
+        if (active.length) {
+          setOrgUnitId((prev) => (prev === null ? String(active[0].id) : prev));
+        }
+      })
+      .catch(() => {});
     return () => {
       mountedRef.current = false;
     };
@@ -104,6 +126,9 @@ export default function AdminEvents() {
         event_type: eventType,
         location: location || null,
         external_url: externalUrl || null,
+        org_unit_id: orgUnitId ? Number(orgUnitId) : null,
+        distribution_mode: distributionMode,
+        target_unit_ids: distributionMode === "custom" ? targetUnitIds.map(Number) : null,
       });
 
       setTitle("");
@@ -115,6 +140,8 @@ export default function AdminEvents() {
       setEventType("participativo");
       setLocation("");
       setExternalUrl("");
+      setDistributionMode("unit_only");
+      setTargetUnitIds([]);
       await reload();
     } catch (e) {
       console.error("Error creando evento", e);
@@ -267,6 +294,43 @@ export default function AdminEvents() {
           onChange={(e) => setExternalUrl(e.target.value)}
           mb="sm"
         />
+
+        {orgUnits.length > 0 && (
+          <>
+            <Select
+              label="Unidad que organiza"
+              description="Unidad del organigrama a la que pertenece el evento."
+              data={orgUnits.map((u) => ({ value: String(u.id), label: `${u.name} · ${u.level_label}` }))}
+              value={orgUnitId}
+              onChange={setOrgUnitId}
+              searchable
+              allowDeselect={false}
+              mb="sm"
+            />
+            <Select
+              label="Distribución"
+              description="A quién llega el evento dentro de la estructura."
+              data={DISTRIBUTION_OPTIONS}
+              value={distributionMode}
+              onChange={(v) => setDistributionMode(v || "unit_only")}
+              allowDeselect={false}
+              mb="sm"
+            />
+            {distributionMode === "custom" && (
+              <MultiSelect
+                label="Unidades destino"
+                description="Deben depender de la unidad que organiza."
+                data={orgUnits
+                  .filter((u) => orgUnitId && u.path && u.id !== Number(orgUnitId))
+                  .map((u) => ({ value: String(u.id), label: `${u.name} · ${u.level_label}` }))}
+                value={targetUnitIds}
+                onChange={setTargetUnitIds}
+                searchable
+                mb="sm"
+              />
+            )}
+          </>
+        )}
 
         <Button onClick={createEvent} loading={creating} disabled={creating}>
           Crear evento
