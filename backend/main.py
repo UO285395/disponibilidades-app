@@ -191,12 +191,74 @@ org_service.ensure_org_hierarchy_schema_compatibility(engine, SessionLocal)
 # =========================================================
 # CONFIG JWT
 # =========================================================
-SECRET_KEY = "MI_CLAVE_SECRETA_SUPER_LARGA_123456"
+# La clave de firma NUNCA debe estar en el código: quien lea el repositorio (o
+# su historial) podría firmarse un token para cualquier usuario, incluido un
+# superadmin, sin conocer ninguna contraseña. Se lee del entorno.
+#
+# En producción se exige definirla: es preferible que el arranque falle de forma
+# ruidosa a quedarse funcionando con una clave conocida.
+SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
+_IS_PRODUCTION = bool(os.getenv("DATABASE_URL"))
+
+if not SECRET_KEY:
+    if _IS_PRODUCTION:
+        raise RuntimeError(
+            "Falta la variable de entorno SECRET_KEY. Define una clave aleatoria "
+            "(p. ej. `python -c \"import secrets; print(secrets.token_urlsafe(64))\"`) "
+            "en las variables del servicio antes de desplegar."
+        )
+    # Desarrollo local: clave efímera distinta en cada arranque. Obliga a
+    # volver a iniciar sesión al reiniciar, pero evita cualquier valor por
+    # defecto inseguro que pudiera acabar en producción por descuido.
+    SECRET_KEY = secrets.token_urlsafe(64)
+    print("⚠️ SECRET_KEY no definida: usando una clave temporal (solo desarrollo local).")
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 días
 
 auth_scheme = HTTPBearer(auto_error=False)
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+
+
+# =========================================================
+# FRENO A LA FUERZA BRUTA EN EL LOGIN
+# =========================================================
+# La API es pública (la usa la APK repartida), así que sin esto cualquiera puede
+# probar contraseñas de forma ilimitada contra el correo de un militante.
+# Es un freno en memoria: se pierde al reiniciar y no se comparte entre varias
+# instancias, pero encarece muchísimo un ataque frente a no tener nada.
+_login_failures: dict[str, list[datetime]] = {}
+_LOGIN_MAX_FAILURES = 8
+_LOGIN_WINDOW = timedelta(minutes=5)
+
+
+def _login_key(email: str | None, request: Request) -> str:
+    ip = request.client.host if request and request.client else "no-ip"
+    return f"{ip}|{(email or '').strip().lower()}"
+
+
+def _recent_failures(key: str) -> list[datetime]:
+    cutoff = datetime.utcnow() - _LOGIN_WINDOW
+    recent = [t for t in _login_failures.get(key, []) if t > cutoff]
+    if recent:
+        _login_failures[key] = recent
+    else:
+        _login_failures.pop(key, None)
+    return recent
+
+
+def _ensure_login_allowed(key: str):
+    if len(_recent_failures(key)) >= _LOGIN_MAX_FAILURES:
+        raise HTTPException(429, "Demasiados intentos fallidos. Espera unos minutos e inténtalo de nuevo.")
+
+
+def _record_login_failure(key: str):
+    # Poda periódica: evita que el diccionario crezca sin límite si alguien
+    # prueba con muchos correos/IPs distintos.
+    if len(_login_failures) > 5000:
+        for stale_key in list(_login_failures.keys()):
+            _recent_failures(stale_key)
+    _login_failures.setdefault(key, []).append(datetime.utcnow())
 
 
 # =========================================================
@@ -547,11 +609,16 @@ def register(data: Register, db: Session = Depends(get_db)):
 
 
 @app.post("/login")
-def login(data: Login, db: Session = Depends(get_db)):
+def login(data: Login, request: Request, db: Session = Depends(get_db)):
+    key = _login_key(data.email, request)
+    _ensure_login_allowed(key)
+
     user = db.query(User).filter(User.email == data.email).first()
     if not user or not verify_password(data.password, user.hashed_password):
+        _record_login_failure(key)
         raise HTTPException(400, "Credenciales incorrectas")
 
+    _login_failures.pop(key, None)
     token = create_token({"sub": str(user.id)})
     return {"access_token": token, "token_type": "bearer"}
 

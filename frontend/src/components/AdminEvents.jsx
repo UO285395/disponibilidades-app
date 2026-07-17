@@ -11,9 +11,9 @@ const VISIBILITY_OPTIONS = [
 ];
 
 const DISTRIBUTION_OPTIONS = [
-  { value: "unit_only", label: "Solo esta unidad" },
-  { value: "subtree", label: "Esta unidad y todas sus dependientes" },
-  { value: "custom", label: "Unidades específicas" },
+  { value: "subtree", label: "Esta estructura y todas sus dependientes" },
+  { value: "unit_only", label: "Solo esta estructura" },
+  { value: "custom", label: "Estructuras específicas" },
 ];
 
 const EVENT_TYPE_OPTIONS = [
