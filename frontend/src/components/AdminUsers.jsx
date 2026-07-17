@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { adminAPI } from "../api/adminApi.js";
+import OrgUnitSelect from "./OrgUnitSelect.jsx";
 import {
   Table,
   Button,
@@ -20,10 +21,13 @@ export default function AdminUsers({ currentUser }) {
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
   const [groupTag, setGroupTag] = useState("");
+  const [newUserUnitId, setNewUserUnitId] = useState(null);
+  const [filterUnitId, setFilterUnitId] = useState(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [tagDrafts, setTagDrafts] = useState({});
   const [modalUserId, setModalUserId] = useState(null);
+  const [moveUser, setMoveUser] = useState(null);
 
   function getGroupTags(user) {
     if (Array.isArray(user?.group_tags)) return user.group_tags;
@@ -35,7 +39,8 @@ export default function AdminUsers({ currentUser }) {
   }
 
   async function reload() {
-    const users = await adminAPI.listUsers();
+    // El filtro por estructura se resuelve en servidor e incluye las inferiores.
+    const users = await adminAPI.listUsers(filterUnitId ? Number(filterUnitId) : null);
     setRows(users);
     setTagDrafts((prev) => {
       const next = { ...prev };
@@ -53,7 +58,7 @@ export default function AdminUsers({ currentUser }) {
 
     (async () => {
       try {
-        const users = await adminAPI.listUsers();
+        const users = await adminAPI.listUsers(filterUnitId ? Number(filterUnitId) : null);
         if (!cancelled) {
           setRows(users);
           setTagDrafts((prev) => {
@@ -76,7 +81,7 @@ export default function AdminUsers({ currentUser }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [filterUnitId]);
 
   async function makeAdmin(id) {
     await adminAPI.makeAdmin(id);
@@ -96,13 +101,19 @@ export default function AdminUsers({ currentUser }) {
       setError("Email, nombre y contraseña son obligatorios");
       return;
     }
+    if (!newUserUnitId) {
+      setError("Selecciona la estructura a la que pertenece el usuario");
+      return;
+    }
 
     try {
+      // La estructura ya no se deduce del email: se indica explícitamente.
       await adminAPI.createUser({
         email: email.trim().toLowerCase(),
         full_name: fullName.trim(),
         password: password,
         group_tags: groupTag.trim() ? [groupTag.trim()] : null,
+        org_unit_id: Number(newUserUnitId),
       });
       setEmail("");
       setFullName("");
@@ -112,6 +123,19 @@ export default function AdminUsers({ currentUser }) {
       await reload();
     } catch (e) {
       setError(e?.message || "Error creando usuario");
+    }
+  }
+
+  async function changeUserUnit(userId, unitId) {
+    setError("");
+    setSuccess("");
+    try {
+      await adminAPI.updateUserOrgUnit(userId, Number(unitId));
+      setMoveUser(null);
+      setSuccess("Usuario movido de estructura");
+      await reload();
+    } catch (e) {
+      setError(e?.message || "No se pudo mover el usuario");
     }
   }
 
@@ -212,6 +236,16 @@ export default function AdminUsers({ currentUser }) {
           mb="sm"
         />
 
+        <OrgUnitSelect
+          label="Estructura"
+          description="Estructura a la que pertenece el usuario. Puedes elegir la tuya o cualquiera que dependa de ella."
+          placeholder="Selecciona una estructura"
+          clearable={false}
+          value={newUserUnitId}
+          onChange={setNewUserUnitId}
+          mb="sm"
+        />
+
         <TextInput
           label="Primera etiqueta (opcional)"
           placeholder="Ej: organizador"
@@ -223,12 +257,23 @@ export default function AdminUsers({ currentUser }) {
         <Button onClick={createUser}>Crear usuario</Button>
       </Card>
 
+      <OrgUnitSelect
+        label="Filtrar por estructura"
+        description="Incluye las estructuras que dependen de la elegida"
+        placeholder="Todo mi ámbito"
+        value={filterUnitId}
+        onChange={setFilterUnitId}
+        mb="md"
+        maw={420}
+      />
+
       <Table highlightOnHover>
         <Table.Thead>
           <Table.Tr>
             <Table.Th>ID</Table.Th>
             <Table.Th>Nombre</Table.Th>
             <Table.Th>Email</Table.Th>
+            <Table.Th>Estructura</Table.Th>
             <Table.Th>Rol</Table.Th>
             <Table.Th>Etiquetas</Table.Th>
             <Table.Th>Acciones</Table.Th>
@@ -240,6 +285,14 @@ export default function AdminUsers({ currentUser }) {
               <Table.Td>{u.id}</Table.Td>
               <Table.Td>{u.full_name}</Table.Td>
               <Table.Td>{u.email}</Table.Td>
+              <Table.Td>
+                <Group gap={4} wrap="nowrap">
+                  <Text size="sm">{u.org_unit_name || "—"}</Text>
+                  <Button size="compact-xs" variant="subtle" onClick={() => setMoveUser(u)}>
+                    Mover
+                  </Button>
+                </Group>
+              </Table.Td>
               <Table.Td>{u.role}</Table.Td>
               <Table.Td>
                 <Group gap="xs">
@@ -322,6 +375,39 @@ export default function AdminUsers({ currentUser }) {
           </Group>
         )}
       </Modal>
+
+      {moveUser && (
+        <MoveUserModal
+          user={moveUser}
+          onClose={() => setMoveUser(null)}
+          onConfirm={(unitId) => changeUserUnit(moveUser.id, unitId)}
+        />
+      )}
     </>
+  );
+}
+
+function MoveUserModal({ user, onClose, onConfirm }) {
+  const [unitId, setUnitId] = useState(user.org_unit_id ? String(user.org_unit_id) : null);
+
+  return (
+    <Modal opened onClose={onClose} title={`Mover a ${user.full_name}`}>
+      <Text size="sm" c="dimmed" mb="sm">
+        Estructura actual: <b>{user.org_unit_name || "—"}</b>. Solo puedes moverlo
+        a tu estructura o a una que dependa de ella.
+      </Text>
+      <OrgUnitSelect
+        label="Nueva estructura"
+        placeholder="Selecciona una estructura"
+        clearable={false}
+        value={unitId}
+        onChange={setUnitId}
+        mb="md"
+      />
+      <Group justify="flex-end">
+        <Button variant="default" onClick={onClose}>Cancelar</Button>
+        <Button disabled={!unitId} onClick={() => onConfirm(unitId)}>Mover</Button>
+      </Group>
+    </Modal>
   );
 }

@@ -1,8 +1,14 @@
 import { request } from "./api.js";
 
 export const adminAPI = {
-  listUsers() {
-    return request("/admin/users");
+  // unitId acota a esa estructura y a las que dependen de ella
+  listUsers(unitId = null) {
+    const qs = unitId ? `?unit_id=${unitId}` : "";
+    return request(`/admin/users${qs}`);
+  },
+
+  updateUserOrgUnit(userId, orgUnitId) {
+    return request(`/admin/users/${userId}/org-unit`, "PUT", { org_unit_id: orgUnitId });
   },
 
   createUser(payload) {

@@ -48,7 +48,7 @@ export default function AdminNotifications() {
     };
 
     if (scope === "colectivo" && !payload.org_unit_id) {
-      alert("Selecciona la unidad destino");
+      alert("Selecciona la estructura destino");
       return;
     }
     if (scope === "users" && payload.user_ids.length === 0) {

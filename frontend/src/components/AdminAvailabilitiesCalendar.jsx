@@ -292,7 +292,7 @@ const weekStart = useMemo(() => {
       <Group align="flex-end" mb="lg" grow>
         <OrgUnitSelect
           label="Ámbito"
-          description="Incluye las unidades que dependen de la elegida"
+          description="Incluye las estructuras que dependen de la elegida"
           placeholder="Todo mi ámbito"
           value={unitId}
           onChange={setUnitId}

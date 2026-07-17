@@ -342,6 +342,10 @@ class AdminUserGroupTagUpdate(BaseModel):
     group_tag: str | None = None
 
 
+class AdminUserOrgUnitUpdate(BaseModel):
+    org_unit_id: int
+
+
 class AdminUserGroupTagAdd(BaseModel):
     tag: str
 
@@ -1046,13 +1050,22 @@ def admin_list_users(
     # cuando quien consulta es un nivel ancestro (no la unidad propia asignada).
     if unit_id is not None:
         if not org_service.can_manage_unit(db, admin, unit_id):
-            raise HTTPException(403, "No autorizado sobre esa unidad")
+            raise HTTPException(403, "No autorizado sobre esa estructura")
         if org_service.requires_drill_down_log(db, admin, unit_id):
             org_service.log_drill_down(db, admin, unit_id, "users")
-        users = db.query(User).filter(User.org_unit_id == unit_id).order_by(func.lower(User.email)).all()
+        # Incluye la estructura elegida y todas las que dependen de ella.
+        subtree_ids = org_service.subtree_unit_ids(db, unit_id)
+        users = (
+            db.query(User)
+            .filter(User.org_unit_id.in_(subtree_ids))
+            .order_by(func.lower(User.email))
+            .all()
+        ) if subtree_ids else []
     else:
         all_users = db.query(User).order_by(func.lower(User.email)).all()
         users = [u for u in all_users if _can_admin_manage_user(admin, u, db)]
+
+    unit_names = {u.id: u.name for u in db.query(OrgUnit).all()}
 
     return [
         {
@@ -1063,6 +1076,7 @@ def admin_list_users(
             "group_tag": u.group_tag,
             "group_tags": _parse_group_tags(u.group_tag),
             "org_unit_id": u.org_unit_id,
+            "org_unit_name": unit_names.get(u.org_unit_id),
         }
         for u in users
     ]
@@ -1094,10 +1108,17 @@ def admin_create_user(
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(400, "Email ya registrado")
 
-    if admin.role != "superadmin":
-        target_domain = _get_domain(email)
-        if not _can_admin_manage_domain(admin, target_domain, db):
-            raise HTTPException(403, "Solo puedes crear usuarios de tu dominio o dominios delegados")
+    # El alcance ya NO se deduce del email: el usuario se crea en la estructura
+    # indicada, que debe estar dentro de la autoridad del admin (la suya propia
+    # o cualquiera que dependa de ella). El dominio del email es irrelevante.
+    target_unit_id = data.org_unit_id if data.org_unit_id is not None else admin.org_unit_id
+    if target_unit_id is None and admin.role == "superadmin":
+        root = org_service.get_root_unit(db)
+        target_unit_id = root.id if root else None
+    if target_unit_id is None:
+        raise HTTPException(400, "Indica la estructura a la que pertenece el usuario")
+    if not org_service.can_manage_unit(db, admin, target_unit_id):
+        raise HTTPException(403, "No autorizado sobre esa estructura")
 
     initial_tags = []
     if data.group_tags:
@@ -1113,18 +1134,6 @@ def admin_create_user(
         if tag not in seen_initial_tags:
             seen_initial_tags.add(tag)
             deduped_initial_tags.append(tag)
-
-    # Resolver la unidad organizativa del nuevo usuario. Preferir la indicada
-    # (si el admin tiene autoridad sobre ella); si no, el colectivo del dominio
-    # del email (creándolo si no existe) para mantener coherencia.
-    target_unit_id = None
-    if data.org_unit_id is not None:
-        if admin.role != "superadmin" and not org_service.can_manage_unit(db, admin, data.org_unit_id):
-            raise HTTPException(403, "No autorizado sobre esa unidad")
-        target_unit_id = data.org_unit_id
-    else:
-        colectivo = org_service.ensure_colectivo_for_domain(db, _get_domain(email))
-        target_unit_id = colectivo.id if colectivo else None
 
     user = User(
         email=email,
@@ -1147,6 +1156,59 @@ def admin_create_user(
         "group_tags": _parse_group_tags(user.group_tag),
         "org_unit_id": user.org_unit_id,
     }
+
+
+@app.put("/admin/users/{user_id}/org-unit")
+def admin_update_user_org_unit(
+    user_id: int,
+    data: AdminUserOrgUnitUpdate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    """Mueve a un usuario a otra estructura. Exige autoridad sobre la estructura
+    de origen y la de destino (la propia del admin o cualquiera inferior)."""
+    admin = get_user_from_token(cred.credentials, db)
+    require_admin(admin)
+
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role,
+                               set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
+        raise HTTPException(403, "Gestión de usuarios deshabilitada para tu estructura")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "Usuario no encontrado")
+
+    if not _can_admin_manage_user(admin, user, db):
+        raise HTTPException(403, "No autorizado sobre ese usuario")
+    if not org_service.can_manage_unit(db, admin, data.org_unit_id):
+        raise HTTPException(403, "No autorizado sobre la estructura de destino")
+
+    unit = db.query(OrgUnit).get(data.org_unit_id)
+    if not unit:
+        raise HTTPException(404, "Estructura no encontrada")
+
+    user.org_unit_id = unit.id
+
+    # Si es admin, su autoridad acompaña al usuario a su nueva estructura.
+    if user.role == "admin":
+        db.query(AdminAssignment).filter(
+            AdminAssignment.user_id == user.id
+        ).update({AdminAssignment.is_active: 0}, synchronize_session=False)
+        existing = db.query(AdminAssignment).filter(
+            AdminAssignment.user_id == user.id,
+            AdminAssignment.org_unit_id == unit.id,
+        ).first()
+        if existing:
+            existing.is_active = 1
+        else:
+            db.add(AdminAssignment(
+                user_id=user.id, org_unit_id=unit.id, granted_by=admin.id,
+                created_at=datetime.utcnow().isoformat(), is_active=1,
+            ))
+
+    db.commit()
+    db.refresh(user)
+    return {"id": user.id, "org_unit_id": user.org_unit_id, "org_unit_name": unit.name}
 
 
 @app.put("/admin/users/{user_id}/group-tag")

@@ -96,7 +96,7 @@ export default function AdminDomainPolicies() {
       setSuccess("");
 
       if (targetType === "unit" && !orgUnitId) {
-        setError("Selecciona la unidad de la estructura");
+        setError("Selecciona la estructura");
         return;
       }
       const normalizedTarget = domain.trim().toLowerCase();
@@ -165,8 +165,8 @@ export default function AdminDomainPolicies() {
         {success && <Notification color="green">{success}</Notification>}
 
         <Text size="sm" c="dimmed" mb="sm">
-          Define módulos para una unidad de la estructura o una etiqueta. Una
-          política se hereda a las unidades dependientes, salvo que estas tengan
+          Define módulos para una estructura o una etiqueta (ej. Responsabilidad o comisión). Una
+          política se hereda a las estructuras dependientes, salvo que estas tengan
           la suya propia. Los módulos de superadmin aplican solo a admins del
           objetivo, no a usuarios estándar.
         </Text>
@@ -174,7 +174,7 @@ export default function AdminDomainPolicies() {
         <Select
           label="Tipo de política"
           data={[
-            { value: "unit", label: "Unidad de la estructura" },
+            { value: "unit", label: "Estructura" },
             { value: "tag", label: "Etiqueta" },
           ]}
           value={targetType}
@@ -184,9 +184,9 @@ export default function AdminDomainPolicies() {
 
         {targetType === "unit" ? (
           <OrgUnitSelect
-            label="Unidad"
-            description="La política se aplica a esta unidad y se hereda a las que dependen de ella"
-            placeholder="Selecciona una unidad"
+            label="Estructura"
+            description="La política se aplica a esta estructura y se hereda a las que dependen de ella"
+            placeholder="Selecciona una estructura"
             clearable={false}
             value={orgUnitId}
             onChange={setOrgUnitId}
