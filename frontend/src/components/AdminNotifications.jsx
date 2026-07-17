@@ -5,8 +5,9 @@ import { Card, Title, Text, TextInput, Textarea, Button, Group, Select, MultiSel
 
 export default function AdminNotifications() {
   const [users, setUsers] = useState([]);
-  const [scope, setScope] = useState("all");
+  const [scope, setScope] = useState("colectivo");
   const [orgUnitId, setOrgUnitId] = useState(null);
+  const [groupTag, setGroupTag] = useState(null);
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -33,6 +34,18 @@ export default function AdminNotifications() {
     [users]
   );
 
+  // Etiquetas realmente existentes entre los usuarios de mi ámbito.
+  const tagOptions = useMemo(() => {
+    const tags = new Set();
+    for (const u of users) {
+      const list = Array.isArray(u.group_tags)
+        ? u.group_tags
+        : String(u.group_tag || "").split(",").map((t) => t.trim()).filter(Boolean);
+      list.forEach((t) => tags.add(t));
+    }
+    return [...tags].sort().map((t) => ({ value: t, label: t }));
+  }, [users]);
+
   async function handleSend() {
     if (!title.trim() || !body.trim()) {
       alert("Título y mensaje son obligatorios");
@@ -45,6 +58,7 @@ export default function AdminNotifications() {
       body: body.trim(),
       org_unit_id: scope === "colectivo" && orgUnitId ? Number(orgUnitId) : null,
       user_ids: scope === "users" ? selectedUsers.map((id) => Number(id)) : null,
+      group_tag: scope === "tag" ? groupTag : null,
     };
 
     if (scope === "colectivo" && !payload.org_unit_id) {
@@ -53,6 +67,10 @@ export default function AdminNotifications() {
     }
     if (scope === "users" && payload.user_ids.length === 0) {
       alert("Selecciona al menos un usuario");
+      return;
+    }
+    if (scope === "tag" && !payload.group_tag) {
+      alert("Selecciona la etiqueta destino");
       return;
     }
 
@@ -75,31 +93,46 @@ export default function AdminNotifications() {
     <>
       <Title order={3} mb="md">Notificaciones móviles</Title>
       <Text size="sm" c="dimmed" mb="lg">
-        Envío manual de notificaciones push por alcance: global, por unidad de la
-        estructura (incluye sus dependientes) o por usuario.
+        Envío manual de notificaciones push por estructura, usuario o etiqueta.
+        Solo puedes notificar dentro de tu ámbito: tu propia estructura y las
+        que dependen de ella.
       </Text>
 
       <Card shadow="sm" p="md" withBorder>
         <Select
           label="Alcance"
           value={scope}
-          onChange={(v) => setScope(v || "all")}
+          onChange={(v) => setScope(v || "colectivo")}
           data={[
-            { value: "all", label: "General (todos)" },
-            { value: "colectivo", label: "Por unidad de la estructura" },
-            { value: "users", label: "Individual (usuarios)" },
+            { value: "colectivo", label: "Por estructura" },
+            { value: "users", label: "Por usuario" },
+            { value: "tag", label: "Por etiqueta" },
           ]}
           mb="sm"
         />
 
         {scope === "colectivo" && (
           <OrgUnitSelect
-            label="Unidad destino"
-            description="Se notificará también a las unidades que dependen de ella"
-            placeholder="Selecciona una unidad"
+            label="Estructura destino"
+            description="Se notificará también a las estructuras que dependen de ella"
+            placeholder="Selecciona una estructura"
             clearable={false}
             value={orgUnitId}
             onChange={setOrgUnitId}
+            mb="sm"
+          />
+        )}
+
+        {scope === "tag" && (
+          <Select
+            label="Etiqueta destino"
+            description="Transversal a la estructura, pero solo llega a usuarios de tu ámbito"
+            placeholder="Selecciona una etiqueta"
+            data={tagOptions}
+            value={groupTag}
+            onChange={setGroupTag}
+            searchable
+            nothingFoundMessage="Sin etiquetas en tu ámbito"
             mb="sm"
           />
         )}

@@ -370,12 +370,13 @@ class DeviceTokenRegister(BaseModel):
 
 
 class AdminNotificationSend(BaseModel):
-    scope: str  # all | colectivo | users
+    scope: str  # colectivo (estructura) | users | tag | all (legacy)
     title: str
     body: str
     collective: str | None = None  # legacy (dominio); usar org_unit_id
-    org_unit_id: int | None = None  # unidad del organigrama (incluye su rama)
+    org_unit_id: int | None = None  # estructura destino (incluye su rama)
     user_ids: list[int] | None = None
+    group_tag: str | None = None  # etiqueta destino (dentro de tu ámbito)
 
 class AvailabilityCreate(BaseModel):
     date: str
@@ -1043,7 +1044,7 @@ def admin_list_users(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag))):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
         raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
     # Si se pide una unidad concreta: verificar autoridad y auditar el acceso
@@ -1091,7 +1092,7 @@ def admin_create_user(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag))):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
         raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
     email = data.email.strip().lower()
@@ -1221,7 +1222,7 @@ def admin_update_user_group_tag(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag))):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
         raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
     user = db.query(User).filter(User.id == user_id).first()
@@ -1255,7 +1256,7 @@ def admin_add_user_group_tag(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag))):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
         raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
     user = db.query(User).filter(User.id == user_id).first()
@@ -1295,7 +1296,7 @@ def admin_remove_user_group_tag(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag))):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
         raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
     user = db.query(User).filter(User.id == user_id).first()
@@ -1383,7 +1384,7 @@ def remove_admin(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag))):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
         raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
     if admin.id == user_id:
@@ -1418,7 +1419,7 @@ def make_admin(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag))):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
         raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
     user = db.query(User).filter(User.id == user_id).first()
@@ -1736,7 +1737,7 @@ def create_event(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "events", admin.role, set(_parse_group_tags(admin.group_tag))):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "events", admin.role, set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
         raise HTTPException(403, "Eventos deshabilitados para tu dominio")
 
     allowed_domain = data.allowed_domain.strip().lower() if data.allowed_domain else None
@@ -2012,7 +2013,7 @@ def list_events(
 
     user_domain = _get_domain(user.email) if user else None
 
-    if user and not _is_feature_enabled(db, user_domain, "events", user.role, set(_parse_group_tags(user.group_tag))):
+    if user and not _is_feature_enabled(db, user_domain, "events", user.role, set(_parse_group_tags(user.group_tag)), unit_id=user.org_unit_id):
         raise HTTPException(403, "Eventos deshabilitados para tu dominio")
 
     events = db.query(Event).all()
@@ -2573,7 +2574,7 @@ def get_my_availability(
     db: Session = Depends(get_db)
 ):
     user = get_user_from_token(cred.credentials, db)
-    if not _is_feature_enabled(db, _get_domain(user.email), "availabilities", user.role, set(_parse_group_tags(user.group_tag))):
+    if not _is_feature_enabled(db, _get_domain(user.email), "availabilities", user.role, set(_parse_group_tags(user.group_tag)), unit_id=user.org_unit_id):
         raise HTTPException(403, "Disponibilidades deshabilitadas para tu dominio")
     return db.query(Availability).filter(Availability.user_id == user.id).all()
 
@@ -2585,7 +2586,7 @@ def create_my_availability(
     db: Session = Depends(get_db)
 ):
     user = get_user_from_token(cred.credentials, db)
-    if not _is_feature_enabled(db, _get_domain(user.email), "availabilities", user.role, set(_parse_group_tags(user.group_tag))):
+    if not _is_feature_enabled(db, _get_domain(user.email), "availabilities", user.role, set(_parse_group_tags(user.group_tag)), unit_id=user.org_unit_id):
         raise HTTPException(403, "Disponibilidades deshabilitadas para tu dominio")
 
     today = datetime.utcnow().date()
@@ -2640,7 +2641,7 @@ def admin_all_availability(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "availabilities", admin.role, set(_parse_group_tags(admin.group_tag))):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "availabilities", admin.role, set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
         raise HTTPException(403, "Disponibilidades deshabilitadas para tu dominio")
 
     cleanup_expired_data(db)
@@ -3579,7 +3580,7 @@ def _require_superadmin_module_access(user: User, db: Session, module_name: str)
 
     user_domain = _get_domain(user.email)
     user_tags = set(_parse_group_tags(user.group_tag))
-    if not _is_feature_enabled(db, user_domain, module_name, user.role, user_tags):
+    if not _is_feature_enabled(db, user_domain, module_name, user.role, user_tags, unit_id=user.org_unit_id):
         raise HTTPException(403, "No autorizado para este modulo")
 
 
@@ -3929,8 +3930,8 @@ def send_admin_notification(
     title = (data.title or "").strip()
     body = (data.body or "").strip()
 
-    if scope not in ["all", "colectivo", "users"]:
-        raise HTTPException(400, "scope inválido: usa all, colectivo o users")
+    if scope not in ["all", "colectivo", "users", "tag"]:
+        raise HTTPException(400, "scope inválido: usa colectivo (estructura), users, tag o all")
     if not title or not body:
         raise HTTPException(400, "title y body son obligatorios")
 
@@ -3963,6 +3964,19 @@ def send_admin_notification(
                 raise HTTPException(403, "No autorizado para notificar ese colectivo")
             users = db.query(User).all()
             target_user_ids = [u.id for u in users if _get_domain(u.email) == target_collective]
+    elif scope == "tag":
+        # Etiqueta: transversal a la estructura, pero acotada al ámbito del
+        # admin (su propio nivel y los subordinados).
+        tag = _normalize_group_tag(data.group_tag or "")
+        if not tag:
+            raise HTTPException(400, "Indica la etiqueta destino")
+        target_collective = f"tag:{tag}"
+        target_user_ids = [
+            u.id for u in db.query(User).all()
+            if tag in set(_parse_group_tags(u.group_tag)) and _can_admin_manage_user(admin, u, db)
+        ]
+        if not target_user_ids:
+            raise HTTPException(404, "Ningún usuario de tu ámbito tiene esa etiqueta")
     else:
         target_user_ids = sorted(set(data.user_ids or []))
         if not target_user_ids:
@@ -4036,7 +4050,7 @@ def list_spaces(
         except HTTPException:
             user = None
 
-    if user and not _is_feature_enabled(db, _get_domain(user.email), "spaces", user.role, set(_parse_group_tags(user.group_tag))):
+    if user and not _is_feature_enabled(db, _get_domain(user.email), "spaces", user.role, set(_parse_group_tags(user.group_tag)), unit_id=user.org_unit_id):
         raise HTTPException(403, "Funcionalidad de espacios deshabilitada para tu dominio")
 
     return [
@@ -4058,7 +4072,7 @@ def create_space(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "spaces", admin.role, set(_parse_group_tags(admin.group_tag))):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "spaces", admin.role, set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
         raise HTTPException(403, "Funcionalidad de espacios deshabilitada para tu dominio")
 
     if db.query(models.Space).filter(models.Space.name == data.name).first():
@@ -4089,7 +4103,7 @@ def delete_space(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "spaces", admin.role, set(_parse_group_tags(admin.group_tag))):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "spaces", admin.role, set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
         raise HTTPException(403, "Funcionalidad de espacios deshabilitada para tu dominio")
 
     s = db.query(models.Space).filter(models.Space.id == space_id).first()
@@ -4117,7 +4131,7 @@ def list_reservations(
     user = get_user_from_token(cred.credentials, db)
     user_domain = _get_domain(user.email)
 
-    if not _is_feature_enabled(db, user_domain, "spaces", user.role, set(_parse_group_tags(user.group_tag))):
+    if not _is_feature_enabled(db, user_domain, "spaces", user.role, set(_parse_group_tags(user.group_tag)), unit_id=user.org_unit_id):
         raise HTTPException(403, "Funcionalidad de espacios deshabilitada para tu dominio")
 
     all_reservations = db.query(models.SpaceReservation).join(models.Space).join(models.User).all()
@@ -4271,7 +4285,7 @@ def admin_list_reservations(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "spaces", admin.role, set(_parse_group_tags(admin.group_tag))):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "spaces", admin.role, set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
         raise HTTPException(403, "Funcionalidad de espacios deshabilitada para tu dominio")
 
     all_items = db.query(models.SpaceReservation).join(models.Space).join(models.User).all()
@@ -4338,7 +4352,7 @@ def edit_event(
     admin = get_user_from_token(cred.credentials, db)
     require_admin(admin)
 
-    if not _is_feature_enabled(db, _get_domain(admin.email), "events", admin.role, set(_parse_group_tags(admin.group_tag))):
+    if not _is_feature_enabled(db, _get_domain(admin.email), "events", admin.role, set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
         raise HTTPException(403, "Eventos deshabilitados para tu dominio")
 
     ev = db.query(Event).filter(Event.id == event_id).first()
