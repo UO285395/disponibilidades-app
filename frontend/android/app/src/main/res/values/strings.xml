@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Disponib. CENTRAL</string>
-    <string name="title_activity_main">Disponib. CENTRAL</string>
+    <string name="app_name">Disponibilidad App</string>
+    <string name="title_activity_main">Disponibilidad App</string>
     <string name="package_name">com.uo285395.disponibilidad</string>
     <string name="custom_url_scheme">com.uo285395.disponibilidad</string>
 </resources>

@@ -8,13 +8,12 @@ android {
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
         applicationId "com.uo285395.disponibilidad"
-        // Build de PRUEBAS de la rama central: paquete distinto para poder
-        // instalarlo junto al APK de producción sin sobrescribirlo.
-        applicationIdSuffix ".central"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
+        // versionCode debe ir SIEMPRE por encima del ya repartido (6) para que
+        // Android lo tome como actualización y no lo rechace.
         versionCode 7
-        versionName "1.6-central"
+        versionName "1.6"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
