@@ -27,7 +27,7 @@ const VISIBILITY_BADGE = {
   private: { label: "Privado", color: "gray" },
 };
 
-export default function AdminEvents() {
+export default function AdminEvents({ currentUser }) {
   const [events, setEvents] = useState([]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -39,7 +39,8 @@ export default function AdminEvents() {
   const [externalUrl, setExternalUrl] = useState("");
   const [orgUnits, setOrgUnits] = useState([]);
   const [orgUnitId, setOrgUnitId] = useState(null);
-  const [distributionMode, setDistributionMode] = useState("unit_only");
+  // Por defecto el evento llega a la estructura del usuario y a sus dependientes.
+  const [distributionMode, setDistributionMode] = useState("subtree");
   const [targetUnitIds, setTargetUnitIds] = useState([]);
   const [editingEventId, setEditingEventId] = useState(null);
   const [editTitle, setEditTitle] = useState("");
@@ -88,14 +89,19 @@ export default function AdminEvents() {
         const active = units.filter((u) => u.is_active);
         setOrgUnits(active);
         if (active.length) {
-          setOrgUnitId((prev) => (prev === null ? String(active[0].id) : prev));
+          // Por defecto, la unidad del propio usuario (si está entre las que
+          // puede administrar); si no, la primera disponible.
+          const home = currentUser?.org_unit_id;
+          const homeInTree = active.some((u) => u.id === home);
+          const fallback = String(active[0].id);
+          setOrgUnitId((prev) => (prev === null ? (homeInTree ? String(home) : fallback) : prev));
         }
       })
       .catch(() => {});
     return () => {
       mountedRef.current = false;
     };
-  }, [reload]);
+  }, [reload, currentUser?.org_unit_id]);
 
   // Refresco silencioso al volver a la pestaña/app, para reflejar altas/bajas
   // hechas desde otra sesión sin depender de una recarga manual.
@@ -145,7 +151,7 @@ export default function AdminEvents() {
       setEventType("participativo");
       setLocation("");
       setExternalUrl("");
-      setDistributionMode("unit_only");
+      setDistributionMode("subtree");
       setTargetUnitIds([]);
       await reload();
     } catch (e) {
@@ -281,7 +287,7 @@ export default function AdminEvents() {
         />
         <TextInput
           label="Ubicación (opcional)"
-          placeholder="Plaza Mayor, Madrid"
+          placeholder="Ej. Sede, Calle Falsa 123, Zoom…"
           value={location}
           onChange={(e) => setLocation(e.target.value)}
           mb="sm"

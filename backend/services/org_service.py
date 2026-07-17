@@ -799,19 +799,46 @@ def resolve_owning_unit(db: Session, admin: User, requested_unit_id: int | None)
     return colectivo.id if colectivo else (get_root_unit(db).id if get_root_unit(db) else None)
 
 
+def distribution_reach_ids(db: Session, owning_unit_id: int, mode: str,
+                           target_unit_ids: list[int] | None) -> set[int]:
+    """Conjunto de unidades a las que ALCANZA el contenido, para poder comprobar
+    que no excede la autoridad de quien lo crea."""
+    mode = (mode or "unit_only").strip().lower()
+    if mode == "unit_only":
+        return {owning_unit_id}
+    if mode == "subtree":
+        return set(subtree_unit_ids(db, owning_unit_id))
+    # custom: la unidad propietaria + el subárbol de cada destino
+    reach = {owning_unit_id}
+    for tid in (target_unit_ids or []):
+        reach.update(subtree_unit_ids(db, tid))
+    return reach
+
+
 def validate_distribution(db: Session, admin: User, owning_unit_id: int, mode: str,
                           target_unit_ids: list[int] | None) -> str:
     mode = (mode or "unit_only").strip().lower()
     if mode not in DISTRIBUTION_MODES:
         raise ValueError("Modo de distribución inválido")
-    # Solo superadmin puede difundir a todo el árbol desde la raíz de forma
-    # amplia; un admin normal puede usar subtree dentro de su propio subárbol.
+
+    # Los destinos "custom" deben colgar de la unidad propietaria.
     if mode == "custom":
-        owning = db.query(OrgUnit).get(owning_unit_id)
+        owning = unit_by_id(db, owning_unit_id)
         for tid in (target_unit_ids or []):
-            target = db.query(OrgUnit).get(tid)
+            target = unit_by_id(db, tid)
             if target is None or not (owning and target.path.startswith(owning.path)):
-                raise ValueError("Los destinos deben ser descendientes de la unidad propietaria")
+                raise ValueError("Los destinos deben depender de la unidad que organiza")
+
+    # SEGURIDAD: nadie puede convocar por encima/fuera de su ámbito. Todo lo que
+    # el evento alcanza debe estar dentro de la autoridad del admin. Cubre el
+    # caso de scope 'unit_only' que intente difundir a su rama sin gestionarla.
+    if admin.role != "superadmin":
+        allowed = authorized_subtree_unit_ids(db, admin)  # None solo para superadmin
+        allowed_set = set(allowed or [])
+        reach = distribution_reach_ids(db, owning_unit_id, mode, target_unit_ids)
+        if not reach.issubset(allowed_set):
+            raise ValueError("No puedes convocar eventos fuera de tu ámbito")
+
     return mode
 
 

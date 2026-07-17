@@ -25,7 +25,7 @@ import SessionExpiredModal from "../components/SessionExpiredModal.jsx";
 // Cada sección: permiso, etiqueta, icono y componente. El orden es una jerarquía
 // lógica (lo más usado arriba).
 const SECTIONS = [
-  { value: "events", label: "Eventos", icon: IconCalendarEvent, can: (u) => u.role === "superadmin" || u.events_enabled, render: () => <AdminEvents /> },
+  { value: "events", label: "Eventos", icon: IconCalendarEvent, can: (u) => u.role === "superadmin" || u.events_enabled, render: (u) => <AdminEvents currentUser={u} /> },
   { value: "availabilities-calendar", label: "Disponibilidad", icon: IconCalendarTime, can: (u) => u.role === "superadmin" || u.availabilities_enabled, render: () => <AdminAvailabilitiesCalendar /> },
   { value: "spaces", label: "Espacios", icon: IconBuildingCommunity, can: (u) => u.role === "superadmin" || u.spaces_enabled, render: () => <AdminSpaces /> },
   { value: "users", label: "Usuarios", icon: IconUsers, can: (u) => u.role === "superadmin" || u.users_enabled, render: (u) => <AdminUsers currentUser={u} /> },
