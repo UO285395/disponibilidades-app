@@ -265,8 +265,13 @@ export const eventsAPI = {
 
   // ------------------- PÚBLICO / INVITADOS -------------------
 
-  listPublic() {
-    return request("/events?visibility=public", "GET", null, false);
+  listPublic(provinceId = null) {
+    const qs = provinceId ? `&province_id=${provinceId}` : "";
+    return request(`/events?visibility=public${qs}`, "GET", null, false);
+  },
+
+  listProvinces() {
+    return request("/geo/provinces", "GET", null, false);
   },
 
   getPublicDetail(event_id) {
@@ -308,8 +313,11 @@ async function downloadIcsFromEndpoint(endpoint, filename) {
 }
 
 export const calendarAPI = {
-  download(visibility = null) {
-    const qs = visibility ? `?visibility=${encodeURIComponent(visibility)}` : "";
+  download(visibility = null, provinceId = null) {
+    const params = [];
+    if (visibility) params.push(`visibility=${encodeURIComponent(visibility)}`);
+    if (provinceId) params.push(`province_id=${provinceId}`);
+    const qs = params.length ? `?${params.join("&")}` : "";
     return downloadIcsFromEndpoint(`/calendar/export.ics${qs}`, "eventos.ics");
   },
 
