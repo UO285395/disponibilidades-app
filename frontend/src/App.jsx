@@ -1,16 +1,29 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { BrowserRouter, HashRouter, Navigate, Routes, Route } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
+import { Loader, Center } from "@mantine/core";
 import Login from "./pages/Login.jsx";
-import Dashboard from "./pages/Dashboard.jsx";
-import AdminDashboard from "./pages/AdminDashboard.jsx";
-import AdminEventResponses from "./pages/AdminEventResponses.jsx";
-import CensusForm from "./pages/CensusForm.jsx";
-import SurveyForm from "./pages/SurveyForm.jsx";
 import PublicHome from "./pages/PublicHome.jsx";
 import EventDetail from "./pages/EventDetail.jsx";
 import { getToken, initializeAuthStorage, subscribeAuthChanges } from "./api/api.js";
 import { initMobileNotifications } from "./services/mobileNotifications.js";
+
+// Lo que un visitante NO necesita se carga solo al entrar. El panel de
+// administración es la mayor parte del código de la app: un visitante que solo
+// mira eventos públicos no debe descargarlo.
+const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
+const AdminDashboard = lazy(() => import("./pages/AdminDashboard.jsx"));
+const AdminEventResponses = lazy(() => import("./pages/AdminEventResponses.jsx"));
+const CensusForm = lazy(() => import("./pages/CensusForm.jsx"));
+const SurveyForm = lazy(() => import("./pages/SurveyForm.jsx"));
+
+function PageFallback() {
+  return (
+    <Center h="60vh">
+      <Loader />
+    </Center>
+  );
+}
 
 export default function App() {
   const [ready, setReady] = useState(false);
@@ -50,23 +63,25 @@ export default function App() {
 
   return (
     <RouterComponent>
-      <Routes>
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
 
-        <Route path="/" element={hasSession ? <Navigate to="/dashboard" replace /> : <PublicHome />} />
-        <Route path="/login" element={hasSession ? <Navigate to="/dashboard" replace /> : <Login />} />
+          <Route path="/" element={hasSession ? <Navigate to="/dashboard" replace /> : <PublicHome />} />
+          <Route path="/login" element={hasSession ? <Navigate to="/dashboard" replace /> : <Login />} />
 
-        <Route path="/dashboard" element={hasSession ? <Dashboard /> : <Navigate to="/" replace />} />
+          <Route path="/dashboard" element={hasSession ? <Dashboard /> : <Navigate to="/" replace />} />
 
-        <Route path="/admin" element={hasSession ? <AdminDashboard /> : <Navigate to="/" replace />} />
-        <Route path="/admin/event/:id" element={hasSession ? <AdminEventResponses /> : <Navigate to="/" replace />} />
+          <Route path="/admin" element={hasSession ? <AdminDashboard /> : <Navigate to="/" replace />} />
+          <Route path="/admin/event/:id" element={hasSession ? <AdminEventResponses /> : <Navigate to="/" replace />} />
 
-        {/* Rutas públicas — sin autenticación */}
-        <Route path="/eventos/:id" element={<EventDetail />} />
-        <Route path="/censo/:token" element={<CensusForm />} />
-        <Route path="/encuesta/:token" element={<SurveyForm />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+          {/* Rutas públicas — sin autenticación */}
+          <Route path="/eventos/:id" element={<EventDetail />} />
+          <Route path="/censo/:token" element={<CensusForm />} />
+          <Route path="/encuesta/:token" element={<SurveyForm />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
 
-      </Routes>
+        </Routes>
+      </Suspense>
     </RouterComponent>
   );
 }

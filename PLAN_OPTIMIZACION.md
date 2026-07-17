@@ -1,5 +1,7 @@
 # Plan de optimización
 
+> **Estado: Fases 1 y 2 aplicadas y medidas.** Ver §6 al final para los resultados reales.
+
 Repaso de rendimiento y peso de la aplicación. **Todo lo que sigue está medido**, no estimado:
 las cifras salen de instrumentar el backend contando consultas SQL reales con volumen de prueba
 (40 eventos, 60 usuarios, 5 colectivos bajo un comité regional) y de inspeccionar el bundle real.
@@ -131,3 +133,51 @@ engañan; lo que se traduce a producción es el número de viajes a la base de d
 
 Regla para no repetir el error: **medir siempre como admin normal, nunca solo como superadmin**, que
 tiene atajos que ocultan los N+1.
+
+---
+
+## 6. Resultados reales (Fases 1 y 2 aplicadas)
+
+### Fase 1 — Backend: medido antes/después con el mismo instrumental
+
+| Endpoint | Antes | Después | Mejora |
+|---|---:|---:|---:|
+| `/admin/users` (60 usuarios, admin normal) | 228 q · 254 ms | **8 q · 26 ms** | **28× menos consultas** |
+| `/admin/availability` (60 franjas) | 257 q · 235 ms | **8 q · 30 ms** | **32× menos** |
+| `/events` (40 eventos) | 243 q · 296 ms | **6 q · 21 ms** | **40× menos** |
+| `/events` (visitante) | 241 q · 288 ms | **4 q · 17 ms** | **60× menos** |
+| `/events?province_id` | 201 q · 251 ms | **10 q · 17 ms** | **20× menos** |
+| `/me` (admin normal) | 25 q · 26 ms | **3 q · 12 ms** | **8× menos** |
+| `/admin/org/tree` | 25 q · 30 ms | **7 q · 16 ms** | 3,5× menos |
+
+**Lo importante no es el tiempo, es que el número de consultas ya no crece con el volumen.** Antes,
+el doble de usuarios significaba el doble de consultas; ahora es constante. En Postgres por red (que
+es lo que corre en producción) esto se traduce en cientos de viajes ahorrados por petición.
+
+Los límites de autoridad se verificaron intactos tras el cambio (un admin sigue sin ver ni poder
+crear fuera de su rama).
+
+### Fase 2 — Frontend: resultado honesto
+
+| | Antes | Después |
+|---|---:|---:|
+| JS que descarga un **visitante** | 583 kB (181 kB gzip) | **~505 kB (~160 kB gzip)** |
+| Código de administración | Siempre | **Solo al entrar al panel** (62 kB) |
+| Chunks | 1 | Entry + vendor-react + vendor-mantine + 5 bajo demanda |
+
+**Con perspectiva**: la mejora del frontend es **moderada (~11 % gzip para el visitante)**, no
+espectacular, y conviene decirlo. El motivo es que **Mantine domina el peso** (250 kB JS + 203 kB CSS)
+y las páginas públicas también lo necesitan, así que no se puede diferir. Lo que sí aporta:
+- El panel admin (62 kB) ya no lo descarga quien no lo usa.
+- El *vendor* separado significa que **desplegar un cambio nuestro ya no invalida la caché de
+  React/Mantine** en el navegador ni en la APK: las actualizaciones se descargan mucho más ligeras.
+
+**Descartado a propósito**: trocear el CSS de Mantine por componente. Son 203 kB en bruto pero solo
+**30 kB comprimidos** por la red; trocearlo obliga a listar cada componente usado, es frágil y se
+rompe en silencio al añadir uno nuevo. El coste/beneficio no sale.
+
+### Conclusión
+
+**El cuello de botella real era el backend, no el peso del frontend.** La sensación de lentitud al
+refrescar venía de cientos de viajes a la base de datos por petición, no de descargar JavaScript.
+Quedan pendientes las Fases 3 y 4, de menor impacto.
