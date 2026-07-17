@@ -174,6 +174,10 @@ export const adminAPI = {
     return request(`/admin/org/units/${unitId}/deactivate`, "POST");
   },
 
+  orgDeleteUnit(unitId) {
+    return request(`/admin/org/units/${unitId}`, "DELETE");
+  },
+
   orgReactivateUnit(unitId) {
     return request(`/admin/org/units/${unitId}/reactivate`, "POST");
   },

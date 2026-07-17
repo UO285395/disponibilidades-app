@@ -252,12 +252,28 @@ def _colectivo_by_domain(db: Session, root: OrgUnit) -> dict[str, OrgUnit]:
     }
 
 
+def _domains_of_unassigned_users(db: Session) -> set[str]:
+    """Dominios de usuarios que todavía no tienen unidad asignada. Solo estos
+    necesitan que se les cree un colectivo automáticamente.
+
+    Limitarlo a estos es lo que permite ELIMINAR una estructura de verdad: si
+    se creara un colectivo por cada dominio existente (como antes), un
+    colectivo borrado a propósito reaparecería en el siguiente arranque.
+    """
+    domains: set[str] = set()
+    for (email,) in db.query(User.email).filter(User.org_unit_id.is_(None)).all():
+        d = _domain_of_email(email)
+        if d:
+            domains.add(d)
+    return domains
+
+
 def _backfill_colectivos_and_users(db: Session, root: OrgUnit):
     colectivo_type_id = _colectivo_type_id(db)
     existing = _colectivo_by_domain(db, root)
     now = datetime.utcnow().isoformat()
 
-    for domain in _distinct_legacy_domains(db):
+    for domain in _domains_of_unassigned_users(db):
         if domain in existing:
             continue
         unit = OrgUnit(
@@ -455,6 +471,49 @@ def reactivate_unit(db: Session, unit: OrgUnit) -> None:
     unit.is_active = 1
     unit.deactivated_at = None
     db.flush()
+
+
+def delete_unit(db: Session, unit: OrgUnit) -> dict:
+    """Elimina definitivamente una unidad SIN descendientes.
+
+    Todo lo que colgaba de ella (personas, eventos, espacios, censos,
+    encuestas, dispositivos) se reasigna a la unidad superior para no perder
+    datos ni dejar referencias rotas (Postgres exige las claves foráneas).
+    Las políticas quedan sin unidad y las asignaciones de admin/territorios de
+    esa unidad se eliminan con ella.
+    """
+    parent_id = unit.parent_id
+
+    moved_users = db.query(User).filter(User.org_unit_id == unit.id).update(
+        {User.org_unit_id: parent_id}, synchronize_session=False)
+    moved_events = db.query(Event).filter(Event.org_unit_id == unit.id).update(
+        {Event.org_unit_id: parent_id}, synchronize_session=False)
+    db.query(Space).filter(Space.org_unit_id == unit.id).update(
+        {Space.org_unit_id: parent_id}, synchronize_session=False)
+    db.query(CensusConfig).filter(CensusConfig.org_unit_id == unit.id).update(
+        {CensusConfig.org_unit_id: parent_id}, synchronize_session=False)
+    db.query(Survey).filter(Survey.org_unit_id == unit.id).update(
+        {Survey.org_unit_id: parent_id}, synchronize_session=False)
+    db.query(DeviceToken).filter(DeviceToken.org_unit_id == unit.id).update(
+        {DeviceToken.org_unit_id: parent_id}, synchronize_session=False)
+
+    # Las políticas son propias de la unidad: se quedan sin unidad (inertes).
+    db.query(DomainPolicy).filter(DomainPolicy.org_unit_id == unit.id).update(
+        {DomainPolicy.org_unit_id: None}, synchronize_session=False)
+    db.query(GuestPolicy).filter(GuestPolicy.org_unit_id == unit.id).update(
+        {GuestPolicy.org_unit_id: None}, synchronize_session=False)
+
+    # Dependencias exclusivas de la unidad.
+    db.query(AdminAssignment).filter(AdminAssignment.org_unit_id == unit.id).delete(
+        synchronize_session=False)
+    db.query(OrgUnitTerritory).filter(OrgUnitTerritory.org_unit_id == unit.id).delete(
+        synchronize_session=False)
+    db.query(ContentDistributionTarget).filter(ContentDistributionTarget.org_unit_id == unit.id).delete(
+        synchronize_session=False)
+
+    db.delete(unit)
+    db.flush()
+    return {"moved_users": moved_users or 0, "moved_events": moved_events or 0}
 
 
 def serialize_unit(db: Session, unit: OrgUnit, include_counts: bool = False) -> dict:

@@ -121,9 +121,9 @@ export default function AdminOrgStructure() {
                   )}
                   {unit.parent_id !== null && (
                     unit.is_active ? (
-                      <Button size="compact-xs" variant="subtle" color="red"
+                      <Button size="compact-xs" variant="subtle" color="orange"
                         onClick={async () => {
-                          if (!window.confirm(`¿Desactivar "${unit.name}"?`)) return;
+                          if (!window.confirm(`¿Desactivar "${unit.name}"? Se ocultará al crear cosas nuevas, pero no se pierde nada.`)) return;
                           await adminAPI.orgDeactivateUnit(unit.id);
                           load();
                         }}>
@@ -135,6 +135,24 @@ export default function AdminOrgStructure() {
                         Reactivar
                       </Button>
                     )
+                  )}
+                  {unit.parent_id !== null && (
+                    <Button size="compact-xs" variant="subtle" color="red"
+                      onClick={async () => {
+                        const people = unit.member_count ?? 0;
+                        const aviso = people > 0
+                          ? `\n\nLas ${people} persona(s) de esta unidad pasarán a la unidad superior.`
+                          : "";
+                        if (!window.confirm(`¿Eliminar "${unit.name}" definitivamente?${aviso}`)) return;
+                        try {
+                          await adminAPI.orgDeleteUnit(unit.id);
+                          load();
+                        } catch (e) {
+                          alert(e?.message || "No se pudo eliminar la unidad");
+                        }
+                      }}>
+                      Eliminar
+                    </Button>
                   )}
                 </Group>
               </Group>
@@ -394,8 +412,7 @@ function UnitTerritoriesModal({ unit, onClose }) {
         <>
           <Text size="xs" c="dimmed" mb="sm">
             La provincia determina a qué visitantes se muestran los eventos públicos
-            de esta unidad (sin revelar la estructura interna). La ciudad es texto
-            libre y solo afina; basta con la provincia para el aviso a visitantes.
+            de esta unidad
           </Text>
           <Stack gap="xs" mb="md">
             {rows.length === 0 && <Text size="sm" c="dimmed">Sin territorios asignados.</Text>}

@@ -799,6 +799,34 @@ def org_reactivate_unit(
     return {"ok": True}
 
 
+@app.delete("/admin/org/units/{unit_id}")
+def org_delete_unit(
+    unit_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    """Elimina definitivamente una unidad sin dependientes. Sus personas y
+    contenidos suben a la unidad superior (no se pierde nada)."""
+    admin = get_user_from_token(cred.credentials, db)
+    _require_org_admin(admin)
+    if not org_service.can_manage_unit(db, admin, unit_id):
+        raise HTTPException(403, "No autorizado sobre esa unidad")
+
+    unit = db.query(OrgUnit).get(unit_id)
+    if not unit:
+        raise HTTPException(404, "Unidad no encontrada")
+    if unit.parent_id is None:
+        raise HTTPException(400, "No se puede eliminar la estructura raíz")
+
+    children = db.query(OrgUnit).filter(OrgUnit.parent_id == unit_id).count()
+    if children:
+        raise HTTPException(400, "Elimina o mueve primero las unidades que dependen de esta")
+
+    result = org_service.delete_unit(db, unit)
+    db.commit()
+    return {"ok": True, **result}
+
+
 @app.get("/admin/org/units/{unit_id}/admins")
 def org_list_unit_admins(
     unit_id: int,
