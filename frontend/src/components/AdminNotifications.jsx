@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { adminAPI } from "../api/adminApi.js";
+import OrgUnitSelect from "./OrgUnitSelect.jsx";
 import { Card, Title, Text, TextInput, Textarea, Button, Group, Select, MultiSelect } from "@mantine/core";
 
 export default function AdminNotifications() {
   const [users, setUsers] = useState([]);
   const [scope, setScope] = useState("all");
-  const [collective, setCollective] = useState("");
+  const [orgUnitId, setOrgUnitId] = useState(null);
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -42,12 +43,12 @@ export default function AdminNotifications() {
       scope,
       title: title.trim(),
       body: body.trim(),
-      collective: scope === "colectivo" ? collective.trim().toLowerCase() : null,
+      org_unit_id: scope === "colectivo" && orgUnitId ? Number(orgUnitId) : null,
       user_ids: scope === "users" ? selectedUsers.map((id) => Number(id)) : null,
     };
 
-    if (scope === "colectivo" && !payload.collective) {
-      alert("Indica un colectivo para el envío por colectivo");
+    if (scope === "colectivo" && !payload.org_unit_id) {
+      alert("Selecciona la unidad destino");
       return;
     }
     if (scope === "users" && payload.user_ids.length === 0) {
@@ -74,7 +75,8 @@ export default function AdminNotifications() {
     <>
       <Title order={3} mb="md">Notificaciones móviles</Title>
       <Text size="sm" c="dimmed" mb="lg">
-        Envío manual de notificaciones push por alcance: global, por colectivo o por usuario.
+        Envío manual de notificaciones push por alcance: global, por unidad de la
+        estructura (incluye sus dependientes) o por usuario.
       </Text>
 
       <Card shadow="sm" p="md" withBorder>
@@ -84,18 +86,20 @@ export default function AdminNotifications() {
           onChange={(v) => setScope(v || "all")}
           data={[
             { value: "all", label: "General (todos)" },
-            { value: "colectivo", label: "Por colectivo" },
+            { value: "colectivo", label: "Por unidad de la estructura" },
             { value: "users", label: "Individual (usuarios)" },
           ]}
           mb="sm"
         />
 
         {scope === "colectivo" && (
-          <TextInput
-            label="Colectivo"
-            placeholder="ej: empresa.com"
-            value={collective}
-            onChange={(e) => setCollective(e.target.value)}
+          <OrgUnitSelect
+            label="Unidad destino"
+            description="Se notificará también a las unidades que dependen de ella"
+            placeholder="Selecciona una unidad"
+            clearable={false}
+            value={orgUnitId}
+            onChange={setOrgUnitId}
             mb="sm"
           />
         )}

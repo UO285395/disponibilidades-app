@@ -62,9 +62,10 @@ export const adminAPI = {
     return request(`/events/${eventId}/responses`);
   },
 
-  // Disponibilidades de todos
-  listAvailabilities() {
-    return request("/admin/availability");
+  // Disponibilidades de todos (unitId acota a esa unidad y su rama)
+  listAvailabilities(unitId = null) {
+    const qs = unitId ? `?unit_id=${unitId}` : "";
+    return request(`/admin/availability${qs}`);
   },
 
   // Espacios

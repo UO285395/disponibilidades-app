@@ -13,11 +13,13 @@ import {
   Select,
 } from "@mantine/core";
 import { adminAPI } from "../api/adminApi.js";
+import OrgUnitSelect from "./OrgUnitSelect.jsx";
 
 export default function AdminDomainPolicies() {
   const [policies, setPolicies] = useState([]);
   const [editingId, setEditingId] = useState(null);
-  const [targetType, setTargetType] = useState("domain");
+  const [targetType, setTargetType] = useState("unit");
+  const [orgUnitId, setOrgUnitId] = useState(null);
   const [domain, setDomain] = useState("");
   const [eventsEnabled, setEventsEnabled] = useState(true);
   const [availabilitiesEnabled, setAvailabilitiesEnabled] = useState(true);
@@ -60,7 +62,8 @@ export default function AdminDomainPolicies() {
 
   function resetForm() {
     setEditingId(null);
-    setTargetType("domain");
+    setTargetType("unit");
+    setOrgUnitId(null);
     setDomain("");
     setEventsEnabled(true);
     setAvailabilitiesEnabled(true);
@@ -74,7 +77,8 @@ export default function AdminDomainPolicies() {
 
   function fillForm(policy) {
     setEditingId(policy.id);
-    setTargetType(policy.target_type || "domain");
+    setTargetType(policy.org_unit_id ? "unit" : (policy.target_type || "domain"));
+    setOrgUnitId(policy.org_unit_id ? String(policy.org_unit_id) : null);
     setDomain(policy.domain);
     setEventsEnabled(Boolean(policy.events_enabled));
     setAvailabilitiesEnabled(Boolean(policy.availabilities_enabled));
@@ -90,16 +94,21 @@ export default function AdminDomainPolicies() {
     try {
       setError("");
       setSuccess("");
-      const normalizedTarget = domain.trim().toLowerCase();
 
-      if (!normalizedTarget) {
+      if (targetType === "unit" && !orgUnitId) {
+        setError("Selecciona la unidad de la estructura");
+        return;
+      }
+      const normalizedTarget = domain.trim().toLowerCase();
+      if (targetType !== "unit" && !normalizedTarget) {
         setError(targetType === "tag" ? "Etiqueta requerida" : "Colectivo requerido");
         return;
       }
 
       const payload = {
-        domain: normalizedTarget,
+        domain: targetType === "unit" ? null : normalizedTarget,
         target_type: targetType,
+        org_unit_id: targetType === "unit" ? Number(orgUnitId) : null,
         events_enabled: eventsEnabled,
         availabilities_enabled: availabilitiesEnabled,
         spaces_enabled: spacesEnabled,
@@ -156,27 +165,42 @@ export default function AdminDomainPolicies() {
         {success && <Notification color="green">{success}</Notification>}
 
         <Text size="sm" c="dimmed" mb="sm">
-          Define módulos para un colectivo o etiqueta. Los módulos de superadmin seleccionados aplican solo a admins del objetivo, no a usuarios estándar.
+          Define módulos para una unidad de la estructura o una etiqueta. Una
+          política se hereda a las unidades dependientes, salvo que estas tengan
+          la suya propia. Los módulos de superadmin aplican solo a admins del
+          objetivo, no a usuarios estándar.
         </Text>
 
         <Select
           label="Tipo de política"
           data={[
-            { value: "domain", label: "Colectivo (dominio)" },
+            { value: "unit", label: "Unidad de la estructura" },
             { value: "tag", label: "Etiqueta" },
           ]}
           value={targetType}
-          onChange={(value) => setTargetType(value || "domain")}
+          onChange={(value) => setTargetType(value || "unit")}
           mb="sm"
         />
 
-        <TextInput
-          label={targetType === "tag" ? "Etiqueta" : "Colectivo"}
-          value={domain}
-          onChange={(e) => setDomain(e.target.value)}
-          mb="sm"
-          placeholder={targetType === "tag" ? "voluntariado" : "example.com"}
-        />
+        {targetType === "unit" ? (
+          <OrgUnitSelect
+            label="Unidad"
+            description="La política se aplica a esta unidad y se hereda a las que dependen de ella"
+            placeholder="Selecciona una unidad"
+            clearable={false}
+            value={orgUnitId}
+            onChange={setOrgUnitId}
+            mb="sm"
+          />
+        ) : (
+          <TextInput
+            label={targetType === "tag" ? "Etiqueta" : "Colectivo"}
+            value={domain}
+            onChange={(e) => setDomain(e.target.value)}
+            mb="sm"
+            placeholder={targetType === "tag" ? "voluntariado" : "example.com"}
+          />
+        )}
 
         <Stack gap="xs">
           <Checkbox
@@ -262,8 +286,10 @@ export default function AdminDomainPolicies() {
         <Table.Tbody>
           {policies.map((p) => (
             <Table.Tr key={p.id}>
-              <Table.Td>{p.target_type === "tag" ? "Etiqueta" : "Colectivo"}</Table.Td>
-              <Table.Td>{p.domain}</Table.Td>
+              <Table.Td>
+                {p.target_type === "tag" ? "Etiqueta" : p.target_type === "unit" ? "Unidad" : "Colectivo"}
+              </Table.Td>
+              <Table.Td>{p.org_unit_name || p.domain}</Table.Td>
               <Table.Td>{p.events_enabled ? "Sí" : "No"}</Table.Td>
               <Table.Td>{p.availabilities_enabled ? "Sí" : "No"}</Table.Td>
               <Table.Td>{p.spaces_enabled ? "Sí" : "No"}</Table.Td>

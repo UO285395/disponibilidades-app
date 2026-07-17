@@ -369,7 +369,8 @@ class AdminNotificationSend(BaseModel):
     scope: str  # all | colectivo | users
     title: str
     body: str
-    collective: str | None = None
+    collective: str | None = None  # legacy (dominio); usar org_unit_id
+    org_unit_id: int | None = None  # unidad del organigrama (incluye su rama)
     user_ids: list[int] | None = None
 
 class AvailabilityCreate(BaseModel):
@@ -434,8 +435,9 @@ class SurveyCreate(BaseModel):
     fields: list[SurveyFieldCreate]
 
 class DomainPolicyCreate(BaseModel):
-    domain: str
-    target_type: str = "domain"  # domain | tag
+    domain: str | None = None
+    target_type: str = "domain"  # domain | tag | unit
+    org_unit_id: int | None = None  # unidad del organigrama (preferente)
     events_enabled: bool = True
     availabilities_enabled: bool = True
     spaces_enabled: bool = True
@@ -539,18 +541,21 @@ def me(
     user = get_user_from_token(cred.credentials, db)
     domain = user.email.split("@")[-1].lower() if "@" in user.email else ""
     tags = set(_parse_group_tags(user.group_tag))
+    # Su unidad real manda sobre el dominio del email: un usuario puede haberse
+    # movido en el organigrama sin que su email lo refleje.
+    unit = user.org_unit_id
 
-    events_enabled = _is_feature_enabled(db, domain, "events", user.role, tags)
-    availabilities_enabled = _is_feature_enabled(db, domain, "availabilities", user.role, tags)
-    spaces_enabled = _is_feature_enabled(db, domain, "spaces", user.role, tags)
-    users_enabled = _is_feature_enabled(db, domain, "users", user.role, tags)
+    events_enabled = _is_feature_enabled(db, domain, "events", user.role, tags, unit_id=unit)
+    availabilities_enabled = _is_feature_enabled(db, domain, "availabilities", user.role, tags, unit_id=unit)
+    spaces_enabled = _is_feature_enabled(db, domain, "spaces", user.role, tags, unit_id=unit)
+    users_enabled = _is_feature_enabled(db, domain, "users", user.role, tags, unit_id=unit)
 
     # Modulos de superadmin delegables solo para admins (no para users estandar)
     can_receive_super_modules = user.role in ["admin", "superadmin"]
-    domain_policies_enabled = can_receive_super_modules and _is_feature_enabled(db, domain, "domain_policies", user.role, tags)
-    census_enabled = can_receive_super_modules and _is_feature_enabled(db, domain, "census", user.role, tags)
-    surveys_enabled = can_receive_super_modules and _is_feature_enabled(db, domain, "surveys", user.role, tags)
-    notifications_enabled = can_receive_super_modules and _is_feature_enabled(db, domain, "notifications", user.role, tags)
+    domain_policies_enabled = can_receive_super_modules and _is_feature_enabled(db, domain, "domain_policies", user.role, tags, unit_id=unit)
+    census_enabled = can_receive_super_modules and _is_feature_enabled(db, domain, "census", user.role, tags, unit_id=unit)
+    surveys_enabled = can_receive_super_modules and _is_feature_enabled(db, domain, "surveys", user.role, tags, unit_id=unit)
+    notifications_enabled = can_receive_super_modules and _is_feature_enabled(db, domain, "notifications", user.role, tags, unit_id=unit)
 
     return {
         "id": user.id,
@@ -1410,7 +1415,7 @@ def admin_list_domain_policies(
             if _can_admin_manage_policy_target(admin, policy.domain, db)
         ]
 
-    return [_domain_policy_to_dict(p) for p in policies]
+    return [_domain_policy_to_dict(p, db) for p in policies]
 
 
 @app.post("/admin/domain-policies")
@@ -1422,26 +1427,37 @@ def create_domain_policy(
     admin = get_user_from_token(cred.credentials, db)
     _require_superadmin_module_access(admin, db, "domain_policies")
 
-    normalized_target_type = (data.target_type or "domain").strip().lower()
-    if normalized_target_type not in ["domain", "tag"]:
-        raise HTTPException(400, "target_type invalido: usa domain o tag")
+    # Preferente: política sobre una unidad del organigrama (se hereda hacia
+    # abajo salvo que una unidad inferior tenga la suya propia).
+    if data.org_unit_id is not None:
+        if not org_service.can_manage_unit(db, admin, data.org_unit_id):
+            raise HTTPException(403, "No autorizado sobre esa unidad")
+        unit = db.query(OrgUnit).get(data.org_unit_id)
+        if not unit:
+            raise HTTPException(404, "Unidad no encontrada")
+        storage_key = f"unit:{data.org_unit_id}"
+    else:
+        normalized_target_type = (data.target_type or "domain").strip().lower()
+        if normalized_target_type not in ["domain", "tag"]:
+            raise HTTPException(400, "target_type invalido: usa domain o tag")
 
-    target_value = data.domain.strip()
-    if not target_value:
-        raise HTTPException(400, "Dominio/etiqueta invalido")
+        target_value = (data.domain or "").strip()
+        if not target_value:
+            raise HTTPException(400, "Indica la unidad destino")
 
-    storage_key = _policy_storage_key(normalized_target_type, target_value)
-    if not storage_key:
-        raise HTTPException(400, "Dominio/etiqueta invalido")
+        storage_key = _policy_storage_key(normalized_target_type, target_value)
+        if not storage_key:
+            raise HTTPException(400, "Dominio/etiqueta invalido")
 
-    if admin.role != "superadmin" and not _can_admin_manage_policy_target(admin, storage_key, db):
-        raise HTTPException(403, "No puedes crear politicas para este dominio/etiqueta")
+        if admin.role != "superadmin" and not _can_admin_manage_policy_target(admin, storage_key, db):
+            raise HTTPException(403, "No puedes crear politicas para este dominio/etiqueta")
 
     if db.query(models.DomainPolicy).filter(models.DomainPolicy.domain == storage_key).first():
-        raise HTTPException(400, "Politica ya existe")
+        raise HTTPException(400, "Ya existe una política para ese ámbito")
 
     policy = models.DomainPolicy(
         domain=storage_key,
+        org_unit_id=data.org_unit_id,
         events_enabled=1 if data.events_enabled else 0,
         availabilities_enabled=1 if data.availabilities_enabled else 0,
         spaces_enabled=1 if data.spaces_enabled else 0,
@@ -1455,7 +1471,7 @@ def create_domain_policy(
     db.commit()
     db.refresh(policy)
 
-    return _domain_policy_to_dict(policy)
+    return _domain_policy_to_dict(policy, db)
 
 
 @app.put("/admin/domain-policies/{policy_id}")
@@ -1475,25 +1491,33 @@ def update_domain_policy(
     if admin.role != "superadmin" and not _can_admin_manage_policy_target(admin, policy.domain, db):
         raise HTTPException(403, "No puedes editar esta politica")
 
-    normalized_target_type = (data.target_type or "domain").strip().lower()
-    if normalized_target_type not in ["domain", "tag"]:
-        raise HTTPException(400, "target_type invalido: usa domain o tag")
+    if data.org_unit_id is not None:
+        if not org_service.can_manage_unit(db, admin, data.org_unit_id):
+            raise HTTPException(403, "No autorizado sobre esa unidad")
+        new_storage_key = f"unit:{data.org_unit_id}"
+        new_unit_id = data.org_unit_id
+    else:
+        normalized_target_type = (data.target_type or "domain").strip().lower()
+        if normalized_target_type not in ["domain", "tag"]:
+            raise HTTPException(400, "target_type invalido: usa domain o tag")
 
-    target_value = data.domain.strip()
-    if not target_value:
-        raise HTTPException(400, "Dominio/etiqueta invalido")
+        target_value = (data.domain or "").strip()
+        if not target_value:
+            raise HTTPException(400, "Indica la unidad destino")
 
-    new_storage_key = _policy_storage_key(normalized_target_type, target_value)
-    if not new_storage_key:
-        raise HTTPException(400, "Dominio/etiqueta invalido")
+        new_storage_key = _policy_storage_key(normalized_target_type, target_value)
+        if not new_storage_key:
+            raise HTTPException(400, "Dominio/etiqueta invalido")
 
-    if admin.role != "superadmin" and not _can_admin_manage_policy_target(admin, new_storage_key, db):
-        raise HTTPException(403, "No puedes mover esta politica a ese dominio/etiqueta")
+        if admin.role != "superadmin" and not _can_admin_manage_policy_target(admin, new_storage_key, db):
+            raise HTTPException(403, "No puedes mover esta politica a ese dominio/etiqueta")
+        new_unit_id = None
 
     if policy.domain != new_storage_key and db.query(models.DomainPolicy).filter(models.DomainPolicy.domain == new_storage_key).first():
-        raise HTTPException(400, "Ya existe una politica con ese objetivo")
+        raise HTTPException(400, "Ya existe una política para ese ámbito")
 
     policy.domain = new_storage_key
+    policy.org_unit_id = new_unit_id
     policy.events_enabled = 1 if data.events_enabled else 0
     policy.availabilities_enabled = 1 if data.availabilities_enabled else 0
     policy.spaces_enabled = 1 if data.spaces_enabled else 0
@@ -1504,7 +1528,7 @@ def update_domain_policy(
     policy.notifications_enabled = 1 if data.notifications_enabled else 0
     db.commit()
 
-    return _domain_policy_to_dict(policy)
+    return _domain_policy_to_dict(policy, db)
 
 
 @app.delete("/admin/domain-policies/{policy_id}")
@@ -2474,6 +2498,7 @@ def delete_availability(
 
 @app.get("/admin/availability")
 def admin_all_availability(
+    unit_id: int | None = Query(None),
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
     db: Session = Depends(get_db)
 ):
@@ -2493,8 +2518,24 @@ def admin_all_availability(
 
     db.commit()
 
+    # Filtro por unidad del organigrama: incluye toda su rama (por niveles),
+    # sustituyendo al antiguo filtro por el dominio del email.
+    subtree_ids = None
+    if unit_id is not None:
+        if not org_service.can_manage_unit(db, admin, unit_id):
+            raise HTTPException(403, "No autorizado sobre esa unidad")
+        subtree_ids = set(org_service.subtree_unit_ids(db, unit_id))
+
     all_items = db.query(Availability).all()
-    items = [a for a in all_items if _can_admin_manage_domain(admin, _get_domain(a.user.email), db)]
+    items = []
+    for a in all_items:
+        if not _can_admin_manage_user(admin, a.user, db):
+            continue
+        if subtree_ids is not None and a.user.org_unit_id not in subtree_ids:
+            continue
+        items.append(a)
+
+    unit_names = {u.id: u.name for u in db.query(models.OrgUnit).all()}
 
     return [
         {
@@ -2503,6 +2544,8 @@ def admin_all_availability(
             "email": a.user.email,
             "group_tag": a.user.group_tag,
             "group_tags": _parse_group_tags(a.user.group_tag),
+            "org_unit_id": a.user.org_unit_id,
+            "org_unit_name": unit_names.get(a.user.org_unit_id),
             "date": a.date,
             "start_time": a.start_time,
             "end_time": a.end_time,
@@ -3264,6 +3307,8 @@ def _policy_target_from_storage(storage_key: str) -> tuple[str, str]:
     key = (storage_key or "").strip().lower()
     if key.startswith("tag:"):
         return "tag", _normalize_group_tag(key.split(":", 1)[1])
+    if key.startswith("unit:"):
+        return "unit", key.split(":", 1)[1]
     return "domain", key
 
 
@@ -3271,6 +3316,10 @@ def _matches_policy_target(storage_key: str, domain: str, tags: set[str]) -> boo
     target_type, target_value = _policy_target_from_storage(storage_key)
     if target_type == "tag":
         return target_value in tags
+    if target_type == "unit":
+        # Las políticas por unidad no se resuelven por dominio: las aplica la
+        # cascada del organigrama (feature_decision_for_unit).
+        return False
     return target_value == (domain or "").strip().lower()
 
 
@@ -3285,10 +3334,21 @@ def _get_applicable_policies(db: Session, domain: str, tags: set[str] | None = N
     ]
 
 
-def _is_feature_enabled(db: Session, domain: str, feature: str, role: str = "user", tags: set[str] | None = None):
+def _is_feature_enabled(db: Session, domain: str, feature: str, role: str = "user",
+                        tags: set[str] | None = None, unit_id: int | None = None):
     if role == "superadmin":
         return True
 
+    # 1) Organigrama: gana la política de la unidad más específica, heredando de
+    #    sus superiores si no tiene propia. Si no se indica la unidad, se deduce
+    #    del dominio (su colectivo equivalente) para no romper las llamadas que
+    #    todavía razonan en términos de dominio.
+    resolved_unit_id = unit_id if unit_id is not None else org_service.unit_id_for_legacy_domain(db, domain)
+    decision = org_service.feature_decision_for_unit(db, resolved_unit_id, feature)
+    if decision is not None:
+        return decision
+
+    # 2) Criterio antiguo por dominio/etiqueta (políticas aún sin unidad).
     applicable = _get_applicable_policies(db, domain, tags)
     if not applicable:
         # Defaults when no policy is defined, by role
@@ -3315,12 +3375,18 @@ def _is_feature_enabled(db: Session, domain: str, feature: str, role: str = "use
     return any(bool(getattr(policy, column_name, 0)) for policy in applicable)
 
 
-def _domain_policy_to_dict(policy: models.DomainPolicy) -> dict:
+def _domain_policy_to_dict(policy: models.DomainPolicy, db: Session | None = None) -> dict:
     target_type, target_value = _policy_target_from_storage(policy.domain)
+    unit_name = None
+    if db is not None and policy.org_unit_id is not None:
+        unit = db.query(OrgUnit).get(policy.org_unit_id)
+        unit_name = unit.name if unit else None
     return {
         "id": policy.id,
         "domain": target_value,
         "target_type": target_type,
+        "org_unit_id": policy.org_unit_id,
+        "org_unit_name": unit_name,
         "events_enabled": bool(policy.events_enabled),
         "availabilities_enabled": bool(policy.availabilities_enabled),
         "spaces_enabled": bool(policy.spaces_enabled),
@@ -3360,6 +3426,11 @@ def _can_admin_manage_policy_target(admin: User, storage_key: str, db: Session) 
     target_type, target_value = _policy_target_from_storage(storage_key)
     if target_type == "domain":
         return _can_admin_manage_domain(admin, target_value, db)
+    if target_type == "unit":
+        try:
+            return org_service.can_manage_unit(db, admin, int(target_value))
+        except (TypeError, ValueError):
+            return False
 
     admin_tags = set(_parse_group_tags(admin.group_tag))
     return target_value in admin_tags
@@ -3736,13 +3807,27 @@ def send_admin_notification(
             raise HTTPException(403, "Los admins delegados no pueden enviar notificaciones globales")
         target_user_ids = [u.id for u in db.query(User.id).all()]
     elif scope == "colectivo":
-        target_collective = (data.collective or "").strip().lower()
-        if not target_collective:
-            raise HTTPException(400, "collective obligatorio para scope=colectivo")
-        if admin.role != "superadmin" and not _can_admin_manage_domain(admin, target_collective, db):
-            raise HTTPException(403, "No autorizado para notificar ese colectivo")
-        users = db.query(User).all()
-        target_user_ids = [u.id for u in users if _get_domain(u.email) == target_collective]
+        # Preferente: unidad del organigrama, que alcanza a toda su rama.
+        if data.org_unit_id is not None:
+            if not org_service.can_manage_unit(db, admin, data.org_unit_id):
+                raise HTTPException(403, "No autorizado para notificar esa unidad")
+            unit = db.query(OrgUnit).get(data.org_unit_id)
+            if not unit:
+                raise HTTPException(404, "Unidad no encontrada")
+            target_collective = unit.name
+            subtree_ids = set(org_service.subtree_unit_ids(db, data.org_unit_id))
+            target_user_ids = [
+                u.id for u in db.query(User).filter(User.org_unit_id.in_(subtree_ids)).all()
+            ]
+        else:
+            # Legacy: por dominio del email.
+            target_collective = (data.collective or "").strip().lower()
+            if not target_collective:
+                raise HTTPException(400, "Indica la unidad destino")
+            if admin.role != "superadmin" and not _can_admin_manage_domain(admin, target_collective, db):
+                raise HTTPException(403, "No autorizado para notificar ese colectivo")
+            users = db.query(User).all()
+            target_user_ids = [u.id for u in users if _get_domain(u.email) == target_collective]
     else:
         target_user_ids = sorted(set(data.user_ids or []))
         if not target_user_ids:

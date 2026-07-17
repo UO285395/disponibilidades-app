@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, useMemo } from "react";
 import { adminAPI } from "../api/adminApi.js";
+import OrgUnitSelect from "./OrgUnitSelect.jsx";
 import {
   Alert,
   Card,
@@ -74,6 +75,7 @@ function parseHour(value) {
 export default function AdminAvailabilitiesCalendar() {
   const [rows, setRows] = useState([]);
   const [filterCode, setFilterCode] = useState("");
+  const [unitId, setUnitId] = useState(null);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalUsers, setModalUsers] = useState([]);
@@ -83,11 +85,12 @@ export default function AdminAvailabilitiesCalendar() {
   const [weekOffset, setWeekOffset] = useState(0);
   const MAX_WEEK_OFFSET = 2;
 
-  // cargar disponibilidades
+  // cargar disponibilidades (el filtro por unidad se resuelve en servidor,
+  // incluyendo toda la rama de la unidad elegida)
   useEffect(() => {
     const loadAvailabilities = async () => {
       try {
-        const data = await adminAPI.listAvailabilities();
+        const data = await adminAPI.listAvailabilities(unitId ? Number(unitId) : null);
         setRows(data);
       } catch (e) {
         console.error("Error cargando disponibilidades", e);
@@ -114,22 +117,21 @@ export default function AdminAvailabilitiesCalendar() {
       window.removeEventListener("focus", handleVisibilityOrFocus);
       document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
     };
-  }, []);
+  }, [unitId]);
 
-  // filtrado por dominio o etiqueta de grupo
+  // El ámbito (unidad) ya viene filtrado del servidor por rama. Aquí solo
+  // queda el filtro por etiqueta de grupo, que es transversal a la estructura.
   const filteredRows = useMemo(() => {
     if (!filterCode.trim()) return rows;
     const code = filterCode.toLowerCase();
     return rows.filter((r) => {
-      const domain = r.email.split("@")[1]?.toLowerCase() || "";
       const tags = Array.isArray(r.group_tags)
         ? r.group_tags
         : String(r.group_tag || "")
             .split(",")
             .map((value) => value.trim())
             .filter(Boolean);
-      const matchesTag = tags.some((tag) => tag.toLowerCase().includes(code));
-      return domain.includes(code) || matchesTag;
+      return tags.some((tag) => tag.toLowerCase().includes(code));
     });
   }, [rows, filterCode]);
 
@@ -286,13 +288,22 @@ const weekStart = useMemo(() => {
         Disponibilidades (Semana actual, siguiente y posterior)
       </Title>
 
-      {/* Filtro por colectivo o etiqueta */}
-      <TextInput
-        placeholder="Filtrar por colectivo o etiqueta (ej: organizador)"
-        value={filterCode}
-        onChange={(e) => setFilterCode(e.target.value)}
-        mb="lg"
-      />
+      {/* Filtros: ámbito de la estructura (incluye su rama) y etiqueta */}
+      <Group align="flex-end" mb="lg" grow>
+        <OrgUnitSelect
+          label="Ámbito"
+          description="Incluye las unidades que dependen de la elegida"
+          placeholder="Todo mi ámbito"
+          value={unitId}
+          onChange={setUnitId}
+        />
+        <TextInput
+          label="Etiqueta"
+          placeholder="Filtrar por etiqueta (ej: organizador)"
+          value={filterCode}
+          onChange={(e) => setFilterCode(e.target.value)}
+        />
+      </Group>
 
       {/* Botones de semana */}
       <Group mb="md">

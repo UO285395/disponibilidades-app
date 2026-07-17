@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, Button, TextInput, Title, Textarea, Text, Group, Select, Badge, MultiSelect } from "@mantine/core";
 import { adminAPI } from "../api/adminApi.js";
+import OrgUnitSelect from "./OrgUnitSelect.jsx";
 import { useNavigate } from "react-router-dom";
 
 const VISIBILITY_OPTIONS = [
@@ -31,7 +32,6 @@ export default function AdminEvents() {
   const [description, setDescription] = useState("");
   const [date, setDate] = useState(null);
   const [startTime, setStartTime] = useState("");
-  const [allowedDomain, setAllowedDomain] = useState("");
   const [visibility, setVisibility] = useState("internal");
   const [eventType, setEventType] = useState("participativo");
   const [location, setLocation] = useState("");
@@ -45,7 +45,8 @@ export default function AdminEvents() {
   const [editDescription, setEditDescription] = useState("");
   const [editDate, setEditDate] = useState("");
   const [editStartTime, setEditStartTime] = useState("");
-  const [editAllowedDomain, setEditAllowedDomain] = useState("");
+  const [editOrgUnitId, setEditOrgUnitId] = useState(null);
+  const [editDistributionMode, setEditDistributionMode] = useState("unit_only");
   const [editVisibility, setEditVisibility] = useState("internal");
   const [editEventType, setEditEventType] = useState("participativo");
   const [editLocation, setEditLocation] = useState("");
@@ -56,6 +57,9 @@ export default function AdminEvents() {
   const navigate = useNavigate();
   const mountedRef = useRef(true);
   const loadingRef = useRef(false);
+
+  // Nombre de unidad por id, para mostrar el ámbito de cada evento.
+  const unitNameById = Object.fromEntries(orgUnits.map((u) => [u.id, u.name]));
 
   const reload = useCallback(async () => {
     if (loadingRef.current) return;
@@ -111,17 +115,16 @@ export default function AdminEvents() {
 
     const isoDate = typeof date === "string" ? date : date instanceof Date ? date.toISOString().slice(0, 10) : "";
 
-    const normalized = allowedDomain.trim().toLowerCase();
-    const domainToSend = !normalized || normalized === "todos" || normalized === "all" ? null : normalized;
-
     try {
       setCreating(true);
+      // El alcance ya no sale del dominio del email: lo define la unidad del
+      // organigrama y su modo de distribución.
       await adminAPI.createEvent({
         title,
         description: description || null,
         date: isoDate,
         start_time: startTime || null,
-        allowed_domain: domainToSend,
+        allowed_domain: null,
         visibility,
         event_type: eventType,
         location: location || null,
@@ -135,7 +138,6 @@ export default function AdminEvents() {
       setDescription("");
       setDate(null);
       setStartTime("");
-      setAllowedDomain("");
       setVisibility("internal");
       setEventType("participativo");
       setLocation("");
@@ -175,7 +177,8 @@ export default function AdminEvents() {
     setEditDescription(ev.description || "");
     setEditDate(ev.date || "");
     setEditStartTime(ev.start_time || "");
-    setEditAllowedDomain(ev.allowed_domain || "");
+    setEditOrgUnitId(ev.org_unit_id ? String(ev.org_unit_id) : null);
+    setEditDistributionMode(ev.distribution_mode || "unit_only");
     setEditVisibility(ev.visibility || "internal");
     setEditEventType(ev.event_type || "participativo");
     setEditLocation(ev.location || "");
@@ -188,7 +191,8 @@ export default function AdminEvents() {
     setEditDescription("");
     setEditDate("");
     setEditStartTime("");
-    setEditAllowedDomain("");
+    setEditOrgUnitId(null);
+    setEditDistributionMode("unit_only");
     setEditVisibility("internal");
     setEditEventType("participativo");
     setEditLocation("");
@@ -198,9 +202,6 @@ export default function AdminEvents() {
   async function saveEdit() {
     if (!editingEventId || !editTitle || !editDate || savingEdit) return;
 
-    const normalized = editAllowedDomain.trim().toLowerCase();
-    const domainToSend = !normalized || normalized === "todos" || normalized === "all" ? null : normalized;
-
     try {
       setSavingEdit(true);
       await adminAPI.editEvent(editingEventId, {
@@ -208,11 +209,13 @@ export default function AdminEvents() {
         description: editDescription || null,
         date: editDate,
         start_time: editStartTime || null,
-        allowed_domain: domainToSend,
+        allowed_domain: null,
         visibility: editVisibility,
         event_type: editEventType,
         location: editLocation || null,
         external_url: editExternalUrl || null,
+        org_unit_id: editOrgUnitId ? Number(editOrgUnitId) : null,
+        distribution_mode: editDistributionMode,
       });
       cancelEdit();
       await reload();
@@ -257,13 +260,6 @@ export default function AdminEvents() {
           onChange={(e) => setStartTime(e.target.value)}
           mb="sm"
         />
-        <TextInput
-          label="Colectivo (parte después de @)"
-          description="Interno: vacío = solo tu dominio; rellena para acotar a un colectivo concreto. Público: vacío = todos."
-          value={allowedDomain}
-          onChange={(e) => setAllowedDomain(e.target.value)}
-          mb="sm"
-        />
         <Select
           label="Visibilidad"
           data={VISIBILITY_OPTIONS}
@@ -295,41 +291,36 @@ export default function AdminEvents() {
           mb="sm"
         />
 
-        {orgUnits.length > 0 && (
-          <>
-            <Select
-              label="Unidad que organiza"
-              description="Unidad del organigrama a la que pertenece el evento."
-              data={orgUnits.map((u) => ({ value: String(u.id), label: `${u.name} · ${u.level_label}` }))}
-              value={orgUnitId}
-              onChange={setOrgUnitId}
-              searchable
-              allowDeselect={false}
-              mb="sm"
-            />
-            <Select
-              label="Distribución"
-              description="A quién llega el evento dentro de la estructura."
-              data={DISTRIBUTION_OPTIONS}
-              value={distributionMode}
-              onChange={(v) => setDistributionMode(v || "unit_only")}
-              allowDeselect={false}
-              mb="sm"
-            />
-            {distributionMode === "custom" && (
-              <MultiSelect
-                label="Unidades destino"
-                description="Deben depender de la unidad que organiza."
-                data={orgUnits
-                  .filter((u) => orgUnitId && u.path && u.id !== Number(orgUnitId))
-                  .map((u) => ({ value: String(u.id), label: `${u.name} · ${u.level_label}` }))}
-                value={targetUnitIds}
-                onChange={setTargetUnitIds}
-                searchable
-                mb="sm"
-              />
-            )}
-          </>
+        <OrgUnitSelect
+          label="Unidad que organiza"
+          description="Unidad del organigrama a la que pertenece el evento."
+          placeholder="Selecciona una unidad"
+          clearable={false}
+          value={orgUnitId}
+          onChange={setOrgUnitId}
+          mb="sm"
+        />
+        <Select
+          label="Distribución"
+          description="A quién llega el evento dentro de la estructura."
+          data={DISTRIBUTION_OPTIONS}
+          value={distributionMode}
+          onChange={(v) => setDistributionMode(v || "unit_only")}
+          allowDeselect={false}
+          mb="sm"
+        />
+        {distributionMode === "custom" && (
+          <MultiSelect
+            label="Unidades destino"
+            description="Deben depender de la unidad que organiza."
+            data={orgUnits
+              .filter((u) => orgUnitId && u.id !== Number(orgUnitId))
+              .map((u) => ({ value: String(u.id), label: `${"  ".repeat(u.depth)}${u.name} · ${u.level_label}` }))}
+            value={targetUnitIds}
+            onChange={setTargetUnitIds}
+            searchable
+            mb="sm"
+          />
         )}
 
         <Button onClick={createEvent} loading={creating} disabled={creating}>
@@ -378,11 +369,20 @@ export default function AdminEvents() {
                   onChange={(e) => setEditStartTime(e.target.value)}
                   mb="sm"
                 />
-                <TextInput
-                  label="Colectivo"
-                  description="Interno: vacío = solo tu dominio; rellena para acotar a un colectivo concreto. Público: vacío = todos."
-                  value={editAllowedDomain}
-                  onChange={(e) => setEditAllowedDomain(e.target.value)}
+                <OrgUnitSelect
+                  label="Unidad que organiza"
+                  placeholder="Selecciona una unidad"
+                  clearable={false}
+                  value={editOrgUnitId}
+                  onChange={setEditOrgUnitId}
+                  mb="sm"
+                />
+                <Select
+                  label="Distribución"
+                  data={DISTRIBUTION_OPTIONS}
+                  value={editDistributionMode}
+                  onChange={(v) => setEditDistributionMode(v || "unit_only")}
+                  allowDeselect={false}
                   mb="sm"
                 />
                 <Select
@@ -423,9 +423,11 @@ export default function AdminEvents() {
                     {(VISIBILITY_BADGE[ev.visibility] || VISIBILITY_BADGE.internal).label}
                   </Badge>
                 </Group>
-                {ev.allowed_domain && (
+                {ev.org_unit_id && (
                   <p style={{ margin: "4px 0", color: "#555" }}>
-                    Colectivo: <strong>{ev.allowed_domain}</strong>
+                    Ámbito: <strong>{unitNameById[ev.org_unit_id] || "—"}</strong>
+                    {ev.distribution_mode === "subtree" && " (y sus dependientes)"}
+                    {ev.distribution_mode === "custom" && " (unidades específicas)"}
                   </p>
                 )}
                 {ev.location && (

@@ -623,6 +623,15 @@ def can_manage_unit(db: Session, admin: User, target_unit_id: int | None) -> boo
     return False
 
 
+def subtree_unit_ids(db: Session, unit_id: int) -> list[int]:
+    """IDs de una unidad y de todas las que dependen de ella (su rama)."""
+    unit = db.query(OrgUnit).get(unit_id)
+    if unit is None or not unit.path:
+        return []
+    rows = db.query(OrgUnit.id).filter(OrgUnit.path.like(f"{unit.path}%")).all()
+    return [r[0] for r in rows]
+
+
 def can_manage_user(db: Session, admin: User, target_user: User) -> bool:
     if admin.role == "superadmin":
         return True
@@ -750,6 +759,36 @@ FEATURE_COLUMN = {
     "surveys": "surveys_enabled",
     "notifications": "notifications_enabled",
 }
+
+
+def feature_decision_for_unit(db: Session, unit_id: int | None, feature: str) -> bool | None:
+    """Resuelve un módulo recorriendo la cadena de la unidad (ella misma primero,
+    luego sus superiores hasta la raíz). Gana la política más específica.
+
+    Devuelve None si ninguna unidad de la cadena tiene política propia, para que
+    quien llama pueda decidir con el criterio antiguo (dominio/etiqueta o rol).
+    """
+    column_name = FEATURE_COLUMN.get(feature)
+    if not column_name or unit_id is None:
+        return None
+
+    unit = db.query(OrgUnit).get(unit_id)
+    if unit is None or not unit.path:
+        return None
+
+    chain = policy_chain_unit_ids(unit)  # self -> raíz
+    if not chain:
+        return None
+
+    policies = {
+        p.org_unit_id: p for p in
+        db.query(DomainPolicy).filter(DomainPolicy.org_unit_id.in_(chain)).all()
+    }
+    for candidate_id in chain:
+        policy = policies.get(candidate_id)
+        if policy is not None:
+            return bool(getattr(policy, column_name, 0))
+    return None
 
 
 def is_feature_enabled_for_unit(db: Session, unit_id: int | None, feature: str, role: str = "user") -> bool:
