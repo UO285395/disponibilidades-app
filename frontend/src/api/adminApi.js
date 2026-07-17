@@ -217,6 +217,10 @@ export const adminAPI = {
     return request(`/admin/geo/cities?province_id=${provinceId}`);
   },
 
+  geoCreateCity(name, provinceId) {
+    return request("/admin/geo/cities", "POST", { name, province_id: provinceId });
+  },
+
   usersInUnit(unitId) {
     return request(`/admin/users?unit_id=${unitId}`);
   },

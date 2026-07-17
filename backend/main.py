@@ -1257,6 +1257,22 @@ def admin_delete_user(
     db.query(Availability).filter(Availability.user_id == user_id).delete(synchronize_session=False)
     db.query(models.SpaceReservation).filter(models.SpaceReservation.user_id == user_id).delete(synchronize_session=False)
 
+    # Limpiar referencias que apuntan al usuario para no violar claves foráneas
+    # (Postgres las exige; en SQLite local pasaba desapercibido). Incluye las
+    # nuevas del organigrama (admin_assignments) y otras preexistentes.
+    db.query(AdminAssignment).filter(AdminAssignment.user_id == user_id).delete(synchronize_session=False)
+    db.query(AdminAssignment).filter(AdminAssignment.granted_by == user_id).update(
+        {AdminAssignment.granted_by: None}, synchronize_session=False)
+    db.query(models.DeviceToken).filter(models.DeviceToken.user_id == user_id).delete(synchronize_session=False)
+    db.query(models.GuestPolicy).filter(models.GuestPolicy.updated_by == user_id).update(
+        {models.GuestPolicy.updated_by: None}, synchronize_session=False)
+    # created_by es NOT NULL: se reasigna al superadmin que borra para conservar
+    # el historial en vez de romper la FK o perder los registros.
+    db.query(models.Survey).filter(models.Survey.created_by == user_id).update(
+        {models.Survey.created_by: admin.id}, synchronize_session=False)
+    db.query(models.NotificationDispatch).filter(models.NotificationDispatch.created_by == user_id).update(
+        {models.NotificationDispatch.created_by: admin.id}, synchronize_session=False)
+
     db.delete(user)
     db.commit()
 

@@ -328,8 +328,11 @@ function UnitTerritoriesModal({ unit, onClose }) {
   const [provinces, setProvinces] = useState([]);
   const [cities, setCities] = useState([]);
   const [ttype, setTtype] = useState("provincia");
-  const [tid, setTid] = useState(null);
+  const [tid, setTid] = useState(null);                 // comunidad / provincia
+  const [cityProvinceId, setCityProvinceId] = useState(null);
+  const [cityName, setCityName] = useState("");
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -350,22 +353,49 @@ function UnitTerritoriesModal({ unit, onClose }) {
   useEffect(() => { reload(); }, [reload]);
 
   async function loadCitiesFor(provinceId) {
-    const c = await adminAPI.geoCities(provinceId);
-    setCities(c);
+    setCityProvinceId(provinceId);
+    setCities(await adminAPI.geoCities(Number(provinceId)));
   }
 
-  const optionsForType =
-    ttype === "comunidad_autonoma" ? communities.map((c) => ({ value: String(c.id), label: c.name }))
-    : ttype === "provincia" ? provinces.map((p) => ({ value: String(p.id), label: p.name }))
-    : cities.map((c) => ({ value: String(c.id), label: c.name }));
+  function resetForm() {
+    setTid(null);
+    setCityName("");
+    setCityProvinceId(null);
+    setCities([]);
+  }
+
+  const canAdd = ttype === "ciudad" ? Boolean(cityProvinceId && cityName.trim()) : Boolean(tid);
+
+  async function addTerritory() {
+    if (!canAdd) return;
+    try {
+      setSaving(true);
+      if (ttype === "ciudad") {
+        // Las ciudades no vienen sembradas: se crea (o reutiliza) al vuelo.
+        const city = await adminAPI.geoCreateCity(cityName.trim(), Number(cityProvinceId));
+        await adminAPI.orgAddTerritory(unit.id, "ciudad", city.id);
+      } else {
+        await adminAPI.orgAddTerritory(unit.id, ttype, Number(tid));
+      }
+      resetForm();
+      reload();
+    } catch (e) {
+      alert(e?.message || "No se pudo añadir el territorio");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const provinceOptions = provinces.map((p) => ({ value: String(p.id), label: p.name }));
 
   return (
     <Modal opened onClose={onClose} title={`Territorio de "${unit.name}"`} size="lg">
       {loading ? <Loader /> : (
         <>
           <Text size="xs" c="dimmed" mb="sm">
-            El territorio permite mostrar los eventos públicos de esta unidad a los
-            visitantes que eligen su provincia, sin revelar la estructura interna.
+            La provincia determina a qué visitantes se muestran los eventos públicos
+            de esta unidad (sin revelar la estructura interna). La ciudad es texto
+            libre y solo afina; basta con la provincia para el aviso a visitantes.
           </Text>
           <Stack gap="xs" mb="md">
             {rows.length === 0 && <Text size="sm" c="dimmed">Sin territorios asignados.</Text>}
@@ -380,24 +410,40 @@ function UnitTerritoriesModal({ unit, onClose }) {
             ))}
           </Stack>
           <Divider mb="md" />
-          <Group align="flex-end">
-            <Select label="Tipo" data={[
-              { value: "comunidad_autonoma", label: "Comunidad autónoma" },
-              { value: "provincia", label: "Provincia" },
-              { value: "ciudad", label: "Ciudad" },
-            ]} value={ttype} onChange={(v) => { setTtype(v); setTid(null); }} allowDeselect={false} />
-            <Select label="Ámbito" searchable flex={1} data={optionsForType}
-              value={tid}
-              onChange={(v) => setTid(v)}
-              onDropdownOpen={ttype === "ciudad" && provinces.length ? undefined : undefined} />
-            {ttype === "ciudad" && (
-              <Select label="Provincia (para ciudad)" searchable
-                data={provinces.map((p) => ({ value: String(p.id), label: p.name }))}
-                onChange={(v) => v && loadCitiesFor(Number(v))} />
-            )}
-            <Button disabled={!tid}
-              onClick={async () => { await adminAPI.orgAddTerritory(unit.id, ttype, Number(tid)); setTid(null); reload(); }}>
-              Añadir
+
+          <Select label="Tipo de ámbito" mb="sm" data={[
+            { value: "comunidad_autonoma", label: "Comunidad autónoma" },
+            { value: "provincia", label: "Provincia" },
+            { value: "ciudad", label: "Ciudad" },
+          ]} value={ttype} onChange={(v) => { setTtype(v); resetForm(); }} allowDeselect={false} />
+
+          {ttype === "comunidad_autonoma" && (
+            <Select label="Comunidad autónoma" searchable mb="sm"
+              data={communities.map((c) => ({ value: String(c.id), label: c.name }))}
+              value={tid} onChange={setTid} />
+          )}
+
+          {ttype === "provincia" && (
+            <Select label="Provincia" searchable mb="sm"
+              data={provinceOptions} value={tid} onChange={setTid} />
+          )}
+
+          {ttype === "ciudad" && (
+            <>
+              <Select label="Provincia de la ciudad" searchable mb="sm"
+                data={provinceOptions}
+                value={cityProvinceId ? String(cityProvinceId) : null}
+                onChange={(v) => v && loadCitiesFor(v)} />
+              <TextInput label="Ciudad" placeholder="Escribe el nombre de la ciudad"
+                description={cities.length ? `Ya registradas: ${cities.map((c) => c.name).join(", ")}` : "Se creará si no existe."}
+                value={cityName} onChange={(e) => setCityName(e.target.value)}
+                disabled={!cityProvinceId} mb="sm" />
+            </>
+          )}
+
+          <Group justify="flex-end">
+            <Button onClick={addTerritory} loading={saving} disabled={!canAdd}>
+              Añadir territorio
             </Button>
           </Group>
         </>
