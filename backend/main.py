@@ -1289,6 +1289,10 @@ def remove_admin(
         raise HTTPException(403, "No puedes administrar usuarios de otro dominio")
 
     user.role = "user"
+    # Al dejar de ser admin, se retira su autoridad sobre unidades del organigrama.
+    db.query(AdminAssignment).filter(
+        AdminAssignment.user_id == user.id
+    ).update({AdminAssignment.is_active: 0})
     db.commit()
 
     return {"ok": True}
@@ -1317,6 +1321,28 @@ def make_admin(
         raise HTTPException(403, "No puedes administrar usuarios de otro dominio")
 
     user.role = "admin"
+
+    # Otorgar autoridad sobre su propia unidad. Sin esto, el nuevo motor de
+    # permisos (basado en AdminAssignment) dejaría al admin sin ninguna unidad
+    # que gestionar: no podría ni listar ni crear usuarios de su colectivo.
+    unit_id = user.org_unit_id
+    if unit_id is None:
+        colectivo = org_service.ensure_colectivo_for_domain(db, _get_domain(user.email))
+        unit_id = colectivo.id if colectivo else None
+        user.org_unit_id = unit_id
+    if unit_id is not None:
+        existing = db.query(AdminAssignment).filter(
+            AdminAssignment.user_id == user.id,
+            AdminAssignment.org_unit_id == unit_id,
+        ).first()
+        if existing:
+            existing.is_active = 1
+        else:
+            db.add(AdminAssignment(
+                user_id=user.id, org_unit_id=unit_id, granted_by=admin.id,
+                created_at=datetime.utcnow().isoformat(), is_active=1,
+            ))
+
     db.commit()
 
     return {"ok": True}
