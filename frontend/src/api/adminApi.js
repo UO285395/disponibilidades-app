@@ -197,8 +197,8 @@ export const adminAPI = {
     return request(`/admin/org/units/${unitId}/admins`);
   },
 
-  orgGrantAdmin(unitId, userId) {
-    return request(`/admin/org/units/${unitId}/admins`, "POST", { user_id: userId });
+  orgGrantAdmin(unitId, userId, scope = "subtree") {
+    return request(`/admin/org/units/${unitId}/admins`, "POST", { user_id: userId, scope });
   },
 
   orgRevokeAdmin(assignmentId) {

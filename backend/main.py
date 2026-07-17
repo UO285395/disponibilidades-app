@@ -610,6 +610,7 @@ class OrgUnitMove(BaseModel):
 
 class OrgAssignmentCreate(BaseModel):
     user_id: int
+    scope: str = "subtree"  # subtree (toda la rama) | unit_only (solo esta unidad)
 
 
 class OrgTerritoryCreate(BaseModel):
@@ -974,7 +975,10 @@ def org_list_unit_admins(
     for a in assignments:
         u = db.query(User).get(a.user_id)
         if u:
-            result.append({"assignment_id": a.id, "user_id": u.id, "email": u.email, "full_name": u.full_name})
+            result.append({
+                "assignment_id": a.id, "user_id": u.id, "email": u.email,
+                "full_name": u.full_name, "scope": a.scope or "subtree",
+            })
     return result
 
 
@@ -994,16 +998,21 @@ def org_grant_admin(
     if not unit or not target:
         raise HTTPException(404, "Unidad o usuario no encontrado")
 
+    scope = (data.scope or "subtree").strip().lower()
+    if scope not in ("subtree", "unit_only"):
+        raise HTTPException(400, "scope inválido: usa subtree o unit_only")
+
     existing = db.query(AdminAssignment).filter(
         AdminAssignment.user_id == target.id,
         AdminAssignment.org_unit_id == unit_id,
     ).first()
     if existing:
         existing.is_active = 1
+        existing.scope = scope
     else:
         db.add(AdminAssignment(
             user_id=target.id, org_unit_id=unit_id, granted_by=admin.id,
-            created_at=datetime.utcnow().isoformat(), is_active=1,
+            scope=scope, created_at=datetime.utcnow().isoformat(), is_active=1,
         ))
     # Otorgar autoridad implica al menos rol admin.
     if target.role == "user":

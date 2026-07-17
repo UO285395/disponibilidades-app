@@ -294,11 +294,20 @@ function MoveUnitModal({ unit, tree, onClose, onDone }) {
   );
 }
 
+const SCOPE_LABEL = {
+  subtree: "Toda la rama",
+  unit_only: "Solo esta unidad",
+};
+
 function UnitAdminsModal({ unit, onClose }) {
   const [admins, setAdmins] = useState([]);
   const [users, setUsers] = useState([]);
   const [picked, setPicked] = useState(null);
+  const [scope, setScope] = useState("subtree");
+  const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  const hasChildren = (unit.child_count ?? 0) > 0;
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -313,6 +322,20 @@ function UnitAdminsModal({ unit, onClose }) {
 
   useEffect(() => { reload(); }, [reload]);
 
+  async function grant() {
+    if (!picked) return;
+    try {
+      setSaving(true);
+      await adminAPI.orgGrantAdmin(unit.id, Number(picked), scope);
+      setPicked(null);
+      reload();
+    } catch (e) {
+      alert(e?.message || "No se pudo asignar");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <Modal opened onClose={onClose} title={`Administradores de "${unit.name}"`}>
       {loading ? <Loader /> : (
@@ -320,8 +343,16 @@ function UnitAdminsModal({ unit, onClose }) {
           <Stack gap="xs" mb="md">
             {admins.length === 0 && <Text size="sm" c="dimmed">Sin administradores asignados.</Text>}
             {admins.map((a) => (
-              <Group key={a.assignment_id} justify="space-between">
-                <Text size="sm">{a.full_name} · {a.email}</Text>
+              <Group key={a.assignment_id} justify="space-between" wrap="nowrap">
+                <div>
+                  <Text size="sm">{a.full_name}</Text>
+                  <Group gap={6}>
+                    <Text size="xs" c="dimmed">{a.email}</Text>
+                    <Badge size="xs" variant="light" color={a.scope === "unit_only" ? "gray" : "blue"}>
+                      {SCOPE_LABEL[a.scope] || SCOPE_LABEL.subtree}
+                    </Badge>
+                  </Group>
+                </div>
                 <Button size="compact-xs" color="red" variant="subtle"
                   onClick={async () => { await adminAPI.orgRevokeAdmin(a.assignment_id); reload(); }}>
                   Quitar
@@ -330,14 +361,26 @@ function UnitAdminsModal({ unit, onClose }) {
             ))}
           </Stack>
           <Divider mb="md" />
-          <Group align="flex-end">
-            <Select label="Añadir administrador" searchable flex={1}
-              data={users.map((u) => ({ value: String(u.id), label: `${u.full_name} · ${u.email}` }))}
-              value={picked} onChange={setPicked} />
-            <Button disabled={!picked}
-              onClick={async () => { await adminAPI.orgGrantAdmin(unit.id, Number(picked)); setPicked(null); reload(); }}>
-              Añadir
-            </Button>
+          <Select label="Añadir administrador" searchable mb="sm"
+            placeholder="Elige una persona"
+            data={users.map((u) => ({ value: String(u.id), label: `${u.full_name} · ${u.email}` }))}
+            value={picked} onChange={setPicked} />
+          {hasChildren && (
+            <Select
+              label="Alcance"
+              description="Qué puede gestionar dentro de esta estructura"
+              data={[
+                { value: "subtree", label: "Toda la rama (esta unidad y las que dependen de ella)" },
+                { value: "unit_only", label: "Solo esta unidad (no sus dependientes)" },
+              ]}
+              value={scope}
+              onChange={(v) => setScope(v || "subtree")}
+              allowDeselect={false}
+              mb="sm"
+            />
+          )}
+          <Group justify="flex-end">
+            <Button disabled={!picked} loading={saving} onClick={grant}>Añadir</Button>
           </Group>
         </>
       )}

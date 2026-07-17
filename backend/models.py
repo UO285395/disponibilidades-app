@@ -412,6 +412,10 @@ class AdminAssignment(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     org_unit_id = Column(Integer, ForeignKey("org_units.id"), nullable=False, index=True)
+    # Alcance de la autoridad sobre la unidad asignada:
+    #   subtree   -> la unidad y todas las que dependen de ella (todo el comité)
+    #   unit_only -> solo esa unidad concreta (p. ej. solo su colectivo)
+    scope = Column(String, nullable=False, default="subtree")
     granted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(String, nullable=True)
     is_active = Column(Integer, nullable=False, default=1)

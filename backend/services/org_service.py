@@ -137,6 +137,9 @@ def ensure_org_hierarchy_schema_compatibility(engine, session_factory):
             ("surveys", "distribution_mode", "VARCHAR DEFAULT 'unit_only'"),
             ("spaces", "org_unit_id", "INTEGER"),
             ("spaces", "distribution_mode", "VARCHAR DEFAULT 'unit_only'"),
+            # Las asignaciones preexistentes eran de rama completa: default subtree
+            # preserva el comportamiento actual.
+            ("admin_assignments", "scope", "VARCHAR DEFAULT 'subtree'"),
         ]
         with engine.begin() as conn:
             for table, column, ddl in column_specs:
@@ -697,9 +700,33 @@ def authorized_root_units(db: Session, admin: User) -> list[OrgUnit]:
     return result
 
 
+def authorized_scopes(db: Session, admin: User) -> list[tuple[OrgUnit, str]]:
+    """Pares (unidad asignada, alcance) del admin. Alcance: 'subtree' (la unidad
+    y su rama) o 'unit_only' (solo esa unidad). Superadmin = raíz en 'subtree'.
+    Cacheado por petición (se consulta dentro de bucles)."""
+    cache = _request_cache(db).setdefault("scopes", {})
+    if admin.id in cache:
+        return cache[admin.id]
+
+    if admin.role == "superadmin":
+        root = get_root_unit(db)
+        result = [(root, "subtree")] if root else []
+    else:
+        assignments = db.query(AdminAssignment).filter(
+            AdminAssignment.user_id == admin.id,
+            AdminAssignment.is_active == 1,
+        ).all()
+        by_unit = {a.org_unit_id: (a.scope or "subtree") for a in assignments}
+        units = db.query(OrgUnit).filter(OrgUnit.id.in_(by_unit.keys())).all() if by_unit else []
+        result = [(u, by_unit.get(u.id, "subtree")) for u in units]
+
+    cache[admin.id] = result
+    return result
+
+
 def can_manage_unit(db: Session, admin: User, target_unit_id: int | None) -> bool:
-    """Comprobación canónica de autoridad. True si target es la propia unidad
-    asignada o un descendiente estructural de alguna asignación del admin."""
+    """Comprobación canónica de autoridad. Respeta el alcance de cada asignación:
+    con 'unit_only' solo vale la unidad exacta; con 'subtree', también su rama."""
     if admin.role == "superadmin":
         return True
     if target_unit_id is None:
@@ -707,8 +734,10 @@ def can_manage_unit(db: Session, admin: User, target_unit_id: int | None) -> boo
     target = unit_by_id(db, target_unit_id)
     if target is None:
         return False
-    for root in authorized_root_units(db, admin):
-        if target.id == root.id or (root.path and target.path.startswith(root.path)):
+    for root, scope in authorized_scopes(db, admin):
+        if target.id == root.id:
+            return True
+        if scope == "subtree" and root.path and target.path.startswith(root.path):
             return True
     return False
 
@@ -738,12 +767,17 @@ def authorized_subtree_unit_ids(db: Session, admin: User) -> list[int] | None:
     if admin.id in cache:
         return cache[admin.id]
 
-    roots = authorized_root_units(db, admin)
-    clauses = [OrgUnit.path.like(f"{r.path}%") for r in roots if r.path]
-    if not clauses:
-        cache[admin.id] = []
-        return []
-    result = [u.id for u in db.query(OrgUnit.id).filter(or_(*clauses)).all()]
+    scopes = authorized_scopes(db, admin)
+    # Las asignaciones 'unit_only' aportan solo su propia unidad; las 'subtree',
+    # toda su rama.
+    unit_only_ids = {root.id for root, scope in scopes if scope == "unit_only"}
+    subtree_clauses = [OrgUnit.path.like(f"{root.path}%") for root, scope in scopes if scope == "subtree" and root.path]
+
+    ids = set(unit_only_ids)
+    if subtree_clauses:
+        ids.update(u.id for u in db.query(OrgUnit.id).filter(or_(*subtree_clauses)).all())
+
+    result = list(ids)
     cache[admin.id] = result
     return result
 
