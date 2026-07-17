@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Menu, Button } from "@mantine/core";
+import { Capacitor } from "@capacitor/core";
 import { calendarAPI } from "../api/api.js";
 
 function pad2(value) {
@@ -43,25 +44,42 @@ export function buildGoogleCalendarUrl(event) {
 }
 
 export default function AddToCalendarButton({ event, size = "xs", variant = "subtle" }) {
-  const [downloading, setDownloading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const isNative = Capacitor.isNativePlatform();
 
-  async function downloadIcs() {
+  async function exportIcs() {
     try {
-      setDownloading(true);
+      setBusy(true);
+      // En nativo esto abre la hoja de compartir para añadirlo al calendario;
+      // en web descarga el .ics.
       await calendarAPI.downloadEvent(event.id);
     } catch (e) {
-      alert(e?.message || "No se pudo exportar el evento");
+      alert(e?.message || "No se pudo añadir al calendario");
     } finally {
-      setDownloading(false);
+      setBusy(false);
     }
   }
 
+  // stopPropagation: en PublicHome la card entera navega al detalle al hacer clic.
+  const stop = (e) => e.stopPropagation();
+
+  // En móvil, una sola acción clara: compartir el .ics cubre cualquier app de
+  // calendario. En web mantenemos también el atajo a Google Calendar.
+  if (isNative) {
+    return (
+      <span onClick={stop}>
+        <Button size={size} variant={variant} loading={busy} onClick={exportIcs}>
+          📅 Añadir a calendario
+        </Button>
+      </span>
+    );
+  }
+
   return (
-    // stopPropagation: en PublicHome la card entera navega al detalle al hacer clic.
-    <span onClick={(e) => e.stopPropagation()}>
+    <span onClick={stop}>
       <Menu withinPortal position="bottom-end" shadow="md">
         <Menu.Target>
-          <Button size={size} variant={variant} loading={downloading}>
+          <Button size={size} variant={variant} loading={busy}>
             📅 Añadir a calendario
           </Button>
         </Menu.Target>
@@ -74,8 +92,8 @@ export default function AddToCalendarButton({ event, size = "xs", variant = "sub
           >
             Google Calendar
           </Menu.Item>
-          <Menu.Item onClick={downloadIcs}>
-            Calendario del dispositivo (.ics)
+          <Menu.Item onClick={exportIcs}>
+            Descargar .ics
           </Menu.Item>
         </Menu.Dropdown>
       </Menu>

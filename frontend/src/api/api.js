@@ -295,6 +295,41 @@ export const eventsAPI = {
 
 // ------------------- CALENDARIO (export iCalendar) -------------------
 
+// En web se descarga el .ics con el truco del <a download>. En la APK ESO NO
+// FUNCIONA: el WebView de Android no tiene gestor de descargas, así que al
+// pulsar no pasaba nada. En nativo se escribe el .ics a un archivo y se abre la
+// hoja de compartir del sistema, desde la que el usuario lo añade a su
+// calendario (Google Calendar, Samsung, Outlook... todos importan .ics).
+async function shareIcsNative(icsText, filename) {
+  const { Filesystem, Directory, Encoding } = await import("@capacitor/filesystem");
+  const { Share } = await import("@capacitor/share");
+
+  await Filesystem.writeFile({
+    path: filename,
+    data: icsText,
+    directory: Directory.Cache,
+    encoding: Encoding.UTF8,
+  });
+  const { uri } = await Filesystem.getUri({ path: filename, directory: Directory.Cache });
+
+  await Share.share({
+    title: "Añadir a calendario",
+    files: [uri],
+  });
+}
+
+function downloadIcsWeb(icsText, filename) {
+  const blob = new Blob([icsText], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 async function downloadIcsFromEndpoint(endpoint, filename) {
   const opts = { method: "GET", headers: {} };
   const token = getToken();
@@ -306,15 +341,13 @@ async function downloadIcsFromEndpoint(endpoint, filename) {
     throw new Error(`HTTP ${res.status} - ${text}`);
   }
 
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  const icsText = await res.text();
+
+  if (Capacitor.isNativePlatform()) {
+    await shareIcsNative(icsText, filename);
+  } else {
+    downloadIcsWeb(icsText, filename);
+  }
 }
 
 export const calendarAPI = {
