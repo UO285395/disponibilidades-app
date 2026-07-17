@@ -1,6 +1,6 @@
 # Plan de optimización
 
-> **Estado: Fases 1 y 2 aplicadas y medidas.** Ver §6 al final para los resultados reales.
+> **Estado: Fases 1, 2, 3 y 4 aplicadas.** Ver §6 al final para los resultados reales.
 
 Repaso de rendimiento y peso de la aplicación. **Todo lo que sigue está medido**, no estimado:
 las cifras salen de instrumentar el backend contando consultas SQL reales con volumen de prueba
@@ -176,8 +176,41 @@ y las páginas públicas también lo necesitan, así que no se puede diferir. Lo
 **30 kB comprimidos** por la red; trocearlo obliga a listar cada componente usado, es frágil y se
 rompe en silencio al añadir uno nuevo. El coste/beneficio no sale.
 
+### Fase 3 — Red y refresco
+
+- **Árbol del organigrama compartido**: cada `OrgUnitSelect` pedía `/admin/org/tree` por su cuenta;
+  una pantalla con dos selectores hacía dos peticiones idénticas. Ahora hay una caché compartida con
+  **deduplicación de peticiones en vuelo**: si tres componentes lo piden a la vez, sale **una sola**.
+  La pantalla de estructura la invalida al cambiar el árbol, así que no se muestran datos obsoletos.
+- **El sondeo del calendario ya no corre en segundo plano**: antes el intervalo de 15 s seguía
+  disparando peticiones con la app minimizada, gastando datos y batería en la APK para nada.
+- **ETag / 304 en `/admin/availability`**: la vista se sondea cada 15 s y casi nunca cambia. Si el
+  cliente ya tiene esa respuesta, el servidor devuelve **304 sin cuerpo** (verificado: 0 bytes frente
+  al listado completo). El navegador revalida solo, así que no hizo falta tocar el cliente.
+
+**Descartado por ahora**: paginación (§3.3). Con las consultas ya constantes y el filtro por
+estructura acotando el listado, añadir paginación complicaría API y UI sin resolver un problema real
+al volumen actual. Es lo siguiente a hacer **si** los listados crecen a miles por ámbito.
+
+### Fase 4 — Base de datos: un fallo silencioso que sí importaba
+
+Al revisar los índices reales (en vez de fiarse del modelo) apareció esto:
+
+> **Añadir una columna con `ALTER TABLE` no crea su índice, aunque el modelo lo declare con
+> `index=True`.** Ese `index=True` solo aplica al *crear* la tabla. Como las columnas `org_unit_id`
+> se añadieron por migración a tablas que ya existían, **quedaron sin índice en toda base de datos
+> preexistente — producción incluida**.
+
+Justo `users.org_unit_id` es ahora el filtro de ámbito más caliente (lo introdujo la Fase 1), y
+`availabilities.user_id` sostiene el join del calendario. La migración crea ya explícitamente:
+`ix_users_org_unit_id`, `ix_availabilities_user_id`, `ix_events_org_unit_id`,
+`ix_device_tokens_org_unit_id`, `ix_spaces_org_unit_id`, `ix_surveys_org_unit_id` y el de destinos de
+distribución.
+
 ### Conclusión
 
 **El cuello de botella real era el backend, no el peso del frontend.** La sensación de lentitud al
 refrescar venía de cientos de viajes a la base de datos por petición, no de descargar JavaScript.
-Quedan pendientes las Fases 3 y 4, de menor impacto.
+
+Las cuatro fases están aplicadas. El orden importó: sin resolver antes los N+1, los índices de la
+Fase 4 apenas se habrían notado.

@@ -2694,6 +2694,8 @@ def delete_availability(
 
 @app.get("/admin/availability")
 def admin_all_availability(
+    request: Request,
+    response: Response,
     unit_id: int | None = Query(None),
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
     db: Session = Depends(get_db)
@@ -2732,7 +2734,7 @@ def admin_all_availability(
 
     unit_names = {u.id: u.name for u in db.query(models.OrgUnit).all()}
 
-    return [
+    payload = [
         {
             "id": a.id,
             "user": a.user.full_name,
@@ -2747,6 +2749,18 @@ def admin_all_availability(
         }
         for a in items
     ]
+
+    # ETag: esta vista se sondea cada 15 s y casi nunca cambia. Si el cliente ya
+    # tiene esta misma respuesta, se le devuelve 304 sin cuerpo: el sondeo pasa a
+    # costar unos bytes en vez del listado entero (importa en la APK, con datos
+    # móviles).
+    etag = '"' + hashlib.md5(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest() + '"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-cache"})
+
+    response.headers["ETag"] = etag
+    response.headers["Cache-Control"] = "no-cache"
+    return payload
 
 
 # =========================================================

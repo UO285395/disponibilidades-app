@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Select } from "@mantine/core";
-import { adminAPI } from "../api/adminApi.js";
+import { getOrgTree } from "../api/orgTreeCache.js";
 
 // Selector jerárquico de unidades del organigrama con búsqueda incremental.
 // Sustituye a los antiguos filtros por dominio (la parte derecha del @).
@@ -21,7 +21,7 @@ export default function OrgUnitSelect({
 
   useEffect(() => {
     let active = true;
-    adminAPI.orgTree()
+    getOrgTree()
       .then((tree) => {
         if (!active) return;
         setUnits(activeOnly ? tree.filter((u) => u.is_active) : tree);

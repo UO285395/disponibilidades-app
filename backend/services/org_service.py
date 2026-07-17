@@ -143,6 +143,29 @@ def ensure_org_hierarchy_schema_compatibility(engine, session_factory):
                 if table in table_names:
                     _add_column_if_missing(conn, inspector, table, column, ddl)
 
+        # 1.b) Índices de las columnas de filtro.
+        # OJO: añadir una columna con ALTER TABLE NO crea el índice aunque el
+        # modelo lo declare con index=True (eso solo aplica al crear la tabla).
+        # Sin esto, users.org_unit_id —el filtro de ámbito más caliente— queda
+        # sin índice en cualquier base de datos preexistente, incluida producción.
+        index_specs = [
+            ("ix_users_org_unit_id", "users", "org_unit_id"),
+            ("ix_events_org_unit_id", "events", "org_unit_id"),
+            ("ix_availabilities_user_id", "availabilities", "user_id"),
+            ("ix_device_tokens_org_unit_id", "device_tokens", "org_unit_id"),
+            ("ix_spaces_org_unit_id", "spaces", "org_unit_id"),
+            ("ix_surveys_org_unit_id", "surveys", "org_unit_id"),
+            ("ix_content_distribution_targets_content", "content_distribution_targets", "content_type, content_id"),
+        ]
+        with engine.begin() as conn:
+            for index_name, table, columns in index_specs:
+                if table not in table_names and table != "content_distribution_targets":
+                    continue
+                try:
+                    conn.execute(text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table}({columns})"))
+                except Exception as exc:
+                    print(f"⚠️ No se pudo crear el índice {index_name}: {exc}")
+
         db = session_factory()
         try:
             _seed_level_types_and_rules(db)

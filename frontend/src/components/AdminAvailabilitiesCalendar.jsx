@@ -99,7 +99,11 @@ export default function AdminAvailabilitiesCalendar() {
 
     loadAvailabilities();
 
+    // Solo se sondea cuando la pantalla está visible: antes el intervalo seguía
+    // corriendo con la app en segundo plano, gastando datos y batería en la APK
+    // para nada.
     const intervalId = window.setInterval(() => {
+      if (document.hidden) return;
       loadAvailabilities();
     }, 15000);
 

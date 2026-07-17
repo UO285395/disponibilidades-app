@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, Button, TextInput, Title, Textarea, Text, Group, Select, Badge, MultiSelect } from "@mantine/core";
 import { adminAPI } from "../api/adminApi.js";
+import { getOrgTree } from "../api/orgTreeCache.js";
 import OrgUnitSelect from "./OrgUnitSelect.jsx";
 import { useNavigate } from "react-router-dom";
 
@@ -79,7 +80,9 @@ export default function AdminEvents() {
     reload();
     // Cargar el árbol de unidades que el admin puede administrar (para elegir
     // unidad propietaria y modo de distribución del evento).
-    adminAPI.orgTree()
+    // Caché compartida: el OrgUnitSelect de este mismo formulario ya lo pide,
+    // así que ambos se sirven de una única petición.
+    getOrgTree()
       .then((units) => {
         if (!mountedRef.current) return;
         const active = units.filter((u) => u.is_active);

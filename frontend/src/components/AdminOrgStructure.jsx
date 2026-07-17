@@ -4,6 +4,7 @@ import {
   Select, ActionIcon, Divider, Box, Loader,
 } from "@mantine/core";
 import { adminAPI } from "../api/adminApi.js";
+import { invalidateOrgTree } from "../api/orgTreeCache.js";
 
 // Pantalla de gestión del organigrama (estructura organizativa). Permite ver
 // el árbol, crear/renombrar/mover/desactivar unidades, asignar administradores
@@ -25,6 +26,10 @@ export default function AdminOrgStructure() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      // Esta pantalla se recarga tras cada cambio de la estructura, así que es
+      // el punto natural para tirar la caché compartida y que los selectores de
+      // ámbito de otras pantallas no muestren una estructura obsoleta.
+      invalidateOrgTree();
       const [treeData, types] = await Promise.all([
         adminAPI.orgTree(),
         adminAPI.orgLevelTypes(),
