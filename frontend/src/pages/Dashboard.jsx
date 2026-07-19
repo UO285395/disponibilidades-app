@@ -1,19 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Title, Button, Box, Text, Group, Tabs, Card, Menu, ActionIcon, Avatar,
-  Center, Loader, SegmentedControl, Stack,
+  Center, Loader, SegmentedControl, Stack, Badge,
 } from "@mantine/core";
 import {
   IconCalendarTime, IconCalendarEvent, IconBuildingCommunity, IconDotsVertical,
-  IconUserShield, IconKey, IconLogout,
+  IconUserShield, IconKey, IconLogout, IconBell,
 } from "@tabler/icons-react";
-import { clearToken } from "../api/api.js";
+import { clearToken, eventsAPI } from "../api/api.js";
 import { useSessionUser } from "../hooks/useSessionUser.js";
 import MobileWeekCalendar from "../components/MobileWeekCalendar.jsx";
 import EventsSection from "../components/EventsSection.jsx";
 import SpaceReservations from "../components/SpaceReservations.jsx";
 import ChangePasswordModal from "../components/ChangePasswordModal.jsx";
+import ReminderPrefsModal from "../components/ReminderPrefsModal.jsx";
 import SessionExpiredModal from "../components/SessionExpiredModal.jsx";
 
 function initials(name) {
@@ -30,6 +31,33 @@ export default function Dashboard() {
   const [offsetWeeks, setOffsetWeeks] = useState("0");
   const navigate = useNavigate();
   const [changePasswordOpened, setChangePasswordOpened] = useState(false);
+  const [reminderPrefsOpened, setReminderPrefsOpened] = useState(false);
+  const [pendingEvents, setPendingEvents] = useState(0);
+
+  // Conteo ligero de eventos sin responder para el badge de la pestaña.
+  // Se hace aquí porque el panel de eventos no está montado si la pestaña no
+  // está activa (keepMounted={false}).
+  useEffect(() => {
+    if (!user?.events_enabled) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [events, myResponses] = await Promise.all([
+          eventsAPI.list(),
+          eventsAPI.myResponses(),
+        ]);
+        if (cancelled) return;
+        const answered = new Set(
+          (myResponses || []).map((r) => Number(r && typeof r === "object" ? r.event_id : r))
+        );
+        const pending = (events || []).filter((ev) => !answered.has(Number(ev.id))).length;
+        setPendingEvents(pending);
+      } catch {
+        // Silencioso: el badge es informativo, no crítico.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.events_enabled]);
 
   async function logout() {
     await clearToken();
@@ -71,6 +99,9 @@ export default function Dashboard() {
                 Panel de administración
               </Menu.Item>
             )}
+            <Menu.Item leftSection={<IconBell size={18} />} onClick={() => setReminderPrefsOpened(true)}>
+              Recordatorios
+            </Menu.Item>
             <Menu.Item leftSection={<IconKey size={18} />} onClick={() => setChangePasswordOpened(true)}>
               Cambiar contraseña
             </Menu.Item>
@@ -87,6 +118,11 @@ export default function Dashboard() {
         onClose={() => setChangePasswordOpened(false)}
       />
 
+      <ReminderPrefsModal
+        opened={reminderPrefsOpened}
+        onClose={() => setReminderPrefsOpened(false)}
+      />
+
       <Tabs defaultValue={defaultTab} variant="outline" keepMounted={false}>
         <Tabs.List grow mb="md">
           {user.availabilities_enabled && (
@@ -95,7 +131,13 @@ export default function Dashboard() {
             </Tabs.Tab>
           )}
           {user.events_enabled && (
-            <Tabs.Tab value="events" leftSection={<IconCalendarEvent size={18} />}>
+            <Tabs.Tab
+              value="events"
+              leftSection={<IconCalendarEvent size={18} />}
+              rightSection={pendingEvents > 0 ? (
+                <Badge size="sm" circle variant="filled" color="red">{pendingEvents}</Badge>
+              ) : null}
+            >
               Eventos
             </Tabs.Tab>
           )}

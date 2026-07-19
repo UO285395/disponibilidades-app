@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Badge, Card, Group, SimpleGrid, Text } from "@mantine/core";
+import { Card, Group, SimpleGrid, Text } from "@mantine/core";
 import { availabilityAPI } from "../api/api.js";
 
 function startOfWeek(date) {
@@ -161,8 +161,11 @@ export default function MobileWeekCalendar({ offsetWeeks = 0 }) {
 
   const days = useMemo(() => {
     const weekStart = addDays(startOfWeek(new Date()), offsetWeeks * 7);
-    return Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
-  }, [offsetWeeks]);
+    // Ocultamos los días ya vencidos para no ocupar scroll con tarjetas
+    // bloqueadas: en la semana actual solo se muestran hoy y los siguientes.
+    return Array.from({ length: 7 }, (_, index) => addDays(weekStart, index))
+      .filter((day) => day >= today);
+  }, [offsetWeeks, today]);
   const hours = useMemo(() => Array.from({ length: 16 }, (_, index) => index + 8), []);
 
   return (
@@ -170,19 +173,9 @@ export default function MobileWeekCalendar({ offsetWeeks = 0 }) {
       <SimpleGrid cols={{ base: 1, sm: 2, xl: 3 }} spacing="md">
         {days.map((day) => {
           const date = formatISO(day);
-          const expired = isPastDate(date);
 
           return (
-            <Card
-              key={date}
-              withBorder
-              radius="md"
-              padding="md"
-              style={{
-                background: expired ? "#f8f9fa" : "#ffffff",
-                opacity: expired ? 0.8 : 1,
-              }}
-            >
+            <Card key={date} withBorder radius="md" padding="md">
               <Group justify="space-between" mb="sm">
                 <div>
                   <Text fw={700}>
@@ -192,53 +185,48 @@ export default function MobileWeekCalendar({ offsetWeeks = 0 }) {
                       month: "long",
                     })}
                   </Text>
-                  <Text size="xs" c="dimmed">
-                    {expired ? "Día vencido" : "Selecciona franjas"}
-                  </Text>
+                  <Text size="xs" c="dimmed">Selecciona franjas</Text>
                 </div>
-                {expired && <Badge color="gray">Vencido</Badge>}
               </Group>
 
-              {!expired && (
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-                    gap: 8,
-                  }}
-                >
-                  {hours.map((hour) => {
-                    const key = `${date}-${hour}`;
-                    const active = isAvailable(date, hour);
-                    const pending = pendingKeys.has(key);
-                    const disabled = pending;
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                  gap: 8,
+                }}
+              >
+                {hours.map((hour) => {
+                  const key = `${date}-${hour}`;
+                  const active = isAvailable(date, hour);
+                  const pending = pendingKeys.has(key);
+                  const disabled = pending;
 
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => !disabled && toggleCell(date, hour)}
-                        disabled={disabled}
-                        style={{
-                          border: pending ? "1px solid #f08c00" : active ? "1px solid #2f9e44" : "1px solid #d0d7de",
-                          borderRadius: 10,
-                          minHeight: 48,
-                          padding: "8px 4px",
-                          textAlign: "center",
-                          background: pending ? "#ffeaa7" : active ? "#abf5d1" : "#ffffff",
-                          color: "#1f2328",
-                          cursor: disabled ? "not-allowed" : "pointer",
-                          opacity: pending ? 0.75 : 1,
-                          fontSize: 12,
-                          fontWeight: 600,
-                        }}
-                      >
-                        {hour}-{hour + 1}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => !disabled && toggleCell(date, hour)}
+                      disabled={disabled}
+                      style={{
+                        border: pending ? "1px solid #f08c00" : active ? "1px solid #2f9e44" : "1px solid #d0d7de",
+                        borderRadius: 10,
+                        minHeight: 48,
+                        padding: "8px 4px",
+                        textAlign: "center",
+                        background: pending ? "#ffeaa7" : active ? "#abf5d1" : "#ffffff",
+                        color: "#1f2328",
+                        cursor: disabled ? "not-allowed" : "pointer",
+                        opacity: pending ? 0.75 : 1,
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {hour}-{hour + 1}
+                    </button>
+                  );
+                })}
+              </div>
             </Card>
           );
         })}

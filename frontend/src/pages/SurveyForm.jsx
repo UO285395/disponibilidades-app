@@ -13,6 +13,7 @@ import {
   Card,
 } from "@mantine/core";
 import { request } from "../api/api.js";
+import { notifyError } from "../utils/notify.js";
 
 export default function SurveyForm() {
   const { token } = useParams();
@@ -32,7 +33,7 @@ export default function SurveyForm() {
           init[String(field.id)] = "";
         });
         setValues(init);
-      } catch (e) {
+      } catch {
         setError("Encuesta no encontrada o enlace incorrecto.");
       }
     })();
@@ -48,7 +49,7 @@ export default function SurveyForm() {
     const fields = survey?.fields || [];
     for (const field of fields) {
       if (field.required && !String(values[String(field.id)] ?? "").trim()) {
-        alert(`El campo "${field.label}" es obligatorio.`);
+        notifyError(`El campo "${field.label}" es obligatorio.`, "Falta un campo");
         return;
       }
     }
@@ -58,7 +59,7 @@ export default function SurveyForm() {
       await request(`/encuesta/${token}`, "POST", values, false);
       setDone(true);
     } catch (e) {
-      alert(e?.message || "Error enviando la encuesta. Intentalo de nuevo.");
+      notifyError(e?.message || "Error enviando la encuesta. Inténtalo de nuevo.");
     } finally {
       setSubmitting(false);
     }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Card,
   Title,
@@ -18,18 +18,27 @@ export default function AdminSpaces() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  useEffect(() => {
-    reload();
-  }, []);
-
-  async function reload() {
+  const reload = useCallback(async () => {
     try {
       const list = await adminAPI.listSpaces();
       setSpaces(list);
     } catch (e) {
       console.error(e);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await adminAPI.listSpaces();
+        if (!cancelled) setSpaces(list);
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   async function create() {
     setError("");

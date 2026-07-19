@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, Button, TextInput, Title, Textarea, Text, Group, Select, Badge, MultiSelect } from "@mantine/core";
 import { adminAPI } from "../api/adminApi.js";
 import { getOrgTree } from "../api/orgTreeCache.js";
+import { notifyError } from "../utils/notify.js";
 import OrgUnitSelect from "./OrgUnitSelect.jsx";
 import { useNavigate } from "react-router-dom";
 
@@ -24,7 +25,6 @@ const EVENT_TYPE_OPTIONS = [
 const VISIBILITY_BADGE = {
   public: { label: "Público", color: "teal" },
   internal: { label: "Interno", color: "blue" },
-  private: { label: "Privado", color: "gray" },
 };
 
 export default function AdminEvents({ currentUser }) {
@@ -37,6 +37,10 @@ export default function AdminEvents({ currentUser }) {
   const [eventType, setEventType] = useState("participativo");
   const [location, setLocation] = useState("");
   const [externalUrl, setExternalUrl] = useState("");
+  // Adjuntos por enlace del nuevo evento: lista de {name, url}.
+  const [attachments, setAttachments] = useState([]);
+  const [attName, setAttName] = useState("");
+  const [attUrl, setAttUrl] = useState("");
   const [orgUnits, setOrgUnits] = useState([]);
   const [orgUnitId, setOrgUnitId] = useState(null);
   // Por defecto el evento llega a la estructura del usuario y a sus dependientes.
@@ -141,6 +145,7 @@ export default function AdminEvents({ currentUser }) {
         org_unit_id: orgUnitId ? Number(orgUnitId) : null,
         distribution_mode: distributionMode,
         target_unit_ids: distributionMode === "custom" ? targetUnitIds.map(Number) : null,
+        attachments: attachments.length ? attachments : null,
       });
 
       setTitle("");
@@ -151,12 +156,15 @@ export default function AdminEvents({ currentUser }) {
       setEventType("participativo");
       setLocation("");
       setExternalUrl("");
+      setAttachments([]);
+      setAttName("");
+      setAttUrl("");
       setDistributionMode("subtree");
       setTargetUnitIds([]);
       await reload();
     } catch (e) {
       console.error("Error creando evento", e);
-      alert(e?.message || "Error creando evento");
+      notifyError(e?.message || "Error creando evento");
     } finally {
       setCreating(false);
     }
@@ -174,7 +182,7 @@ export default function AdminEvents({ currentUser }) {
       await reload();
     } catch (e) {
       console.error("Error eliminando evento", e);
-      alert(e?.message || "Error eliminando evento");
+      notifyError(e?.message || "Error eliminando evento");
     } finally {
       setDeletingId(null);
     }
@@ -230,7 +238,7 @@ export default function AdminEvents({ currentUser }) {
       await reload();
     } catch (e) {
       console.error("Error editando evento", e);
-      alert(e?.message || "Error editando evento");
+      notifyError(e?.message || "Error editando evento");
     } finally {
       setSavingEdit(false);
     }
@@ -299,6 +307,61 @@ export default function AdminEvents({ currentUser }) {
           onChange={(e) => setExternalUrl(e.target.value)}
           mb="sm"
         />
+
+        {/* Adjuntos por enlace (cartel, orden del día…) */}
+        <Text size="sm" fw={500} mt="xs">Documentos adjuntos (por enlace)</Text>
+        {attachments.length > 0 && (
+          <Group gap="xs" mt={4} mb="xs">
+            {attachments.map((a, i) => (
+              <Badge
+                key={i}
+                variant="light"
+                rightSection={
+                  <Text
+                    component="span"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => setAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+                  >
+                    ✕
+                  </Text>
+                }
+              >
+                {a.name || a.url}
+              </Badge>
+            ))}
+          </Group>
+        )}
+        <Group gap="xs" mb="sm" align="flex-end">
+          <TextInput
+            label="Nombre"
+            placeholder="Cartel"
+            value={attName}
+            onChange={(e) => setAttName(e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <TextInput
+            label="URL"
+            placeholder="https://…"
+            value={attUrl}
+            onChange={(e) => setAttUrl(e.target.value)}
+            style={{ flex: 2 }}
+          />
+          <Button
+            variant="light"
+            onClick={() => {
+              const url = attUrl.trim();
+              if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                notifyError("El enlace debe empezar por http:// o https://");
+                return;
+              }
+              setAttachments((prev) => [...prev, { name: attName.trim() || url, url }]);
+              setAttName("");
+              setAttUrl("");
+            }}
+          >
+            Añadir
+          </Button>
+        </Group>
 
         <OrgUnitSelect
           label="Unidad que organiza"

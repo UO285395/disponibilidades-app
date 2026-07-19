@@ -34,7 +34,32 @@ cada arranque. Es seguro, pero obliga a volver a iniciar sesión cada vez que se
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | Credenciales FCM para notificaciones push (API v1). |
 | `FIREBASE_PROJECT_ID` | Proyecto de Firebase (si no viene en la service account). |
 | `FCM_SERVER_KEY` | Modo legacy de FCM (alternativa al anterior). |
-| SMTP (`HOST`/`USER`/`PASSWORD`) | Envío de correo del censo. |
+| SMTP (`HOST`/`USER`/`PASSWORD`) | Envío de correo (censo y recordatorios). También `RESEND_API_KEY`/`RESEND_FROM` como alternativa. |
+| `FRONTEND_BASE_URL` | Base pública de la web (p. ej. `https://mi-app`). La usa la página de compartición `/e/{id}` para redirigir tras mostrar los metadatos Open Graph. |
+| `ENABLE_REMINDER_SCHEDULER` | `1` (por defecto) arranca el planificador de recordatorios; ponlo a `0` para desactivarlo. |
+| `REMINDER_TZ_OFFSET_MINUTES` | Desfase entre la hora local de los eventos (España) y UTC del servidor. Por defecto `120` (CEST, verano); usar `60` en invierno. Ajusta cuándo se disparan los recordatorios. |
+
+## Recordatorios (opt-in)
+
+Un hilo daemon (`_reminder_scheduler_loop`) despierta cada 5 minutos para:
+
+- **Recordatorios de evento**: solo los que el usuario activó (tabla `event_reminders`). Nunca se
+  envían automáticamente a quien no los pidió. Se entregan por push y/o correo según elija el usuario.
+- **Recordatorio semanal de disponibilidad**: solo a quien hizo opt-in (`users.availability_reminder_opt_in`),
+  los lunes a las 9:00 locales, y solo si no ha marcado disponibilidad esa semana.
+
+> Nota de zona horaria: la app guarda fechas/horas como texto local. La comparación usa
+> `utcnow + REMINDER_TZ_OFFSET_MINUTES`. Un desfase mal configurado adelanta o atrasa los avisos.
+> La deduplicación del recordatorio semanal es en memoria; un reinicio del servicio en la ventana de
+> envío podría reenviar. Es asumible dado que es semanal y opt-in.
+
+## Actividad económica y métricas
+
+- `event_finances` guarda por evento (opcional) si hubo cuota de inscripción y la recaudación. **No**
+  hay campo "cuota" en el formulario de evento a propósito: rara vez aplica; cuando aplica, un admin lo
+  registra aquí y alimenta `/admin/metrics`.
+- Los **adjuntos** de evento (`events.attachments`, JSON de `{name, url}`) son solo por enlace: Railway
+  tiene almacenamiento efímero, así que no se guardan ficheros en disco.
 
 ## Seguridad
 

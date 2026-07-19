@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Menu, Button } from "@mantine/core";
+import { IconCalendarPlus } from "@tabler/icons-react";
 import { Capacitor } from "@capacitor/core";
 import { calendarAPI } from "../api/api.js";
+import { notifyError } from "../utils/notify.js";
 
 function pad2(value) {
   return String(value).padStart(2, "0");
@@ -16,7 +18,7 @@ function formatLocalCompact(dt) {
 
 // URL del formulario "crear evento" de Google Calendar. Funciona en web y en
 // móvil (abre la app de Google Calendar si está instalada).
-export function buildGoogleCalendarUrl(event) {
+function buildGoogleCalendarUrl(event) {
   const params = new URLSearchParams({
     action: "TEMPLATE",
     text: event.title || "Evento",
@@ -54,7 +56,7 @@ export default function AddToCalendarButton({ event, size = "xs", variant = "sub
       // en web descarga el .ics.
       await calendarAPI.downloadEvent(event.id);
     } catch (e) {
-      alert(e?.message || "No se pudo añadir al calendario");
+      notifyError(e?.message || "No se pudo añadir al calendario");
     } finally {
       setBusy(false);
     }
@@ -68,8 +70,14 @@ export default function AddToCalendarButton({ event, size = "xs", variant = "sub
   if (isNative) {
     return (
       <span onClick={stop}>
-        <Button size={size} variant={variant} loading={busy} onClick={exportIcs}>
-          📅 Añadir a calendario
+        <Button
+          size={size}
+          variant={variant}
+          loading={busy}
+          onClick={exportIcs}
+          leftSection={<IconCalendarPlus size={16} />}
+        >
+          Añadir a calendario
         </Button>
       </span>
     );
@@ -79,8 +87,8 @@ export default function AddToCalendarButton({ event, size = "xs", variant = "sub
     <span onClick={stop}>
       <Menu withinPortal position="bottom-end" shadow="md">
         <Menu.Target>
-          <Button size={size} variant={variant} loading={busy}>
-            📅 Añadir a calendario
+          <Button size={size} variant={variant} loading={busy} leftSection={<IconCalendarPlus size={16} />}>
+            Añadir a calendario
           </Button>
         </Menu.Target>
         <Menu.Dropdown>

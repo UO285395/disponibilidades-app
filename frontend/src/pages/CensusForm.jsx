@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Box, Title, Text, Button, TextInput, Textarea, NumberInput, Select, Stack, Card } from "@mantine/core";
 import { request } from "../api/api.js";
+import { notifyError } from "../utils/notify.js";
 
 export default function CensusForm() {
   const { token } = useParams();
@@ -21,7 +22,7 @@ export default function CensusForm() {
           init[String(f.id)] = "";
         });
         setValues(init);
-      } catch (e) {
+      } catch {
         setError("Formulario no encontrado o enlace incorrecto.");
       }
     })();
@@ -37,7 +38,7 @@ export default function CensusForm() {
     // Validar obligatorios
     for (const f of fields) {
       if (f.required && !String(values[String(f.id)] ?? "").trim()) {
-        alert(`El campo "${f.label}" es obligatorio.`);
+        notifyError(`El campo "${f.label}" es obligatorio.`, "Falta un campo");
         return;
       }
     }
@@ -47,7 +48,7 @@ export default function CensusForm() {
       await request(`/censo/${token}`, "POST", values, false);
       setDone(true);
     } catch (e) {
-      alert(e?.message || "Error enviando el formulario. Inténtalo de nuevo.");
+      notifyError(e?.message || "Error enviando el formulario. Inténtalo de nuevo.");
     } finally {
       setSubmitting(false);
     }

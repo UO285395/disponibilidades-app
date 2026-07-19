@@ -132,6 +132,36 @@ export function getOrCreateGuestId() {
 
 // ------------------- REQUEST WRAPPER -------------------
 
+// ------------------- CACHÉ DE LECTURA (offline) -------------------
+// Guarda la última respuesta correcta de cada GET para poder mostrar contenido
+// al instante si la red falla o va lenta. Solo se usa como respaldo ante un
+// error de red (fetch lanza), nunca ante un error HTTP explícito del servidor.
+const READ_CACHE_PREFIX = "read_cache:";
+
+function readCacheKey(endpoint) {
+  return READ_CACHE_PREFIX + endpoint;
+}
+
+function saveReadCache(endpoint, data) {
+  try {
+    localStorage.setItem(readCacheKey(endpoint), JSON.stringify({ t: Date.now(), data }));
+  } catch {
+    // Cuota llena o no disponible: la caché es best-effort.
+  }
+}
+
+function loadReadCache(endpoint) {
+  try {
+    const raw = localStorage.getItem(readCacheKey(endpoint));
+    if (!raw) return undefined;
+    return JSON.parse(raw).data;
+  } catch {
+    return undefined;
+  }
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export async function request(endpoint, method = "GET", body = null, includeAuth = true) {
   const opts = {
     method,
@@ -149,15 +179,48 @@ export async function request(endpoint, method = "GET", body = null, includeAuth
     opts.body = JSON.stringify(body);
   }
 
-  const res = await fetch(API_URL + endpoint, opts);
+  const isGet = method === "GET";
+  // Reintentos con backoff solo para fallos transitorios (red caída o 5xx).
+  // Los GET se reintentan; las mutaciones no, para no duplicar efectos.
+  const maxAttempts = isGet ? 3 : 1;
+  let lastNetworkError = null;
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`HTTP ${res.status} - ${text}`);
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    let res;
+    try {
+      res = await fetch(API_URL + endpoint, opts);
+    } catch (networkError) {
+      lastNetworkError = networkError;
+      if (attempt < maxAttempts - 1) {
+        await sleep(300 * 2 ** attempt); // 300ms, 600ms
+        continue;
+      }
+      break;
+    }
+
+    if (res.status >= 500 && attempt < maxAttempts - 1) {
+      await sleep(300 * 2 ** attempt);
+      continue;
+    }
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status} - ${text}`);
+    }
+
+    if (res.status === 204) return null;
+    const data = await res.json();
+    if (isGet) saveReadCache(endpoint, data);
+    return data;
   }
 
-  if (res.status === 204) return null;
-  return res.json();
+  // La red falló en todos los intentos: si es un GET con caché, devolvemos la
+  // última copia conocida para que la app siga siendo usable sin conexión.
+  if (isGet) {
+    const cached = loadReadCache(endpoint);
+    if (cached !== undefined) return cached;
+  }
+  throw lastNetworkError || new Error("No se pudo conectar con el servidor");
 }
 
 // ------------------- AUTH -------------------
@@ -216,10 +279,24 @@ export async function ensureTokenValid() {
   return true;
 }
 
+// URL de compartición con metadatos Open Graph (el backend sirve /e/{id} con
+// las etiquetas para que WhatsApp/redes muestren título y descripción).
+export function getShareUrl(eventId) {
+  return `${API_URL}/e/${eventId}`;
+}
+
 export const userAPI = {
   me() {
     return request("/me");
-  }
+  },
+
+  getReminderPrefs() {
+    return request("/me/reminder-prefs");
+  },
+
+  updateReminderPrefs(prefs) {
+    return request("/me/reminder-prefs", "PUT", prefs);
+  },
 };
 
 export const deviceAPI = {
@@ -258,6 +335,22 @@ export const eventsAPI = {
 
   updateMyCompanions(event_id, count) {
     return request(`/events/${event_id}/companions/my`, "PUT", { count });
+  },
+
+  // Recordatorios de evento (opt-in del usuario).
+  myReminders() {
+    return request("/my-event-reminders");
+  },
+
+  setReminder(event_id, minutesBefore, channels = ["push"]) {
+    return request(`/events/${event_id}/reminder`, "PUT", {
+      minutes_before: minutesBefore,
+      channels,
+    });
+  },
+
+  deleteReminder(event_id) {
+    return request(`/events/${event_id}/reminder`, "DELETE");
   },
 
   // ------------------- PÚBLICO / INVITADOS -------------------

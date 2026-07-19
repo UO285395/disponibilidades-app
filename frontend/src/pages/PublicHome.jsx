@@ -10,6 +10,7 @@ import {
 import { eventsAPI, calendarAPI } from "../api/api.js";
 import AddToCalendarButton from "../components/AddToCalendarButton.jsx";
 import { formatDate, formatTime } from "../utils/datetime.js";
+import { notifyError } from "../utils/notify.js";
 
 const PROVINCE_KEY = "public_province_id";
 
@@ -87,7 +88,7 @@ export default function PublicHome() {
           variant="subtle"
           leftSection={<IconCalendarPlus size={18} />}
           mb="md"
-          onClick={() => calendarAPI.download("public", provinceId ? Number(provinceId) : null).catch((e) => alert(e.message))}
+          onClick={() => calendarAPI.download("public", provinceId ? Number(provinceId) : null).catch((e) => notifyError(e.message))}
         >
           Añadir todos a mi calendario
         </Button>

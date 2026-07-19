@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Title, Box, Button, Group, Text, Menu, ActionIcon, Center, Loader, Paper,
@@ -6,21 +6,25 @@ import {
 import {
   IconCalendarEvent, IconCalendarTime, IconBuildingCommunity, IconUsers,
   IconSitemap, IconAdjustments, IconClipboardList, IconChartBar, IconBell,
-  IconChevronDown, IconArrowLeft, IconLogout, IconDotsVertical,
+  IconChevronDown, IconArrowLeft, IconLogout, IconDotsVertical, IconChartPie,
 } from "@tabler/icons-react";
 import { clearToken } from "../api/api.js";
 import { useSessionUser } from "../hooks/useSessionUser.js";
-import AdminUsers from "../components/AdminUsers.jsx";
-import AdminEvents from "../components/AdminEvents.jsx";
-import AdminAvailabilitiesCalendar from "../components/AdminAvailabilitiesCalendar.jsx";
-import AdminSpaces from "../components/AdminSpaces.jsx";
-import AdminDomainPolicies from "../components/AdminDomainPolicies.jsx";
-import AdminCensus from "../components/AdminCensus.jsx";
-import AdminNotifications from "../components/AdminNotifications.jsx";
-import AdminSurveys from "../components/AdminSurveys.jsx";
-import AdminOrgStructure from "../components/AdminOrgStructure.jsx";
 import OrgScopeBar from "../components/OrgScopeBar.jsx";
 import SessionExpiredModal from "../components/SessionExpiredModal.jsx";
+
+// Cada sección del panel es un chunk aparte: abrir "Eventos" no descarga el
+// código de Censo, Encuestas u Organigrama. Importante en web móvil.
+const AdminUsers = lazy(() => import("../components/AdminUsers.jsx"));
+const AdminEvents = lazy(() => import("../components/AdminEvents.jsx"));
+const AdminAvailabilitiesCalendar = lazy(() => import("../components/AdminAvailabilitiesCalendar.jsx"));
+const AdminSpaces = lazy(() => import("../components/AdminSpaces.jsx"));
+const AdminDomainPolicies = lazy(() => import("../components/AdminDomainPolicies.jsx"));
+const AdminCensus = lazy(() => import("../components/AdminCensus.jsx"));
+const AdminNotifications = lazy(() => import("../components/AdminNotifications.jsx"));
+const AdminSurveys = lazy(() => import("../components/AdminSurveys.jsx"));
+const AdminOrgStructure = lazy(() => import("../components/AdminOrgStructure.jsx"));
+const AdminMetrics = lazy(() => import("../components/AdminMetrics.jsx"));
 
 // Cada sección: permiso, etiqueta, icono y componente. El orden es una jerarquía
 // lógica (lo más usado arriba).
@@ -33,6 +37,7 @@ const SECTIONS = [
   { value: "domain-policies", label: "Políticas", icon: IconAdjustments, can: (u) => u.role === "superadmin" || u.domain_policies_enabled, render: () => <AdminDomainPolicies /> },
   { value: "censo", label: "Censo", icon: IconClipboardList, can: (u) => u.role === "superadmin" || u.census_enabled, render: () => <AdminCensus /> },
   { value: "surveys", label: "Encuestas", icon: IconChartBar, can: (u) => u.role === "superadmin" || u.surveys_enabled, render: () => <AdminSurveys /> },
+  { value: "metrics", label: "Métricas", icon: IconChartPie, can: (u) => u.role === "admin" || u.role === "superadmin", render: () => <AdminMetrics /> },
   { value: "notifications", label: "Notificaciones", icon: IconBell, can: (u) => u.role === "superadmin" || u.notifications_enabled, render: () => <AdminNotifications /> },
 ];
 
@@ -133,7 +138,9 @@ export default function AdminDashboard() {
           </Menu>
 
           <Paper key={current?.value}>
-            {current?.render(user)}
+            <Suspense fallback={<Center py="xl"><Loader /></Center>}>
+              {current?.render(user)}
+            </Suspense>
           </Paper>
         </>
       )}

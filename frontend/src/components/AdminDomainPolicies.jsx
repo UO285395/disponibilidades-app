@@ -11,6 +11,7 @@ import {
   Text,
   Stack,
   Select,
+  Divider,
 } from "@mantine/core";
 import { adminAPI } from "../api/adminApi.js";
 import OrgUnitSelect from "./OrgUnitSelect.jsx";
@@ -203,46 +204,67 @@ export default function AdminDomainPolicies() {
         )}
 
         <Stack gap="xs">
-          <Checkbox
-            label="Eventos"
-            checked={eventsEnabled}
-            onChange={(event) => setEventsEnabled(event.currentTarget.checked)}
-          />
-          <Checkbox
-            label="Disponibilidades"
-            checked={availabilitiesEnabled}
-            onChange={(event) => setAvailabilitiesEnabled(event.currentTarget.checked)}
-          />
-          <Checkbox
-            label="Espacios"
-            checked={spacesEnabled}
-            onChange={(event) => setSpacesEnabled(event.currentTarget.checked)}
-          />
-          <Checkbox
-            label="Usuarios"
-            checked={usersEnabled}
-            onChange={(event) => setUsersEnabled(event.currentTarget.checked)}
-          />
-          <Checkbox
-            label="Políticas de colectivo (módulo superadmin para admins)"
-            checked={domainPoliciesEnabled}
-            onChange={(event) => setDomainPoliciesEnabled(event.currentTarget.checked)}
-          />
-          <Checkbox
-            label="Censo (módulo superadmin para admins)"
-            checked={censusEnabled}
-            onChange={(event) => setCensusEnabled(event.currentTarget.checked)}
-          />
-          <Checkbox
-            label="Encuestas (módulo superadmin para admins)"
-            checked={surveysEnabled}
-            onChange={(event) => setSurveysEnabled(event.currentTarget.checked)}
-          />
-          <Checkbox
-            label="Notificaciones (módulo superadmin para admins)"
-            checked={notificationsEnabled}
-            onChange={(event) => setNotificationsEnabled(event.currentTarget.checked)}
-          />
+          <div>
+            <Text size="sm" fw={600}>Módulos de militante</Text>
+            <Text size="xs" c="dimmed" mb={6}>
+              Pestañas del panel del usuario. Si desactivas uno, ni el militante ni sus
+              administradores ven esa pestaña (usuario y gestión).
+            </Text>
+            <Stack gap={6}>
+              <Checkbox
+                label="Eventos"
+                checked={eventsEnabled}
+                onChange={(event) => setEventsEnabled(event.currentTarget.checked)}
+              />
+              <Checkbox
+                label="Disponibilidades"
+                checked={availabilitiesEnabled}
+                onChange={(event) => setAvailabilitiesEnabled(event.currentTarget.checked)}
+              />
+              <Checkbox
+                label="Espacios"
+                checked={spacesEnabled}
+                onChange={(event) => setSpacesEnabled(event.currentTarget.checked)}
+              />
+            </Stack>
+          </div>
+
+          <Divider my="xs" />
+
+          <div>
+            <Text size="sm" fw={600}>Módulos de gestión (solo administradores)</Text>
+            <Text size="xs" c="dimmed" mb={6}>
+              Pestañas del panel de administración. Si activas uno, los administradores de
+              este ámbito acceden a esa pestaña de gestión. No son visibles para el militante.
+            </Text>
+            <Stack gap={6}>
+              <Checkbox
+                label="Usuarios"
+                checked={usersEnabled}
+                onChange={(event) => setUsersEnabled(event.currentTarget.checked)}
+              />
+              <Checkbox
+                label="Políticas de colectivo"
+                checked={domainPoliciesEnabled}
+                onChange={(event) => setDomainPoliciesEnabled(event.currentTarget.checked)}
+              />
+              <Checkbox
+                label="Censo"
+                checked={censusEnabled}
+                onChange={(event) => setCensusEnabled(event.currentTarget.checked)}
+              />
+              <Checkbox
+                label="Encuestas"
+                checked={surveysEnabled}
+                onChange={(event) => setSurveysEnabled(event.currentTarget.checked)}
+              />
+              <Checkbox
+                label="Notificaciones"
+                checked={notificationsEnabled}
+                onChange={(event) => setNotificationsEnabled(event.currentTarget.checked)}
+              />
+            </Stack>
+          </div>
         </Stack>
 
         <Group mt="sm">

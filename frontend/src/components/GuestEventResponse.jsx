@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Card, Title, Text, TextInput, NumberInput, Button, Group, Stack } from "@mantine/core";
+import { Card, Title, Text, TextInput, NumberInput, Button, Group, Stack, Anchor } from "@mantine/core";
+import { IconCheck } from "@tabler/icons-react";
 import { eventsAPI } from "../api/api.js";
 
 export default function GuestEventResponse({ eventId }) {
@@ -27,9 +28,15 @@ export default function GuestEventResponse({ eventId }) {
   if (done) {
     return (
       <Card shadow="sm" p="md" radius="md" mt="md">
-        <Text c="green" fw={600}>
-          {done === "si" ? "¡Gracias por confirmar tu asistencia!" : "Gracias por responder."}
-        </Text>
+        <Group gap="xs" mb={4}>
+          <IconCheck size={20} color="var(--mantine-color-teal-6)" />
+          <Text c="teal" fw={600}>
+            {done === "si" ? "¡Gracias por confirmar tu asistencia!" : "Gracias por responder."}
+          </Text>
+        </Group>
+        <Anchor component="button" type="button" size="sm" onClick={() => setDone(null)}>
+          Cambiar mi respuesta
+        </Anchor>
       </Card>
     );
   }

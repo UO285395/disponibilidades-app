@@ -12,7 +12,10 @@ import {
   Group,
   Modal,
   Badge,
+  Select,
+  Center,
 } from "@mantine/core";
+import { IconSearch } from "@tabler/icons-react";
 
 export default function AdminUsers({ currentUser }) {
   const [rows, setRows] = useState([]);
@@ -23,6 +26,8 @@ export default function AdminUsers({ currentUser }) {
   const [groupTag, setGroupTag] = useState("");
   const [newUserUnitId, setNewUserUnitId] = useState(null);
   const [filterUnitId, setFilterUnitId] = useState(null);
+  const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [tagDrafts, setTagDrafts] = useState({});
@@ -186,12 +191,22 @@ export default function AdminUsers({ currentUser }) {
   }
 
   const sortedRows = useMemo(() => {
-    return [...rows].sort((a, b) => {
-      const byEmail = a.email.localeCompare(b.email, "es", { sensitivity: "base" });
-      if (byEmail !== 0) return byEmail;
-      return a.full_name.localeCompare(b.full_name, "es", { sensitivity: "base" });
-    });
-  }, [rows]);
+    const q = search.trim().toLowerCase();
+    return [...rows]
+      .filter((u) => {
+        if (roleFilter !== "all" && u.role !== roleFilter) return false;
+        if (!q) return true;
+        return (
+          String(u.full_name || "").toLowerCase().includes(q) ||
+          String(u.email || "").toLowerCase().includes(q)
+        );
+      })
+      .sort((a, b) => {
+        const byEmail = a.email.localeCompare(b.email, "es", { sensitivity: "base" });
+        if (byEmail !== 0) return byEmail;
+        return a.full_name.localeCompare(b.full_name, "es", { sensitivity: "base" });
+      });
+  }, [rows, search, roleFilter]);
 
   const modalUser = useMemo(
     () => sortedRows.find((user) => user.id === modalUserId) || null,
@@ -200,10 +215,6 @@ export default function AdminUsers({ currentUser }) {
 
   if (!loaded) {
     return <Text>Cargando usuarios…</Text>;
-  }
-
-  if (sortedRows.length === 0) {
-    return <Text>No hay usuarios.</Text>;
   }
 
   return (
@@ -257,16 +268,45 @@ export default function AdminUsers({ currentUser }) {
         <Button onClick={createUser}>Crear usuario</Button>
       </Card>
 
-      <OrgUnitSelect
-        label="Filtrar por estructura"
-        description="Incluye las estructuras que dependen de la elegida"
-        placeholder="Todo mi ámbito"
-        value={filterUnitId}
-        onChange={setFilterUnitId}
-        mb="md"
-        maw={420}
-      />
+      <Group align="flex-end" mb="md" wrap="wrap">
+        <OrgUnitSelect
+          label="Filtrar por estructura"
+          description="Incluye las estructuras que dependen de la elegida"
+          placeholder="Todo mi ámbito"
+          value={filterUnitId}
+          onChange={setFilterUnitId}
+          maw={360}
+          style={{ flex: 1, minWidth: 220 }}
+        />
+        <TextInput
+          label="Buscar"
+          placeholder="Nombre o email"
+          leftSection={<IconSearch size={16} />}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ flex: 1, minWidth: 200 }}
+        />
+        <Select
+          label="Rol"
+          value={roleFilter}
+          onChange={(v) => setRoleFilter(v || "all")}
+          data={[
+            { value: "all", label: "Todos" },
+            { value: "user", label: "Militantes" },
+            { value: "admin", label: "Administradores" },
+            { value: "superadmin", label: "Superadmin" },
+          ]}
+          maw={200}
+        />
+      </Group>
 
+      <Text size="sm" c="dimmed" mb="xs">{sortedRows.length} usuario(s)</Text>
+
+      {sortedRows.length === 0 ? (
+        <Center py="lg">
+          <Text c="dimmed">Ningún usuario coincide con los filtros.</Text>
+        </Center>
+      ) : (
       <Table highlightOnHover>
         <Table.Thead>
           <Table.Tr>
@@ -348,6 +388,7 @@ export default function AdminUsers({ currentUser }) {
           ))}
         </Table.Tbody>
       </Table>
+      )}
 
       <Modal
         opened={Boolean(modalUser)}

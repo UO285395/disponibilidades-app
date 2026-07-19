@@ -139,6 +139,14 @@ export const adminAPI = {
     return request("/admin/surveys", "POST", payload);
   },
 
+  updateSurvey(surveyId, payload) {
+    return request(`/admin/surveys/${surveyId}`, "PUT", payload);
+  },
+
+  deleteSurvey(surveyId) {
+    return request(`/admin/surveys/${surveyId}`, "DELETE");
+  },
+
   regenerateSurveyToken(surveyId) {
     return request(`/admin/surveys/${surveyId}/regenerate-token`, "POST");
   },
@@ -149,6 +157,20 @@ export const adminAPI = {
 
   sendNotification(payload) {
     return request("/admin/notifications/send", "POST", payload);
+  },
+
+  // Actividad económica del evento
+  getEventFinance(eventId) {
+    return request(`/admin/events/${eventId}/finance`);
+  },
+
+  setEventFinance(eventId, payload) {
+    return request(`/admin/events/${eventId}/finance`, "PUT", payload);
+  },
+
+  // Métricas del ámbito
+  getMetrics() {
+    return request("/admin/metrics");
   },
 
   // ---- Organigrama / estructura ----

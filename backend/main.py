@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, Body, Query, Request, Response
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session, joinedload
@@ -11,9 +12,11 @@ from datetime import datetime, timedelta
 import base64
 import csv
 import hashlib
+import html
 import io
 import importlib
 import json
+import logging
 import os
 import secrets
 import socket
@@ -33,6 +36,8 @@ from models import (
     Event,
     EventResponse,
     EventCompanion,
+    EventReminder,
+    EventFinance,
     GuestResponse,
     GuestPolicy,
     CensusConfig,
@@ -47,6 +52,11 @@ from models import (
 from database import SessionLocal, engine
 from services.calendar_service import generate_ics
 from services import org_service
+
+# Log estructurado para poder diagnosticar fallos de envío push y de login sin
+# reproducirlos: en Railway estos mensajes quedan en la consola del servicio.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logger = logging.getLogger("disponibilidad")
 
 
 # =========================================================
@@ -95,6 +105,9 @@ def ensure_legacy_schema_compatibility():
                 if "deleted_at" not in event_columns:
                     conn.execute(text("ALTER TABLE events ADD COLUMN deleted_at VARCHAR"))
                     print("✅ Columna events.deleted_at añadida")
+                if "attachments" not in event_columns:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN attachments VARCHAR"))
+                    print("✅ Columna events.attachments añadida")
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_events_visibility ON events(visibility)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_events_date ON events(date)"))
 
@@ -119,10 +132,16 @@ def ensure_legacy_schema_compatibility():
 
         if "users" in table_names:
             user_columns = {column["name"] for column in inspector.get_columns("users")}
-            if "group_tag" not in user_columns:
-                with engine.begin() as conn:
+            with engine.begin() as conn:
+                if "group_tag" not in user_columns:
                     conn.execute(text("ALTER TABLE users ADD COLUMN group_tag VARCHAR"))
-                print("✅ Columna users.group_tag añadida para compatibilidad")
+                    print("✅ Columna users.group_tag añadida para compatibilidad")
+                if "reminder_email" not in user_columns:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN reminder_email VARCHAR"))
+                    print("✅ Columna users.reminder_email añadida")
+                if "availability_reminder_opt_in" not in user_columns:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN availability_reminder_opt_in INTEGER DEFAULT 0"))
+                    print("✅ Columna users.availability_reminder_opt_in añadida")
 
         if "device_tokens" in table_names:
             device_token_columns = {column["name"] for column in inspector.get_columns("device_tokens")}
@@ -262,12 +281,14 @@ def _ensure_login_allowed(db: Session, email: str):
 
 
 def _record_login_failure(db: Session, email: str, request: Request):
+    ip = _client_ip(request)
     db.add(models.LoginAttempt(
         email=email,
-        ip=_client_ip(request),
+        ip=ip,
         created_at=datetime.utcnow().isoformat(),
     ))
     db.commit()
+    logger.info("Login fallido para email=%s ip=%s", email, ip)
 
 
 def _clear_login_failures(db: Session, email: str):
@@ -512,6 +533,8 @@ class EventCreate(BaseModel):
     org_unit_id: int | None = None
     distribution_mode: str | None = None  # unit_only | subtree | custom
     target_unit_ids: list[int] | None = None
+    # Adjuntos por enlace: lista de {name, url}.
+    attachments: list[dict] | None = None
 
 class EventResponseCreate(BaseModel):
     answer: str
@@ -520,6 +543,24 @@ class EventResponseCreate(BaseModel):
 
 class EventCompanionUpdate(BaseModel):
     count: int
+
+
+class EventReminderCreate(BaseModel):
+    # Minutos antes del evento en que avisar (p. ej. 60 = 1h antes, 1440 = 1 día).
+    minutes_before: int = 120
+    channels: list[str] = ["push"]
+
+
+class ReminderPrefsUpdate(BaseModel):
+    reminder_email: str | None = None
+    availability_reminder_opt_in: bool | None = None
+
+
+class EventFinanceUpdate(BaseModel):
+    has_registration_fee: bool = False
+    fee_amount: str | None = None
+    collected_amount: str | None = None
+    notes: str | None = None
 
 class CensusFieldCreate(BaseModel):
     id: int | None = None
@@ -550,6 +591,15 @@ class SurveyCreate(BaseModel):
     title: str
     description: str | None = None
     fields: list[SurveyFieldCreate]
+
+
+class SurveyUpdate(BaseModel):
+    title: str
+    description: str | None = None
+    is_active: bool | None = None
+    # Solo se aplican si la encuesta aún no tiene respuestas (para no romper el
+    # mapeo de respuestas ya guardadas por id de campo).
+    fields: list[SurveyFieldCreate] | None = None
 
 class DomainPolicyCreate(BaseModel):
     domain: str | None = None
@@ -1910,6 +1960,7 @@ def create_event(
         event_type=event_type,
         location=(data.location or None),
         external_url=(data.external_url or None),
+        attachments=_clean_attachments(data.attachments),
         metadata_json=json.dumps(data.metadata) if data.metadata else None,
         is_recurring=1 if data.is_recurring else 0,
         recurrence_rule=(data.recurrence_rule or None),
@@ -2103,6 +2154,42 @@ def _bulk_event_counts(db: Session, event_ids: list[int]) -> dict[int, dict]:
     return counts
 
 
+def _parse_attachments(raw) -> list:
+    """Lista [{name, url}] a partir del JSON guardado. Tolerante a datos viejos."""
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    out = []
+    for item in data:
+        if isinstance(item, dict) and item.get("url"):
+            out.append({"name": str(item.get("name") or item["url"])[:200], "url": str(item["url"])[:1000]})
+    return out
+
+
+def _clean_attachments(items) -> str | None:
+    """Normaliza la lista de adjuntos entrante y la serializa a JSON (o None)."""
+    if not items:
+        return None
+    cleaned = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if not url:
+            continue
+        # Solo enlaces http(s) para evitar esquemas peligrosos.
+        if not (url.startswith("http://") or url.startswith("https://")):
+            continue
+        name = str(item.get("name") or url).strip()[:200]
+        cleaned.append({"name": name, "url": url[:1000]})
+    return json.dumps(cleaned) if cleaned else None
+
+
 def _serialize_event_with_counts(db: Session, e: Event, counts: dict | None = None) -> dict:
     # `counts` precalculado por _bulk_event_counts al serializar listas. Si no
     # viene (endpoints de un solo evento), se calcula para ese evento.
@@ -2133,6 +2220,7 @@ def _serialize_event_with_counts(db: Session, e: Event, counts: dict | None = No
         "event_type": e.event_type,
         "location": e.location,
         "external_url": e.external_url,
+        "attachments": _parse_attachments(e.attachments),
         "metadata": json.loads(e.metadata_json) if e.metadata_json else None,
         "is_recurring": bool(e.is_recurring),
         "recurrence_rule": e.recurrence_rule,
@@ -2206,6 +2294,48 @@ def get_event_public(
     return _serialize_event_with_counts(db, ev)
 
 
+@app.get("/e/{event_id}", response_class=HTMLResponse)
+def event_share_page(event_id: int, db: Session = Depends(get_db)):
+    """Página de compartición para redes (WhatsApp, redes sociales). Devuelve
+    HTML con metadatos Open Graph para que el enlace muestre título/descripción,
+    y redirige a la app. Solo eventos públicos: no desvela nada interno."""
+    frontend_base = os.getenv("FRONTEND_BASE_URL", "").strip().rstrip("/")
+    target = f"{frontend_base}/eventos/{event_id}" if frontend_base else f"/eventos/{event_id}"
+
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    is_public = ev and (ev.visibility or "internal").strip().lower() == "public" and not ev.deleted_at
+    if not is_public:
+        # No revelamos existencia de eventos no públicos: redirección simple.
+        return HTMLResponse(
+            f'<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url={html.escape(target)}">'
+            f'<a href="{html.escape(target)}">Ir al evento</a>'
+        )
+
+    title = html.escape(ev.title or "Evento")
+    desc_parts = []
+    if ev.date:
+        desc_parts.append(ev.date + (f" {ev.start_time[:5]}" if ev.start_time else ""))
+    if ev.location:
+        desc_parts.append(ev.location)
+    if ev.description:
+        desc_parts.append(ev.description[:160])
+    description = html.escape(" · ".join(desc_parts) or "Próximo evento")
+    target_esc = html.escape(target)
+
+    return HTMLResponse(
+        f'<!doctype html><html lang="es"><head><meta charset="utf-8">'
+        f'<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f'<title>{title}</title>'
+        f'<meta property="og:type" content="website">'
+        f'<meta property="og:title" content="{title}">'
+        f'<meta property="og:description" content="{description}">'
+        f'<meta name="description" content="{description}">'
+        f'<meta name="twitter:card" content="summary">'
+        f'<meta http-equiv="refresh" content="0;url={target_esc}">'
+        f'</head><body><p><a href="{target_esc}">Ver el evento</a></p></body></html>'
+    )
+
+
 @app.get("/events/{event_id}")
 def get_event(
     event_id: int,
@@ -2234,6 +2364,7 @@ def get_event(
         "event_type": ev.event_type,
         "location": ev.location,
         "external_url": ev.external_url,
+        "attachments": _parse_attachments(ev.attachments),
         "metadata": json.loads(ev.metadata_json) if ev.metadata_json else None,
         "is_recurring": bool(ev.is_recurring),
         "recurrence_rule": ev.recurrence_rule,
@@ -2461,6 +2592,14 @@ def respond_event(
 ):
     user = get_user_from_token(cred.credentials, db)
 
+    raw_answer = str(data.answer).strip().lower()
+    if raw_answer in ["si", "sí", "yes"]:
+        normalized_answer = "si"
+    elif raw_answer == "no":
+        normalized_answer = "no"
+    else:
+        raise HTTPException(400, "answer inválida (usa 'si' o 'no')")
+
     existing = (
         db.query(EventResponse)
         .filter(
@@ -2470,16 +2609,13 @@ def respond_event(
         .first()
     )
 
+    # El militante puede cambiar su respuesta mientras el evento siga activo:
+    # si ya respondió, se actualiza en lugar de rechazar.
     if existing:
-        raise HTTPException(400, "Ya has votado en este evento")
-
-    raw_answer = str(data.answer).strip().lower()
-    if raw_answer in ["si", "sí", "yes"]:
-        normalized_answer = "si"
-    elif raw_answer == "no":
-        normalized_answer = "no"
-    else:
-        raise HTTPException(400, "answer inválida (usa 'si' o 'no')")
+        existing.answer = normalized_answer
+        existing.justification = data.justification
+        db.commit()
+        return {"ok": True, "updated": True}
 
     db.add(EventResponse(
         event_id=event_id,
@@ -2490,10 +2626,24 @@ def respond_event(
     try:
         db.commit()
     except IntegrityError:
+        # Carrera: otra petición creó la respuesta a la vez. Actualizamos.
         db.rollback()
-        raise HTTPException(400, "Ya has votado en este evento")
+        existing = (
+            db.query(EventResponse)
+            .filter(
+                EventResponse.event_id == event_id,
+                EventResponse.user_id == user.id
+            )
+            .first()
+        )
+        if existing:
+            existing.answer = normalized_answer
+            existing.justification = data.justification
+            db.commit()
+            return {"ok": True, "updated": True}
+        raise HTTPException(400, "No se pudo registrar la respuesta")
 
-    return {"ok": True}
+    return {"ok": True, "updated": False}
 
 
 @app.post("/events/{event_id}/responses/guest")
@@ -2602,7 +2752,11 @@ def my_event_responses(
     user = get_user_from_token(cred.credentials, db)
 
     return [
-        r.event_id
+        {
+            "event_id": r.event_id,
+            "answer": r.answer,
+            "justification": r.justification,
+        }
         for r in db.query(EventResponse)
                    .filter(EventResponse.user_id == user.id)
                    .all()
@@ -2692,6 +2846,272 @@ def update_my_event_companions(
         raise HTTPException(400, "Ya se han guardado acompañantes para este evento, recarga e inténtalo de nuevo")
 
     return {"ok": True, "event_id": event_id, "count": int(item.count)}
+
+
+# =========================================================
+# RECORDATORIOS DE EVENTO (opt-in del usuario)
+# =========================================================
+def _event_datetime(event) -> datetime | None:
+    """Combina fecha (YYYY-MM-DD) y hora (HH:MM) del evento. Si no hay hora, se
+    toma el inicio del día."""
+    if not event.date:
+        return None
+    try:
+        time_part = (event.start_time or "00:00")[:5]
+        return datetime.fromisoformat(f"{event.date}T{time_part}:00")
+    except (ValueError, TypeError):
+        try:
+            return datetime.fromisoformat(f"{event.date}T00:00:00")
+        except (ValueError, TypeError):
+            return None
+
+
+@app.get("/my-event-reminders")
+def my_event_reminders(
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db),
+):
+    user = get_user_from_token(cred.credentials, db)
+    items = db.query(EventReminder).filter(EventReminder.user_id == user.id).all()
+    return [
+        {
+            "event_id": r.event_id,
+            "remind_at": r.remind_at,
+            "channels": (r.channels or "push").split(","),
+            "sent": bool(r.sent),
+        }
+        for r in items
+    ]
+
+
+@app.put("/events/{event_id}/reminder")
+def set_event_reminder(
+    event_id: int,
+    data: EventReminderCreate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db),
+):
+    user = get_user_from_token(cred.credentials, db)
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(404, "Evento no encontrado")
+    _ensure_event_domain_access(user, event, db)
+
+    event_dt = _event_datetime(event)
+    if not event_dt:
+        raise HTTPException(400, "El evento no tiene fecha válida para recordar")
+
+    minutes = max(0, int(data.minutes_before or 0))
+    remind_at = event_dt - timedelta(minutes=minutes)
+
+    valid_channels = [c for c in (data.channels or []) if c in ("push", "email")]
+    if not valid_channels:
+        valid_channels = ["push"]
+    channels = ",".join(valid_channels)
+
+    existing = (
+        db.query(EventReminder)
+        .filter(EventReminder.event_id == event_id, EventReminder.user_id == user.id)
+        .first()
+    )
+    now_iso = datetime.utcnow().isoformat()
+    if existing:
+        existing.remind_at = remind_at.isoformat()
+        existing.channels = channels
+        # Si el usuario reprograma, se vuelve a considerar pendiente.
+        existing.sent = 0
+    else:
+        db.add(EventReminder(
+            event_id=event_id,
+            user_id=user.id,
+            remind_at=remind_at.isoformat(),
+            channels=channels,
+            sent=0,
+            created_at=now_iso,
+        ))
+    db.commit()
+    return {"ok": True, "remind_at": remind_at.isoformat(), "channels": valid_channels}
+
+
+@app.delete("/events/{event_id}/reminder")
+def delete_event_reminder(
+    event_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db),
+):
+    user = get_user_from_token(cred.credentials, db)
+    db.query(EventReminder).filter(
+        EventReminder.event_id == event_id,
+        EventReminder.user_id == user.id,
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/me/reminder-prefs")
+def get_reminder_prefs(
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db),
+):
+    user = get_user_from_token(cred.credentials, db)
+    return {
+        "reminder_email": user.reminder_email or "",
+        "availability_reminder_opt_in": bool(user.availability_reminder_opt_in),
+    }
+
+
+@app.put("/me/reminder-prefs")
+def update_reminder_prefs(
+    data: ReminderPrefsUpdate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db),
+):
+    user = get_user_from_token(cred.credentials, db)
+    if data.reminder_email is not None:
+        email = data.reminder_email.strip()
+        if email and "@" not in email:
+            raise HTTPException(400, "El correo no es válido")
+        user.reminder_email = email or None
+    if data.availability_reminder_opt_in is not None:
+        user.availability_reminder_opt_in = 1 if data.availability_reminder_opt_in else 0
+    db.commit()
+    return {
+        "reminder_email": user.reminder_email or "",
+        "availability_reminder_opt_in": bool(user.availability_reminder_opt_in),
+    }
+
+
+# =========================================================
+# ACTIVIDAD ECONÓMICA DEL EVENTO + MÉTRICAS DEL ÁMBITO
+# =========================================================
+def _serialize_finance(fin) -> dict:
+    if not fin:
+        return {
+            "has_registration_fee": False,
+            "fee_amount": "",
+            "collected_amount": "",
+            "notes": "",
+        }
+    return {
+        "has_registration_fee": bool(fin.has_registration_fee),
+        "fee_amount": fin.fee_amount or "",
+        "collected_amount": fin.collected_amount or "",
+        "notes": fin.notes or "",
+    }
+
+
+@app.get("/admin/events/{event_id}/finance")
+def get_event_finance(
+    event_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db),
+):
+    admin = get_user_from_token(cred.credentials, db)
+    require_admin(admin)
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    if not ev:
+        raise HTTPException(404, "Evento no encontrado")
+    _ensure_event_domain_access(admin, ev, db)
+    fin = db.query(EventFinance).filter(EventFinance.event_id == event_id).first()
+    return _serialize_finance(fin)
+
+
+@app.put("/admin/events/{event_id}/finance")
+def set_event_finance(
+    event_id: int,
+    data: EventFinanceUpdate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db),
+):
+    admin = get_user_from_token(cred.credentials, db)
+    require_admin(admin)
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    if not ev:
+        raise HTTPException(404, "Evento no encontrado")
+    _ensure_event_domain_access(admin, ev, db)
+
+    fin = db.query(EventFinance).filter(EventFinance.event_id == event_id).first()
+    now_iso = datetime.utcnow().isoformat()
+    if not fin:
+        fin = EventFinance(event_id=event_id)
+        db.add(fin)
+    fin.has_registration_fee = 1 if data.has_registration_fee else 0
+    fin.fee_amount = (data.fee_amount or "").strip() or None
+    fin.collected_amount = (data.collected_amount or "").strip() or None
+    fin.notes = (data.notes or "").strip() or None
+    fin.updated_by = admin.id
+    fin.updated_at = now_iso
+    db.commit()
+    return _serialize_finance(fin)
+
+
+def _to_float(value):
+    """Convierte importes en texto ('12,50' o '12.50') a float; None si no aplica."""
+    if not value:
+        return None
+    try:
+        return float(str(value).replace(",", ".").strip())
+    except (ValueError, TypeError):
+        return None
+
+
+@app.get("/admin/metrics")
+def admin_metrics(
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db),
+):
+    """Resumen de actividad del ámbito del admin: participación agregada y
+    actividad económica. Reutiliza el conteo en bloque ya optimizado."""
+    admin = get_user_from_token(cred.credentials, db)
+    require_admin(admin)
+
+    q = db.query(Event).filter(Event.deleted_at.is_(None))
+    if admin.role != "superadmin":
+        unit_ids = org_service.authorized_subtree_unit_ids(db, admin)
+        if unit_ids is not None:
+            # Eventos de las unidades del ámbito, o creados por el propio admin.
+            q = q.filter(or_(Event.org_unit_id.in_(unit_ids), Event.created_by == admin.id))
+    events = q.all()
+    event_ids = [e.id for e in events]
+
+    counts = _bulk_event_counts(db, event_ids) if event_ids else {}
+    total_yes = sum(c["yes"] for c in counts.values())
+    total_no = sum(c["no"] for c in counts.values())
+    total_companions = sum(c["companions"] for c in counts.values())
+    total_guest_yes = sum(c["guest_yes"] for c in counts.values())
+    total_guest_companions = sum(c["guest_companions"] for c in counts.values())
+
+    finances = (
+        db.query(EventFinance).filter(EventFinance.event_id.in_(event_ids)).all()
+        if event_ids else []
+    )
+    events_with_fee = sum(1 for f in finances if f.has_registration_fee)
+    total_collected = 0.0
+    has_collected = False
+    for f in finances:
+        amount = _to_float(f.collected_amount)
+        if amount is not None:
+            total_collected += amount
+            has_collected = True
+
+    return {
+        "total_events": len(events),
+        "participation": {
+            "militant_yes": total_yes,
+            "militant_no": total_no,
+            "militant_companions": total_companions,
+            "guest_yes": total_guest_yes,
+            "guest_companions": total_guest_companions,
+            "attendees_total": total_yes + total_companions + total_guest_yes + total_guest_companions,
+        },
+        "finance": {
+            "events_with_fee": events_with_fee,
+            "events_with_finance_record": len(finances),
+            "total_collected": round(total_collected, 2) if has_collected else None,
+        },
+    }
+
 
 @app.delete("/events/{event_id}")
 def delete_event(
@@ -3189,6 +3609,72 @@ def _send_census_email_async(email_to: str, csv_content: str):
         print(f"⚠️ Envío async fallido: {msg}")
 
 
+# ---------------------------------------------------------
+# CORREO GENÉRICO (recordatorios): sin adjunto, reutiliza la misma config
+# Resend/SMTP que el censo. Best-effort; los fallos solo se registran.
+# ---------------------------------------------------------
+def _send_email_simple(email_to: str, subject: str, body_text: str):
+    resend_api_key = _env_str("RESEND_API_KEY", "")
+    resend_from = _env_str("RESEND_FROM", _env_str("SMTP_FROM", ""))
+    provider = _env_str("CENSUS_EMAIL_PROVIDER", "").strip().lower()
+
+    use_resend = (provider in {"resend", "http", "api"}) or (not provider and resend_api_key)
+    if use_resend and resend_api_key and resend_from:
+        payload = {
+            "from": resend_from,
+            "to": [email_to],
+            "subject": subject,
+            "text": body_text,
+        }
+        try:
+            resend_module = importlib.import_module("resend")
+            resend_module.api_key = resend_api_key
+            resend_module.Emails.send(payload)
+            return True, "ok"
+        except Exception as exc:
+            logger.warning("Resend recordatorio falló, intento SMTP: %s", exc)
+
+    # SMTP directo.
+    smtp_host = _env_str("SMTP_HOST", "")
+    smtp_user = _env_str("SMTP_USER", "")
+    smtp_password = _env_str("SMTP_PASSWORD", "")
+    smtp_from = _env_str("SMTP_FROM", smtp_user)
+    if not smtp_host or not smtp_user or not smtp_password:
+        return False, "email no configurado (Resend/SMTP)"
+
+    try:
+        smtp_port = int(_env_str("SMTP_PORT", "587"))
+    except ValueError:
+        return False, "SMTP_PORT inválido"
+
+    smtp_use_ssl = _env_bool("SMTP_USE_SSL", False)
+    smtp_use_tls = _env_bool("SMTP_USE_TLS", True)
+    if smtp_use_ssl and smtp_use_tls:
+        smtp_use_tls = False
+
+    msg = MIMEMultipart()
+    msg["From"] = smtp_from
+    msg["To"] = email_to
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body_text, "plain"))
+
+    def do_send():
+        _smtp_attempt_send(
+            smtp_host=smtp_host, smtp_port=smtp_port, smtp_user=smtp_user,
+            smtp_password=smtp_password, msg=msg, use_ssl=smtp_use_ssl, use_tls=smtp_use_tls,
+        )
+
+    try:
+        if _env_bool("SMTP_FORCE_IPV4", True):
+            _with_forced_ipv4_resolution(do_send)
+        else:
+            do_send()
+        return True, "ok"
+    except Exception as exc:
+        logger.warning("SMTP recordatorio falló para %s: %s", email_to, exc)
+        return False, str(exc)
+
+
 @app.get("/admin/census")
 def get_census_config(
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
@@ -3497,6 +3983,85 @@ def admin_regenerate_survey_token(
     survey.url_token = secrets.token_urlsafe(16)
     db.commit()
     return {"url_token": survey.url_token}
+
+
+@app.put("/admin/surveys/{survey_id}")
+def admin_update_survey(
+    survey_id: int,
+    data: SurveyUpdate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    if not cred or not cred.credentials:
+        raise HTTPException(401, "Token inválido")
+
+    admin = get_user_from_token(cred.credentials, db)
+    _require_superadmin_module_access(admin, db, "surveys")
+
+    survey = db.query(Survey).filter(Survey.id == survey_id).first()
+    if not survey:
+        raise HTTPException(404, "Encuesta no encontrada")
+
+    title = (data.title or "").strip()
+    if not title:
+        raise HTTPException(400, "El título de la encuesta es obligatorio")
+
+    survey.title = title
+    survey.description = (data.description or "").strip() or None
+    if data.is_active is not None:
+        survey.is_active = 1 if data.is_active else 0
+
+    # Los campos solo se pueden reemplazar si la encuesta no tiene respuestas:
+    # cambiarlos con respuestas guardadas rompería el mapeo por id de campo.
+    if data.fields is not None:
+        has_responses = (
+            db.query(SurveyResponse).filter(SurveyResponse.survey_id == survey.id).first()
+            is not None
+        )
+        if has_responses:
+            raise HTTPException(400, "No se pueden editar los campos de una encuesta que ya tiene respuestas")
+
+        _validate_survey_fields(data.fields)
+        # Borrar campos antiguos y crear los nuevos.
+        db.query(SurveyField).filter(SurveyField.survey_id == survey.id).delete(synchronize_session=False)
+        for idx, field in enumerate(data.fields):
+            options = None
+            if field.field_type == "select" and field.options:
+                options = json.dumps([opt.strip() for opt in field.options if opt and opt.strip()])
+            db.add(SurveyField(
+                survey_id=survey.id,
+                label=field.label.strip(),
+                field_type=field.field_type,
+                required=1 if field.required else 0,
+                order_index=field.order_index if field.order_index is not None else idx,
+                options=options,
+            ))
+
+    db.commit()
+    db.refresh(survey)
+    return _survey_to_dict(survey, include_count=True)
+
+
+@app.delete("/admin/surveys/{survey_id}")
+def admin_delete_survey(
+    survey_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    if not cred or not cred.credentials:
+        raise HTTPException(401, "Token inválido")
+
+    admin = get_user_from_token(cred.credentials, db)
+    _require_superadmin_module_access(admin, db, "surveys")
+
+    survey = db.query(Survey).filter(Survey.id == survey_id).first()
+    if not survey:
+        raise HTTPException(404, "Encuesta no encontrada")
+
+    # El modelo Survey tiene cascade all/delete-orphan sobre fields y responses.
+    db.delete(survey)
+    db.commit()
+    return {"ok": True}
 
 
 @app.get("/admin/surveys/{survey_id}/responses")
@@ -3947,14 +4512,23 @@ def _send_fcm_notification(tokens: list[str], title: str, body: str, data: dict 
     # recurso si no hay service account configurada; nunca debe tapar a v1.
     _, _, sa_reason, _ = _load_fcm_service_account()
     if not sa_reason:
-        return _send_fcm_notification_v1(tokens, title, body, data=data)
+        result = _send_fcm_notification_v1(tokens, title, body, data=data)
+    else:
+        server_key = os.getenv("FCM_SERVER_KEY", "").strip()
+        if server_key:
+            result = _send_fcm_notification_legacy(tokens, title, body, server_key, data=data)
+        else:
+            # Sin service account ni server key: v1 devuelve el motivo de config faltante.
+            result = _send_fcm_notification_v1(tokens, title, body, data=data)
 
-    server_key = os.getenv("FCM_SERVER_KEY", "").strip()
-    if server_key:
-        return _send_fcm_notification_legacy(tokens, title, body, server_key, data=data)
-
-    # Sin service account ni server key: v1 devuelve el motivo de config faltante.
-    return _send_fcm_notification_v1(tokens, title, body, data=data)
+    reason = (result or {}).get("reason")
+    if reason and reason not in ("no_tokens",):
+        logger.warning("FCM envío incompleto: tokens=%d sent=%s failed=%s reason=%s",
+                       len(tokens), (result or {}).get("sent"), (result or {}).get("failed"), reason)
+    else:
+        logger.info("FCM enviado: tokens=%d sent=%s failed=%s",
+                    len(tokens), (result or {}).get("sent"), (result or {}).get("failed"))
+    return result
 
 
 def _device_token_freshness_filter():
@@ -4591,6 +5165,8 @@ def edit_event(
     ev.event_type = event_type
     ev.location = data.location or None
     ev.external_url = data.external_url or None
+    if data.attachments is not None:
+        ev.attachments = _clean_attachments(data.attachments)
     ev.metadata_json = json.dumps(data.metadata) if data.metadata else None
     ev.is_recurring = 1 if data.is_recurring else 0
     ev.recurrence_rule = data.recurrence_rule or None
@@ -4630,6 +5206,148 @@ def edit_event(
         "distribution_mode": ev.distribution_mode,
         "created_by": ev.created_by,
     }
+
+
+# =========================================================
+# PLANIFICADOR EN SEGUNDO PLANO (recordatorios)
+# =========================================================
+# Un único hilo daemon que despierta periódicamente para:
+#   1) enviar los recordatorios de evento que el usuario haya activado (opt-in),
+#   2) enviar el recordatorio semanal de disponibilidad a quien lo pidió.
+# No hay envíos automáticos a quien no lo solicitó.
+#
+# Nota de zona horaria: la app guarda fechas/horas como texto local (España).
+# El servidor corre en UTC, así que comparamos contra "ahora local" = utcnow +
+# REMINDER_TZ_OFFSET_MINUTES (por defecto 120 = CEST verano; poner 60 en invierno).
+_scheduler_started = False
+_availability_reminder_sent_weeks = set()  # (user_id, "YYYY-WW") ya avisados esta ejecución
+
+
+def _reminder_now_local():
+    offset = 120
+    try:
+        offset = int(os.getenv("REMINDER_TZ_OFFSET_MINUTES", "120"))
+    except ValueError:
+        offset = 120
+    return datetime.utcnow() + timedelta(minutes=offset)
+
+
+def _user_active_tokens(db, user_id):
+    return [
+        t.token
+        for t in db.query(DeviceToken).filter(
+            DeviceToken.user_id == user_id, DeviceToken.active == 1
+        ).all()
+    ]
+
+
+def _process_due_event_reminders(db):
+    now_iso = _reminder_now_local().isoformat()
+    due = (
+        db.query(EventReminder)
+        .filter(EventReminder.sent == 0, EventReminder.remind_at <= now_iso)
+        .all()
+    )
+    for r in due:
+        try:
+            event = db.query(Event).filter(Event.id == r.event_id).first()
+            if not event or event.deleted_at:
+                r.sent = 1
+                continue
+            user = db.query(User).filter(User.id == r.user_id).first()
+            if not user:
+                r.sent = 1
+                continue
+
+            channels = (r.channels or "push").split(",")
+            title = "Recordatorio de evento"
+            body = event.title + " · " + (event.date or "")
+            if event.start_time:
+                body += f" {event.start_time[:5]}"
+
+            if "push" in channels:
+                tokens = _user_active_tokens(db, user.id)
+                if tokens:
+                    _send_fcm_notification(tokens, title, body, data={"event_id": str(event.id)})
+            if "email" in channels:
+                to = user.reminder_email or user.email
+                if to:
+                    threading.Thread(
+                        target=_send_email_simple, args=(to, title, body), daemon=True
+                    ).start()
+            r.sent = 1
+        except Exception:
+            logger.exception("Fallo procesando recordatorio de evento id=%s", r.id)
+            r.sent = 1  # evita reintentos infinitos de uno roto
+    db.commit()
+
+
+def _process_availability_reminders(db):
+    """Aviso semanal a quien lo pidió y no ha marcado disponibilidad esta semana.
+    Solo se dispara en la ventana lunes 09:00-09:59 (hora local) para no molestar,
+    y se deduplica en memoria por (usuario, semana)."""
+    now = _reminder_now_local()
+    if now.weekday() != 0 or now.hour != 9:  # lunes a las 9
+        return
+
+    iso_week = f"{now.isocalendar().year}-{now.isocalendar().week:02d}"
+    monday = (now - timedelta(days=now.weekday())).date()
+    week_dates = {(monday + timedelta(days=i)).isoformat() for i in range(7)}
+
+    opted_in = db.query(User).filter(User.availability_reminder_opt_in == 1).all()
+    for user in opted_in:
+        key = (user.id, iso_week)
+        if key in _availability_reminder_sent_weeks:
+            continue
+        has_availability = (
+            db.query(Availability)
+            .filter(Availability.user_id == user.id, Availability.date.in_(week_dates))
+            .first()
+        )
+        if has_availability:
+            _availability_reminder_sent_weeks.add(key)
+            continue
+
+        title = "Recuerda marcar tu disponibilidad"
+        body = "Aún no has indicado tu disponibilidad de esta semana. Entra en la app cuando puedas."
+        try:
+            tokens = _user_active_tokens(db, user.id)
+            if tokens:
+                _send_fcm_notification(tokens, title, body)
+            to = user.reminder_email or user.email
+            if to:
+                threading.Thread(target=_send_email_simple, args=(to, title, body), daemon=True).start()
+        except Exception:
+            logger.exception("Fallo enviando recordatorio de disponibilidad a user=%s", user.id)
+        _availability_reminder_sent_weeks.add(key)
+
+
+def _reminder_scheduler_loop(interval_seconds=300):
+    stop = threading.Event()
+    while not stop.wait(interval_seconds):
+        db = SessionLocal()
+        try:
+            _process_due_event_reminders(db)
+            _process_availability_reminders(db)
+        except Exception:
+            logger.exception("Error en el planificador de recordatorios")
+        finally:
+            db.close()
+
+
+def _start_reminder_scheduler():
+    global _scheduler_started
+    if _scheduler_started:
+        return
+    if os.getenv("ENABLE_REMINDER_SCHEDULER", "1").strip() not in ("1", "true", "True"):
+        logger.info("Planificador de recordatorios deshabilitado por entorno")
+        return
+    _scheduler_started = True
+    threading.Thread(target=_reminder_scheduler_loop, daemon=True).start()
+    logger.info("Planificador de recordatorios iniciado")
+
+
+_start_reminder_scheduler()
 
 
 # =========================================================

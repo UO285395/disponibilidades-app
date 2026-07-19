@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { adminAPI } from "../api/adminApi.js";
-import { Card, Title, Text, Button, Box, TextInput } from "@mantine/core";
+import {
+  Card, Title, Text, Button, Box, TextInput, Group, Badge, SimpleGrid, Alert,
+} from "@mantine/core";
+import { IconArrowLeft, IconDownload, IconAlertTriangle } from "@tabler/icons-react";
+import { downloadCsv } from "../utils/csv.js";
 
 // ========================================
 // Función para resumen de votos
@@ -123,10 +127,44 @@ export default function AdminEventResponses() {
     return { si: gsi, no: gno, companions };
   }, [guestResponses]);
 
+  function exportCsv() {
+    const rows = [
+      ...filteredResponses.map((r) => ({
+        tipo: "Militante",
+        nombre: r.user_full_name,
+        colectivo: r.user_domain || "",
+        respuesta: formatRespuesta(r.answer),
+        acompanantes: r.companions_count ?? 0,
+        justificacion: r.justification || "",
+      })),
+      ...(isPublic ? guestResponses.map((g) => ({
+        tipo: "Visitante",
+        nombre: g.guest_name || "Anónimo",
+        colectivo: "",
+        respuesta: formatRespuesta(g.answer),
+        acompanantes: g.companions ?? 0,
+        justificacion: "",
+      })) : []),
+    ];
+    const columns = [
+      { key: "tipo", label: "Tipo" },
+      { key: "nombre", label: "Nombre" },
+      { key: "colectivo", label: "Colectivo" },
+      { key: "respuesta", label: "Respuesta" },
+      { key: "acompanantes", label: "Acompañantes" },
+      { key: "justificacion", label: "Justificación" },
+    ];
+    const safeName = (eventName || "evento").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+    downloadCsv(`respuestas-${safeName}.csv`, rows, columns);
+  }
+
+  const totalMilitants = filteredResponses.length;
+  const participationPct = totalMilitants > 0 ? Math.round((si / totalMilitants) * 100) : 0;
+
   if (loadError) {
     return (
       <Box p="lg">
-        <Button mb="md" variant="outline" onClick={() => navigate("/admin")}>
+        <Button mb="md" variant="light" leftSection={<IconArrowLeft size={18} />} onClick={() => navigate("/admin")}>
           Volver
         </Button>
 
@@ -134,18 +172,28 @@ export default function AdminEventResponses() {
           Respuestas del evento
         </Title>
 
-        <Card shadow="sm" p="lg" style={{ background: "#fff5f5" }}>
-          <Text c="red">{loadError}</Text>
-        </Card>
+        <Alert color="red" icon={<IconAlertTriangle size={18} />}>{loadError}</Alert>
       </Box>
     );
   }
 
+  const hasAnyResponse = filteredResponses.length > 0 || guestResponses.length > 0;
+
   return (
     <Box p="lg">
-      <Button mb="md" variant="outline" onClick={() => navigate("/admin")}>
-        Volver
-      </Button>
+      <Group justify="space-between" mb="md" wrap="nowrap">
+        <Button variant="light" leftSection={<IconArrowLeft size={18} />} onClick={() => navigate("/admin")}>
+          Volver
+        </Button>
+        <Button
+          variant="light"
+          leftSection={<IconDownload size={18} />}
+          disabled={!hasAnyResponse}
+          onClick={exportCsv}
+        >
+          Exportar CSV
+        </Button>
+      </Group>
 
       <Title order={2} mb="lg">
         Respuestas del evento {eventName || "(cargando...)"}
@@ -161,26 +209,35 @@ export default function AdminEventResponses() {
       {/* ========================================
           RESUMEN DE VOTOS (militancia y visitantes por separado)
          ======================================== */}
-      <Card shadow="sm" p="lg" mb="lg" style={{ background: "#eef6ff" }}>
-        <Title order={4} mb="sm">Resumen de votos</Title>
+      <Card withBorder shadow="sm" p="lg" mb="lg">
+        <Title order={4} mb="md">Resumen de votos</Title>
 
-        <Text fw={600} mt="xs">Militancia</Text>
-        <Text><b>Sí:</b> {si}</Text>
-        <Text><b>No:</b> {no}</Text>
-        <Text><b>+ Simpas:</b> {simpas}</Text>
-        <Text c="dimmed" size="sm">Subtotal asistencia: {si + simpas}</Text>
+        <SimpleGrid cols={{ base: 2, sm: isPublic ? 4 : 2 }} spacing="md">
+          <div>
+            <Text size="xs" c="dimmed" tt="uppercase" fw={600}>Militancia</Text>
+            <Group gap="xs" mt={4}>
+              <Badge color="teal" variant="light" size="lg">Sí {si}</Badge>
+              <Badge color="red" variant="light" size="lg">No {no}</Badge>
+            </Group>
+            <Text size="sm" c="dimmed" mt={6}>+ Simpas: {simpas}</Text>
+            <Text size="sm" c="dimmed">Participación: {participationPct}%</Text>
+            <Text size="sm" fw={600} mt={2}>Asistencia: {si + simpas}</Text>
+          </div>
 
-        {isPublic && (
-          <>
-            <Text fw={600} mt="md">Visitantes (sin cuenta)</Text>
-            <Text><b>Sí:</b> {guestSummary.si}</Text>
-            <Text><b>No:</b> {guestSummary.no}</Text>
-            <Text><b>+ Acompañantes:</b> {guestSummary.companions}</Text>
-            <Text c="dimmed" size="sm">Subtotal asistencia: {guestSummary.si + guestSummary.companions}</Text>
-          </>
-        )}
+          {isPublic && (
+            <div>
+              <Text size="xs" c="dimmed" tt="uppercase" fw={600}>Visitantes</Text>
+              <Group gap="xs" mt={4}>
+                <Badge color="teal" variant="light" size="lg">Sí {guestSummary.si}</Badge>
+                <Badge color="red" variant="light" size="lg">No {guestSummary.no}</Badge>
+              </Group>
+              <Text size="sm" c="dimmed" mt={6}>+ Acompañantes: {guestSummary.companions}</Text>
+              <Text size="sm" fw={600} mt={2}>Asistencia: {guestSummary.si + guestSummary.companions}</Text>
+            </div>
+          )}
+        </SimpleGrid>
 
-        <Text fw={700} mt="md">
+        <Text fw={700} mt="md" size="lg">
           Asistencia total: {si + simpas + (isPublic ? guestSummary.si + guestSummary.companions : 0)}
         </Text>
       </Card>

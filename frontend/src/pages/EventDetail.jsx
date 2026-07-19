@@ -5,12 +5,14 @@ import {
 } from "@mantine/core";
 import {
   IconArrowLeft, IconCalendarEvent, IconClock, IconMapPin, IconExternalLink,
-  IconAlertTriangle,
+  IconAlertTriangle, IconShare,
 } from "@tabler/icons-react";
-import { eventsAPI, getToken } from "../api/api.js";
+import { eventsAPI, getToken, getShareUrl } from "../api/api.js";
 import GuestEventResponse from "../components/GuestEventResponse.jsx";
 import AddToCalendarButton from "../components/AddToCalendarButton.jsx";
+import EventAttachments from "../components/EventAttachments.jsx";
 import { formatDate, formatTime } from "../utils/datetime.js";
+import { notifySuccess, notifyError } from "../utils/notify.js";
 
 function InfoRow({ icon, children }) {
   return (
@@ -33,7 +35,7 @@ export default function EventDetail() {
       try {
         const data = await eventsAPI.getPublicDetail(id);
         setEvent(data);
-      } catch (e) {
+      } catch {
         setError("Evento no encontrado o ya no está disponible.");
       }
     })();
@@ -57,6 +59,31 @@ export default function EventDetail() {
 
   if (!event) {
     return <Center h="60vh"><Loader /></Center>;
+  }
+
+  async function shareEvent() {
+    // URL del backend con metadatos Open Graph para que el enlace se vea bien.
+    const url = getShareUrl(event.id);
+    const shareData = {
+      title: event.title,
+      text: `${event.title} · ${formatDate(event.date)}`,
+      url,
+    };
+    // Web Share API en móvil (nativo del navegador); fallback a copiar al portapapeles.
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch (e) {
+        if (e?.name === "AbortError") return; // El usuario canceló.
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      notifySuccess("Enlace copiado al portapapeles.");
+    } catch {
+      notifyError("No se pudo compartir. Copia el enlace de la barra de direcciones.");
+    }
   }
 
   return (
@@ -98,6 +125,8 @@ export default function EventDetail() {
 
         {event.description && <Text mt="md">{event.description}</Text>}
 
+        <EventAttachments attachments={event.attachments} />
+
         {event.external_url && (
           <Anchor href={event.external_url} target="_blank" rel="noreferrer" mt="md" style={{ display: "inline-block" }}>
             <Group gap={4} wrap="nowrap">
@@ -109,6 +138,14 @@ export default function EventDetail() {
 
         <Group mt="lg">
           <AddToCalendarButton event={event} size="md" variant="light" />
+          <Button
+            variant="subtle"
+            size="md"
+            leftSection={<IconShare size={18} />}
+            onClick={shareEvent}
+          >
+            Compartir
+          </Button>
         </Group>
       </Card>
 

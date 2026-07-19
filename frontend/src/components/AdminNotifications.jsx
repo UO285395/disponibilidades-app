@@ -1,7 +1,34 @@
 import { useEffect, useMemo, useState } from "react";
 import { adminAPI } from "../api/adminApi.js";
 import OrgUnitSelect from "./OrgUnitSelect.jsx";
-import { Card, Title, Text, TextInput, Textarea, Button, Group, Select, MultiSelect } from "@mantine/core";
+import { Card, Title, Text, TextInput, Textarea, Button, Group, Select, MultiSelect, Alert } from "@mantine/core";
+import { IconAlertTriangle, IconCircleCheck } from "@tabler/icons-react";
+import { notifyError, notifySuccess } from "../utils/notify.js";
+
+const CONFIG_ERROR_REASONS = [
+  "missing_fcm_key", "missing_fcm_config", "missing_firebase_project_id",
+  "invalid_fcm_service_account", "fcm_auth_error", "missing_google_auth_dependency",
+];
+
+// Traduce el motivo técnico que devuelve el backend a un mensaje claro.
+function describeReason(reason) {
+  switch (reason) {
+    case "no_tokens":
+      return "Nadie del destino tiene la app instalada con notificaciones activadas, así que no se ha enviado ninguna.";
+    case "no_target_users":
+      return "No hay usuarios en el destino seleccionado.";
+    case "missing_fcm_config":
+    case "missing_fcm_key":
+    case "missing_firebase_project_id":
+    case "invalid_fcm_service_account":
+    case "missing_google_auth_dependency":
+      return "Falta configurar Firebase/FCM en el servidor (Railway). Sin esa configuración no se pueden enviar notificaciones push.";
+    case "fcm_auth_error":
+      return "El servidor no ha podido autenticarse con Firebase. Revisa la cuenta de servicio en Railway.";
+    default:
+      return null;
+  }
+}
 
 export default function AdminNotifications() {
   const [users, setUsers] = useState([]);
@@ -48,7 +75,7 @@ export default function AdminNotifications() {
 
   async function handleSend() {
     if (!title.trim() || !body.trim()) {
-      alert("Título y mensaje son obligatorios");
+      notifyError("Título y mensaje son obligatorios");
       return;
     }
 
@@ -62,15 +89,15 @@ export default function AdminNotifications() {
     };
 
     if (scope === "colectivo" && !payload.org_unit_id) {
-      alert("Selecciona la estructura destino");
+      notifyError("Selecciona la estructura destino");
       return;
     }
     if (scope === "users" && payload.user_ids.length === 0) {
-      alert("Selecciona al menos un usuario");
+      notifyError("Selecciona al menos un usuario");
       return;
     }
     if (scope === "tag" && !payload.group_tag) {
-      alert("Selecciona la etiqueta destino");
+      notifyError("Selecciona la etiqueta destino");
       return;
     }
 
@@ -78,12 +105,14 @@ export default function AdminNotifications() {
       setSending(true);
       const r = await adminAPI.sendNotification(payload);
       setResult(r);
-      if (["missing_fcm_key", "missing_fcm_config", "missing_firebase_project_id", "invalid_fcm_service_account", "fcm_auth_error", "missing_google_auth_dependency"].includes(r?.reason)) {
-        alert(r?.message || "Falta configurar Firebase/FCM en Railway para poder enviar notificaciones push.");
+      if (CONFIG_ERROR_REASONS.includes(r?.reason)) {
+        notifyError(describeReason(r?.reason) || r?.message || "Falta configurar Firebase/FCM en el servidor.");
+      } else if ((r?.sent ?? 0) > 0) {
+        notifySuccess(`Notificación enviada a ${r.sent} dispositivo(s).`);
       }
     } catch (e) {
       console.error("Error enviando notificación", e);
-      alert(e?.message || "Error enviando notificación");
+      notifyError(e?.message || "Error enviando notificación");
     } finally {
       setSending(false);
     }
@@ -169,16 +198,27 @@ export default function AdminNotifications() {
         </Group>
       </Card>
 
-      {result && (
-        <Card mt="md" p="md" withBorder>
-          <Text><b>Resultado:</b></Text>
-          <Text size="sm">Usuarios objetivo: {result.target_users ?? 0}</Text>
-          <Text size="sm">Tokens: {result.tokens ?? 0}</Text>
-          <Text size="sm">Enviadas: {result.sent ?? 0}</Text>
-          <Text size="sm">Fallidas: {result.failed ?? 0}</Text>
-          <Text size="sm" c="dimmed">Motivo: {result.reason || "-"}</Text>
-        </Card>
-      )}
+      {result && (() => {
+        const configError = CONFIG_ERROR_REASONS.includes(result.reason);
+        const sent = result.sent ?? 0;
+        const explanation = describeReason(result.reason);
+        const color = configError ? "red" : sent > 0 ? "teal" : "yellow";
+        const icon = configError ? <IconAlertTriangle size={18} /> : sent > 0 ? <IconCircleCheck size={18} /> : <IconAlertTriangle size={18} />;
+        const alertTitle = configError
+          ? "No se pudo enviar: configuración pendiente"
+          : sent > 0
+          ? `Enviada a ${sent} dispositivo(s)`
+          : "No se envió a ningún dispositivo";
+        return (
+          <Alert mt="md" color={color} icon={icon} title={alertTitle} withCloseButton onClose={() => setResult(null)}>
+            {explanation && <Text size="sm" mb="xs">{explanation}</Text>}
+            <Text size="sm" c="dimmed">
+              Usuarios objetivo: {result.target_users ?? 0} · Dispositivos: {result.tokens ?? 0} ·
+              Enviadas: {sent} · Fallidas: {result.failed ?? 0}
+            </Text>
+          </Alert>
+        );
+      })()}
     </>
   );
 }

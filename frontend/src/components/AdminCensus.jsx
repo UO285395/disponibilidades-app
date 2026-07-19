@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { notifyError, notifySuccess } from "../utils/notify.js";
 import {
   Title, Text, TextInput, Button, Group, Card, Select,
   Checkbox, ActionIcon, Stack, Badge, CopyButton, Divider,
@@ -11,8 +12,6 @@ const FIELD_TYPES = [
   { value: "number", label: "Número" },
   { value: "select", label: "Selección (opciones)" },
 ];
-
-const AUTOSAVE_DEBOUNCE_MS = 700;
 
 const emptyField = () => ({
   _key: `tmp-${Date.now()}-${Math.random()}`,
@@ -54,7 +53,6 @@ export default function AdminCensus() {
   const [draggedOptionMeta, setDraggedOptionMeta] = useState(null);
 
   const initialLoadCompletedRef = useRef(false);
-  const autosaveTimeoutRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -76,14 +74,6 @@ export default function AdminCensus() {
         initialLoadCompletedRef.current = true;
       }
     })();
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (autosaveTimeoutRef.current) {
-        clearTimeout(autosaveTimeoutRef.current);
-      }
-    };
   }, []);
 
   const hasRequiredInfo = useMemo(() => {
@@ -132,7 +122,7 @@ export default function AdminCensus() {
     if (!payload) {
       setSaveError(error || "No se pudo guardar la configuración.");
       if (!silent) {
-        alert(error || "No se pudo guardar la configuración.");
+        notifyError(error || "No se pudo guardar la configuración.");
       }
       return false;
     }
@@ -163,7 +153,7 @@ export default function AdminCensus() {
       const msg = e?.message || "Error guardando la configuración";
       setSaveError(msg);
       if (!silent) {
-        alert(msg);
+        notifyError(msg);
       }
       return false;
     } finally {
@@ -171,22 +161,6 @@ export default function AdminCensus() {
     }
   }
 
-  useEffect(() => {
-    if (!loaded || !initialLoadCompletedRef.current) return;
-    if (autosaveTimeoutRef.current) {
-      clearTimeout(autosaveTimeoutRef.current);
-    }
-
-    autosaveTimeoutRef.current = setTimeout(() => {
-      saveConfig(emailTo, fields, { silent: true });
-    }, AUTOSAVE_DEBOUNCE_MS);
-
-    return () => {
-      if (autosaveTimeoutRef.current) {
-        clearTimeout(autosaveTimeoutRef.current);
-      }
-    };
-  }, [emailTo, fields, loaded]);
 
   function addField() {
     setFields((prev) => [...prev, emptyField()]);
@@ -262,7 +236,8 @@ export default function AdminCensus() {
   }
 
   async function saveNow() {
-    await saveConfig(emailTo, fields, { silent: false });
+    const ok = await saveConfig(emailTo, fields, { silent: false });
+    if (ok) notifySuccess("Configuración del censo guardada");
   }
 
   async function regenerateToken() {
@@ -273,7 +248,7 @@ export default function AdminCensus() {
       setConfig((prev) => ({ ...prev, url_token: result.url_token }));
     } catch (e) {
       console.error("Error regenerando token", e);
-      alert("Error al regenerar la URL");
+      notifyError("Error al regenerar la URL");
     } finally {
       setRegenerating(false);
     }
@@ -316,15 +291,15 @@ export default function AdminCensus() {
       </Text>
 
       <Group gap="xs" mb="md">
-        <Badge color={saving ? "yellow" : saveError ? "red" : "green"} variant="light">
-          {saving ? "Guardando..." : saveError ? "Con cambios sin guardar" : "Guardado"}
+        <Badge color={saving ? "yellow" : saveError ? "red" : lastSavedAt ? "green" : "gray"} variant="light">
+          {saving ? "Guardando..." : saveError ? "Error al guardar" : lastSavedAt ? "Guardado" : "Sin guardar"}
         </Badge>
         <Text size="xs" c="dimmed">
           {saveError
             ? saveError
             : lastSavedAt
-              ? `Ultima actualizacion: ${lastSavedAt.toLocaleTimeString()}`
-              : "Los cambios se guardan automaticamente en tiempo real."}
+              ? `Última actualización: ${lastSavedAt.toLocaleTimeString()}`
+              : "Pulsa «Guardar» para aplicar los cambios."}
         </Text>
       </Group>
 
@@ -513,8 +488,8 @@ export default function AdminCensus() {
         </Button>
       </Group>
 
-      <Button onClick={saveNow} loading={saving} disabled={!hasRequiredInfo}>
-        Guardar ahora
+      <Button size="md" onClick={saveNow} loading={saving} disabled={!hasRequiredInfo}>
+        Guardar configuración
       </Button>
     </>
   );

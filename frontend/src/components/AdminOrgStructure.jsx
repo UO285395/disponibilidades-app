@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { notifyError } from "../utils/notify.js";
 import {
   Card, Title, Text, Group, Button, Badge, Stack, Modal, TextInput,
   Select, ActionIcon, Divider, Box, Loader,
@@ -153,7 +154,7 @@ export default function AdminOrgStructure() {
                           await adminAPI.orgDeleteUnit(unit.id);
                           load();
                         } catch (e) {
-                          alert(e?.message || "No se pudo eliminar la unidad");
+                          notifyError(e?.message || "No se pudo eliminar la unidad");
                         }
                       }}>
                       Eliminar
@@ -216,7 +217,7 @@ function CreateUnitModal({ parent, allowedTypes, onClose, onDone }) {
       });
       onDone();
     } catch (e) {
-      alert(e?.message || "No se pudo crear");
+      notifyError(e?.message || "No se pudo crear");
     } finally {
       setSaving(false);
     }
@@ -245,7 +246,7 @@ function RenameUnitModal({ unit, onClose, onDone }) {
       await adminAPI.orgRenameUnit(unit.id, name.trim());
       onDone();
     } catch (e) {
-      alert(e?.message || "No se pudo renombrar");
+      notifyError(e?.message || "No se pudo renombrar");
     } finally {
       setSaving(false);
     }
@@ -273,7 +274,7 @@ function MoveUnitModal({ unit, tree, onClose, onDone }) {
       await adminAPI.orgMoveUnit(unit.id, Number(target));
       onDone();
     } catch (e) {
-      alert(e?.message || "No se pudo mover");
+      notifyError(e?.message || "No se pudo mover");
     } finally {
       setSaving(false);
     }
@@ -330,7 +331,7 @@ function UnitAdminsModal({ unit, onClose }) {
       setPicked(null);
       reload();
     } catch (e) {
-      alert(e?.message || "No se pudo asignar");
+      notifyError(e?.message || "No se pudo asignar");
     } finally {
       setSaving(false);
     }
@@ -446,7 +447,7 @@ function UnitTerritoriesModal({ unit, onClose }) {
       resetForm();
       reload();
     } catch (e) {
-      alert(e?.message || "No se pudo añadir el territorio");
+      notifyError(e?.message || "No se pudo añadir el territorio");
     } finally {
       setSaving(false);
     }
@@ -524,7 +525,7 @@ function UnitMembersModal({ unit, onClose }) {
     (async () => {
       try {
         setMembers(await adminAPI.usersInUnit(unit.id));
-      } catch (e) {
+      } catch {
         setMembers([]);
       } finally {
         setLoading(false);

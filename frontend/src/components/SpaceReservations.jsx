@@ -8,9 +8,13 @@ import {
   Button,
   Table,
   Group,
-  Notification,
+  Center,
+  Stack,
+  Loader,
 } from "@mantine/core";
+import { IconMoodEmpty } from "@tabler/icons-react";
 import { spacesAPI, reservationsAPI } from "../api/api.js";
+import { notifyError, notifySuccess } from "../utils/notify.js";
 
 export default function SpaceReservations({ currentUser }) {
   const [spaces, setSpaces] = useState([]);
@@ -20,8 +24,7 @@ export default function SpaceReservations({ currentUser }) {
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [reason, setReason] = useState("");
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -34,6 +37,8 @@ export default function SpaceReservations({ currentUser }) {
         setReservations(reservationList);
       } catch (e) {
         console.error(e);
+      } finally {
+        setLoading(false);
       }
     })();
   }, []);
@@ -48,23 +53,20 @@ export default function SpaceReservations({ currentUser }) {
   }
 
   async function submit() {
-    setError("");
-    setSuccess("");
-
     if (!spaceId || !date) {
-      setError("Selecciona espacio y fecha.");
+      notifyError("Selecciona espacio y fecha.");
       return;
     }
 
     const dateIso = date instanceof Date ? date.toISOString().slice(0, 10) : date;
 
     if (startTime && !/^\d{1,2}:\d{2}$/.test(startTime) && !/^\d{1,2}:\d{2}:\d{2}$/.test(startTime)) {
-      setError("Formato de hora inicio inválido");
+      notifyError("Formato de hora inicio inválido");
       return;
     }
 
     if (endTime && !/^\d{1,2}:\d{2}$/.test(endTime) && !/^\d{1,2}:\d{2}:\d{2}$/.test(endTime)) {
-      setError("Formato de hora fin inválido");
+      notifyError("Formato de hora fin inválido");
       return;
     }
 
@@ -76,26 +78,23 @@ export default function SpaceReservations({ currentUser }) {
         endTime || null,
         reason || null
       );
-      setSuccess("Reserva creada");
+      notifySuccess("Reserva creada");
       setStartTime("");
       setEndTime("");
       setReason("");
       refresh();
     } catch (e) {
-      setError(e.message || "Error al crear reserva");
+      notifyError(e.message || "Error al crear reserva");
     }
   }
 
   async function deleteReservation(id) {
-    setError("");
-    setSuccess("");
-
     try {
       await reservationsAPI.delete(id);
-      setSuccess("Reserva cancelada");
+      notifySuccess("Reserva cancelada");
       refresh();
     } catch (e) {
-      setError(e.message || "Error al cancelar reserva");
+      notifyError(e.message || "Error al cancelar reserva");
     }
   }
 
@@ -126,13 +125,6 @@ export default function SpaceReservations({ currentUser }) {
 
       <Card shadow="sm" p="md" mb="md">
         <Text mb="sm">Selecciona espacio, día, hora de inicio y opcional fin.</Text>
-
-        {error && (
-          <Notification color="red" mb="sm" onClose={() => setError("")}> {error} </Notification>
-        )}
-        {success && (
-          <Notification color="green" mb="sm" onClose={() => setSuccess("")}> {success} </Notification>
-        )}
 
         <Group mb="sm">
           <Select
@@ -180,6 +172,16 @@ export default function SpaceReservations({ currentUser }) {
 
       <Card shadow="sm" p="md">
         <Text mb="sm">Reservas existentes</Text>
+        {loading ? (
+          <Center py="md"><Loader size="sm" /></Center>
+        ) : reservations.length === 0 ? (
+          <Center py="lg">
+            <Stack align="center" gap="xs">
+              <IconMoodEmpty size={36} color="var(--mantine-color-gray-5)" />
+              <Text c="dimmed" ta="center" size="sm">No hay reservas todavía.</Text>
+            </Stack>
+          </Center>
+        ) : (
         <Table striped highlightOnHover>
           <thead>
             <tr>
@@ -214,6 +216,7 @@ export default function SpaceReservations({ currentUser }) {
             ))}
           </tbody>
         </Table>
+        )}
       </Card>
     </div>
   );

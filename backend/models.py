@@ -15,6 +15,11 @@ class User(Base):
     # Unidad organizativa "hogar" del usuario (colectivo donde milita). La
     # autoridad real de un admin no sale de aquí, sino de AdminAssignment.
     org_unit_id = Column(Integer, ForeignKey("org_units.id"), nullable=True, index=True)
+    # Correo opcional (opt-in) al que el usuario quiere recibir recordatorios.
+    # Puede coincidir con `email` o ser otro; lo gestiona el propio usuario.
+    reminder_email = Column(String, nullable=True)
+    # Opt-in del recordatorio semanal de disponibilidad sin marcar.
+    availability_reminder_opt_in = Column(Integer, nullable=False, default=0)
 
     # Relaciones
     availabilities = relationship("Availability", back_populates="user")
@@ -56,6 +61,9 @@ class Event(Base):
     # Conviven con allowed_domain (legacy) durante la transición.
     org_unit_id = Column(Integer, ForeignKey("org_units.id"), nullable=True, index=True)
     distribution_mode = Column(String, nullable=True, default="unit_only")
+    # Adjuntos como JSON serializado: lista de {name, url}. Basado en enlaces
+    # para no depender de almacenamiento de ficheros (Railway es efímero).
+    attachments = Column(String, nullable=True)
 
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
 
@@ -159,6 +167,53 @@ class GuestResponse(Base):
     companions = Column(Integer, nullable=False, default=0)
     guest_identifier = Column(String, nullable=False)
     created_at = Column(String, nullable=True)
+    updated_at = Column(String, nullable=True)
+
+    event = relationship("Event")
+
+
+class EventReminder(Base):
+    """Recordatorio de evento que el propio usuario activa (opt-in). Nunca se
+    crea automáticamente: solo existe si la persona pulsó "Recordármelo". El
+    planificador en segundo plano lo envía cuando llega `remind_at` y marca
+    `sent=1`."""
+    __tablename__ = "event_reminders"
+    __table_args__ = (
+        UniqueConstraint("event_id", "user_id", name="ux_event_reminders_event_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    # Momento en que debe dispararse (ISO). Se calcula a partir de la fecha/hora
+    # del evento menos el desplazamiento elegido por el usuario.
+    remind_at = Column(String, nullable=False, index=True)
+    # push, email o "push,email" — canales elegidos.
+    channels = Column(String, nullable=False, default="push")
+    sent = Column(Integer, nullable=False, default=0)
+    created_at = Column(String, nullable=True)
+
+    event = relationship("Event")
+    user = relationship("User")
+
+
+class EventFinance(Base):
+    """Actividad económica opcional asociada a un evento (recaudación, cuota de
+    inscripción). Va en tabla aparte a propósito: la inmensa mayoría de eventos
+    no tienen cuota, así que NO se añade un campo "cuota" al formulario; cuando
+    aplica, un admin registra aquí los importes y alimentan el panel de métricas."""
+    __tablename__ = "event_finances"
+    __table_args__ = (
+        UniqueConstraint("event_id", name="ux_event_finances_event"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
+    has_registration_fee = Column(Integer, nullable=False, default=0)
+    fee_amount = Column(String, nullable=True)        # importe de la cuota (texto para evitar problemas de coma/punto)
+    collected_amount = Column(String, nullable=True)  # recaudación total
+    notes = Column(String, nullable=True)
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_at = Column(String, nullable=True)
 
     event = relationship("Event")

@@ -10,9 +10,9 @@ import {
   Badge,
   Modal,
   List,
-  Table,
   Group,
   Button,
+  Stack,
 } from "@mantine/core";
 
 // ============================================
@@ -271,6 +271,35 @@ const weekStart = useMemo(() => {
     [bestMatches]
   );
 
+  // Máximo de personas en una franja, para escalar el mapa de calor.
+  const maxCount = useMemo(() => {
+    let m = 0;
+    for (const key in cellMap) m = Math.max(m, cellMap[key].length);
+    return m;
+  }, [cellMap]);
+
+  // Solo días de hoy en adelante (no se muestran vencidos).
+  const upcomingDays = useMemo(
+    () => days.filter((d) => !isPastDate(formatISO(d))),
+    [days, isPastDate]
+  );
+
+  // Estilo de cada franja según cuánta gente coincide (heatmap) y si es la mejor.
+  function slotStyle(count, isBest) {
+    if (count === 0) {
+      return { background: "#f8f9fa", border: "1px solid #e9ecef", color: "#adb5bd" };
+    }
+    const intensity = maxCount > 0 ? count / maxCount : 0;
+    if (isBest) {
+      return { background: "#ffe3e3", border: "2px solid #ff8787", color: "#1f2328" };
+    }
+    return {
+      background: `rgba(51, 154, 240, ${(0.15 + intensity * 0.55).toFixed(2)})`,
+      border: "1px solid #a5d8ff",
+      color: "#1f2328",
+    };
+  }
+
   // ============================================
   // MODAL USUARIOS
   // ============================================
@@ -326,7 +355,8 @@ const weekStart = useMemo(() => {
       </Group>
 
       <Alert color="blue" mb="md">
-        Los días anteriores a hoy se consideran vencidos: no se incluyen en los conteos y se muestran bloqueados en gris.
+        Solo se muestran los días de hoy en adelante. El número de cada franja es cuántas
+        personas coinciden; el color resalta las más concurridas. Toca una franja para ver quiénes.
       </Alert>
 
       {/* Mejor coincidencia */}
@@ -346,86 +376,75 @@ const weekStart = useMemo(() => {
         </Card>
       )}
 
-      {/* Calendario */}
-<Card shadow="md" p="lg">
-  <div
-    style={{
-      overflowX: "auto",
-      WebkitOverflowScrolling: "touch",
-    }}
-  >
-    <Table
-      withColumnBorders
-      striped
-      highlightOnHover
-      style={{
-        minWidth: 900, // fuerza scroll en móvil
-      }}
-    >
-<Table.Thead>
-            <Table.Tr>
-             <Table.Th>
-  Hora
-</Table.Th>
+      {/* Calendario: una tarjeta por día, franjas como mapa de calor. Sin scroll
+          horizontal ni días vencidos, para que se lea bien en móvil. */}
+      {upcomingDays.length === 0 ? (
+        <Card shadow="md" p="lg">
+          <Text c="dimmed">No hay días disponibles en esta semana.</Text>
+        </Card>
+      ) : (
+        <Stack gap="md">
+          {upcomingDays.map((d) => {
+            const date = formatISO(d);
+            return (
+              <Card key={date} shadow="sm" withBorder p="md" radius="md">
+                <Text fw={700} mb="sm" tt="capitalize">
+                  {d.toLocaleDateString("es-ES", {
+                    weekday: "long",
+                    day: "2-digit",
+                    month: "long",
+                  })}
+                </Text>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill, minmax(64px, 1fr))",
+                    gap: 8,
+                  }}
+                >
+                  {hours.map((h) => {
+                    const key = `${date}-${h}`;
+                    const count = cellMap[key]?.length || 0;
+                    const isBest = bestMatchKeys.has(key);
+                    const clickable = count > 0;
+                    const style = slotStyle(count, isBest);
 
-              {days.map((d) => {
-                const date = formatISO(d);
-                const expired = isPastDate(date);
-
-                return (
-                <Table.Th key={d.toISOString()} style={{ opacity: expired ? 0.6 : 1 }}>
-                 {d.toLocaleDateString("es-ES", {
-  weekday: "short",
-  day: "2-digit",
-})}
-                  {expired ? " · vencido" : ""}
-                </Table.Th>
-              );})}
-            </Table.Tr>
-          </Table.Thead>
-
-          <Table.Tbody>
-            {hours.map((h) => (
-              <Table.Tr key={h}>
-                <Table.Td  style={{textAlign: "center"}}>
-  {pad2(h)}:00 - {pad2(h + 1)}:00
-</Table.Td>
-
-                {days.map((d) => {
-                  const date = formatISO(d);
-                  const expired = isPastDate(date);
-                  const key = `${date}-${h}`;
-                  const count = cellMap[key]?.length || 0;
-                  const isBest = bestMatchKeys.has(key);
-
-                  return (
-                    <Table.Td
-                      key={key}
-                      onClick={() => !expired && count > 0 && openSlotUsers(date, h)}
-                      style={{
-                        cursor: !expired && count > 0 ? "pointer" : "default",
-                        background: expired
-                          ? "#f1f3f5"
-                          : isBest
-                          ? "#ffb3b3"
-                          : count > 0
-                          ? "#d3f5ff"
-                          : undefined,
-                        color: expired ? "#868e96" : undefined,
-                        textAlign: "center",
-                        fontWeight: 600,
-                      }}
-                    >
-                      {expired ? "Vencido" : count > 0 ? count : ""}
-                    </Table.Td>
-                  );
-                })}
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-        </div>
-      </Card>
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => clickable && openSlotUsers(date, h)}
+                        disabled={!clickable}
+                        title={count > 0 ? `${count} persona(s)` : "Sin disponibilidad"}
+                        style={{
+                          ...style,
+                          borderRadius: 10,
+                          minHeight: 56,
+                          padding: "6px 4px",
+                          textAlign: "center",
+                          cursor: clickable ? "pointer" : "default",
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 2,
+                        }}
+                      >
+                        <span style={{ fontSize: 11, fontWeight: 600 }}>
+                          {pad2(h)}-{pad2(h + 1)}
+                        </span>
+                        <span style={{ fontSize: 18, fontWeight: 800, lineHeight: 1 }}>
+                          {count > 0 ? count : ""}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Card>
+            );
+          })}
+        </Stack>
+      )}
 
       {/* Modal usuarios */}
       <Modal
