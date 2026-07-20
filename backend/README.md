@@ -38,6 +38,8 @@ cada arranque. Es seguro, pero obliga a volver a iniciar sesión cada vez que se
 | `FRONTEND_BASE_URL` | Base pública de la web (p. ej. `https://mi-app`). La usa la página de compartición `/e/{id}` para redirigir tras mostrar los metadatos Open Graph. |
 | `ENABLE_REMINDER_SCHEDULER` | `1` (por defecto) arranca el planificador de recordatorios; ponlo a `0` para desactivarlo. |
 | `REMINDER_TZ_OFFSET_MINUTES` | Desfase entre la hora local de los eventos (España) y UTC del servidor. Por defecto `120` (CEST, verano); usar `60` en invierno. Ajusta cuándo se disparan los recordatorios. |
+| `EVENT_CLOSE_GRACE_DAYS` | Días tras la fecha de un evento antes de cerrarlo automáticamente (congelar resumen y podar detalle). Por defecto `30`. Da margen al admin para registrar asistencia/ingresos/gastos. |
+| `METRICS_RETENTION_MONTHS` | Meses que se conserva un evento cerrado en el histórico antes de purgarlo. Por defecto `24`. |
 
 ## Recordatorios (opt-in)
 
@@ -53,11 +55,27 @@ Un hilo daemon (`_reminder_scheduler_loop`) despierta cada 5 minutos para:
 > La deduplicación del recordatorio semanal es en memoria; un reinicio del servicio en la ventana de
 > envío podría reenviar. Es asumible dado que es semanal y opt-in.
 
-## Actividad económica y métricas
+## Ciclo de vida del evento y métricas
 
-- `event_finances` guarda por evento (opcional) si hubo cuota de inscripción y la recaudación. **No**
-  hay campo "cuota" en el formulario de evento a propósito: rara vez aplica; cuando aplica, un admin lo
-  registra aquí y alimenta `/admin/metrics`.
+Los eventos ya **no se borran** al pasar su fecha (antes `cleanup_expired_data` los eliminaba el día
+siguiente, perdiendo la métrica). Ahora tienen ciclo de vida:
+
+1. **Próximo/en curso** (`date >= hoy`, `archived_at` NULL): aparece en las listas operativas
+   (`/events`) para militantes y gestión.
+2. **Pendiente de cerrar** (`date < hoy`, no archivado): sale de las listas operativas y aparece en
+   `/admin/metrics` para que el admin registre asistencia real, ingresos y gastos.
+3. **Cerrado** (`archived_at` puesto, auto tras `EVENT_CLOSE_GRACE_DAYS` o manual vía
+   `POST /admin/events/{id}/close`): `cleanup_expired_data` / `_close_event` **congela** el resumen en
+   las columnas `event_finances.snap_*` y **borra el detalle** (`event_responses`, `guest_responses`,
+   `event_companions`, `event_reminders`). Queda solo el histórico compacto.
+4. **Purgado**: pasada `METRICS_RETENTION_MONTHS` desde `archived_at`, se borra el evento por completo.
+
+- `event_finances` guarda por evento (opcional): cuota de inscripción, **ingresos** (`collected_amount`),
+  **gastos** (`expenses_amount`), asistencia real (`actual_attendance`) y el snapshot congelado. **No**
+  hay campo "cuota"/económico en el formulario de evento a propósito: se registra desde Métricas.
+- `/admin/metrics` calcula por evento y global: asistencia estimada (confirmaciones) vs real (manual),
+  ingresos, gastos y **rentabilidad** (ingresos − gastos). Para archivados usa el snapshot; para el
+  resto, conteo en vivo.
 - Los **adjuntos** de evento (`events.attachments`, JSON de `{name, url}`) son solo por enlace: Railway
   tiene almacenamiento efímero, así que no se guardan ficheros en disco.
 

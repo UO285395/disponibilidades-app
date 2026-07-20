@@ -108,8 +108,12 @@ def ensure_legacy_schema_compatibility():
                 if "attachments" not in event_columns:
                     conn.execute(text("ALTER TABLE events ADD COLUMN attachments VARCHAR"))
                     print("✅ Columna events.attachments añadida")
+                if "archived_at" not in event_columns:
+                    conn.execute(text("ALTER TABLE events ADD COLUMN archived_at VARCHAR"))
+                    print("✅ Columna events.archived_at añadida")
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_events_visibility ON events(visibility)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_events_date ON events(date)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_events_archived_at ON events(archived_at)"))
 
         if "domain_policies" in table_names:
             policy_columns = {column["name"] for column in inspector.get_columns("domain_policies")}
@@ -143,14 +147,24 @@ def ensure_legacy_schema_compatibility():
                     conn.execute(text("ALTER TABLE users ADD COLUMN availability_reminder_opt_in INTEGER DEFAULT 0"))
                     print("✅ Columna users.availability_reminder_opt_in añadida")
 
-        # event_finances es una tabla nueva; si ya existe sin la columna de
-        # asistencia real (creada en un despliegue anterior), la añadimos.
+        # event_finances es una tabla nueva; si ya existe sin columnas nuevas
+        # (creada en un despliegue anterior), las añadimos de forma aditiva.
         if "event_finances" in table_names:
             finance_columns = {column["name"] for column in inspector.get_columns("event_finances")}
-            if "actual_attendance" not in finance_columns:
-                with engine.begin() as conn:
-                    conn.execute(text("ALTER TABLE event_finances ADD COLUMN actual_attendance INTEGER"))
-                print("✅ Columna event_finances.actual_attendance añadida")
+            finance_new_cols = [
+                ("actual_attendance", "INTEGER"),
+                ("expenses_amount", "VARCHAR"),
+                ("snap_militant_yes", "INTEGER"),
+                ("snap_militant_no", "INTEGER"),
+                ("snap_companions", "INTEGER"),
+                ("snap_guest_yes", "INTEGER"),
+                ("snap_guest_companions", "INTEGER"),
+            ]
+            with engine.begin() as conn:
+                for col_name, col_type in finance_new_cols:
+                    if col_name not in finance_columns:
+                        conn.execute(text(f"ALTER TABLE event_finances ADD COLUMN {col_name} {col_type}"))
+                        print(f"✅ Columna event_finances.{col_name} añadida")
 
         if "device_tokens" in table_names:
             device_token_columns = {column["name"] for column in inspector.get_columns("device_tokens")}
@@ -426,22 +440,71 @@ def maybe_cleanup_expired_data(db: Session):
         print(f"⚠️ Limpieza de datos caducados fallida: {exc}")
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (ValueError, TypeError):
+        return default
+
+
+def _close_event(db: Session, event: Event, counts_map: dict | None = None):
+    """Cierra (archiva) un evento: congela su resumen en EventFinance, lo marca
+    con archived_at y descarta el detalle de respuestas (ya resumido). Idempotente.
+    A partir de aquí el evento solo vive en el histórico de Métricas."""
+    if event.archived_at:
+        return
+    if counts_map is None:
+        counts_map = _bulk_event_counts(db, [event.id])
+    c = counts_map.get(event.id, {"yes": 0, "no": 0, "companions": 0, "guest_yes": 0, "guest_no": 0, "guest_companions": 0})
+
+    fin = db.query(EventFinance).filter(EventFinance.event_id == event.id).first()
+    if not fin:
+        fin = EventFinance(event_id=event.id)
+        db.add(fin)
+    fin.snap_militant_yes = c["yes"]
+    fin.snap_militant_no = c["no"]
+    fin.snap_companions = c["companions"]
+    fin.snap_guest_yes = c["guest_yes"]
+    fin.snap_guest_companions = c["guest_companions"]
+    fin.updated_at = datetime.utcnow().isoformat()
+
+    event.archived_at = datetime.utcnow().isoformat()
+
+    # Podar el detalle: el resumen ya está congelado.
+    for model in (EventResponse, GuestResponse, EventCompanion, EventReminder):
+        db.query(model).filter(model.event_id == event.id).delete(synchronize_session=False)
+
+
 def cleanup_expired_data(db: Session):
     today = datetime.utcnow().date()
-    today_str = today.strftime("%Y-%m-%d")
 
-    # --- Eventos expirados ---
-    expired_events = db.query(Event).filter(Event.date < today_str).all()
-    expired_event_ids = [e.id for e in expired_events]
+    # --- Cerrar eventos pasados fuera del periodo de gracia ---
+    # Ya no se borran al pasar la fecha: se conserva el resumen (asistencia,
+    # ingresos, gastos) en el histórico. Solo se congela y poda tras la gracia,
+    # dando margen al admin para registrar los datos finales.
+    grace_days = _env_int("EVENT_CLOSE_GRACE_DAYS", 30)
+    close_before = (today - timedelta(days=grace_days)).strftime("%Y-%m-%d")
+    to_close = db.query(Event).filter(
+        Event.deleted_at.is_(None),
+        Event.archived_at.is_(None),
+        Event.date < close_before,
+    ).all()
+    if to_close:
+        counts_map = _bulk_event_counts(db, [e.id for e in to_close])
+        for e in to_close:
+            _close_event(db, e, counts_map)
 
-    if expired_event_ids:
-        db.query(EventResponse)\
-          .filter(EventResponse.event_id.in_(expired_event_ids))\
-          .delete(synchronize_session=False)
-
-        db.query(Event)\
-          .filter(Event.id.in_(expired_event_ids))\
-          .delete(synchronize_session=False)
+    # --- Purgar histórico pasada la retención ---
+    retention_months = _env_int("METRICS_RETENTION_MONTHS", 24)
+    purge_before = (datetime.utcnow() - timedelta(days=retention_months * 30)).isoformat()
+    purged = db.query(Event).filter(
+        Event.archived_at.isnot(None),
+        Event.archived_at < purge_before,
+    ).all()
+    purged_ids = [e.id for e in purged]
+    if purged_ids:
+        db.query(EventFinance).filter(EventFinance.event_id.in_(purged_ids)).delete(synchronize_session=False)
+        db.query(Event).filter(Event.id.in_(purged_ids)).delete(synchronize_session=False)
 
     # --- Disponibilidades antiguas ---
     availability_limit = (today - timedelta(days=14)).strftime("%Y-%m-%d")
@@ -569,6 +632,7 @@ class EventFinanceUpdate(BaseModel):
     has_registration_fee: bool = False
     fee_amount: str | None = None
     collected_amount: str | None = None
+    expenses_amount: str | None = None
     actual_attendance: int | None = None
     notes: str | None = None
 
@@ -2270,7 +2334,14 @@ def list_events(
     if user and not _is_feature_enabled(db, user_domain, "events", user.role, set(_parse_group_tags(user.group_tag)), unit_id=user.org_unit_id):
         raise HTTPException(403, "Eventos deshabilitados para tu dominio")
 
-    events = db.query(Event).all()
+    # Solo eventos operativos: próximos/en curso (date >= hoy) y no archivados.
+    # Los pasados/archivados viven en el histórico de Métricas, no en las listas.
+    today_str = datetime.utcnow().date().strftime("%Y-%m-%d")
+    events = db.query(Event).filter(
+        Event.deleted_at.is_(None),
+        Event.archived_at.is_(None),
+        Event.date >= today_str,
+    ).all()
     requested_visibilities = _parse_requested_visibilities(visibility)
     filtered = _visible_events_for_user(events, user, user_domain, requested_visibilities, db=db, province_id=province_id)
 
@@ -2298,7 +2369,7 @@ def get_event_public(
     user_domain = _get_domain(user.email) if user else None
 
     ev = db.query(Event).filter(Event.id == event_id).first()
-    if not ev or not _visible_events_for_user([ev], user, user_domain, None, db=db):
+    if not ev or ev.archived_at or not _visible_events_for_user([ev], user, user_domain, None, db=db):
         raise HTTPException(404, "Evento no encontrado")
 
     return _serialize_event_with_counts(db, ev)
@@ -2313,7 +2384,7 @@ def event_share_page(event_id: int, db: Session = Depends(get_db)):
     target = f"{frontend_base}/eventos/{event_id}" if frontend_base else f"/eventos/{event_id}"
 
     ev = db.query(Event).filter(Event.id == event_id).first()
-    is_public = ev and (ev.visibility or "internal").strip().lower() == "public" and not ev.deleted_at
+    is_public = ev and (ev.visibility or "internal").strip().lower() == "public" and not ev.deleted_at and not ev.archived_at
     if not is_public:
         # No revelamos existencia de eventos no públicos: redirección simple.
         return HTMLResponse(
@@ -3001,6 +3072,7 @@ def _serialize_finance(fin) -> dict:
             "has_registration_fee": False,
             "fee_amount": "",
             "collected_amount": "",
+            "expenses_amount": "",
             "actual_attendance": None,
             "notes": "",
         }
@@ -3008,6 +3080,7 @@ def _serialize_finance(fin) -> dict:
         "has_registration_fee": bool(fin.has_registration_fee),
         "fee_amount": fin.fee_amount or "",
         "collected_amount": fin.collected_amount or "",
+        "expenses_amount": fin.expenses_amount or "",
         "actual_attendance": fin.actual_attendance,
         "notes": fin.notes or "",
     }
@@ -3051,6 +3124,7 @@ def set_event_finance(
     fin.has_registration_fee = 1 if data.has_registration_fee else 0
     fin.fee_amount = (data.fee_amount or "").strip() or None
     fin.collected_amount = (data.collected_amount or "").strip() or None
+    fin.expenses_amount = (data.expenses_amount or "").strip() or None
     if data.actual_attendance is not None and data.actual_attendance < 0:
         raise HTTPException(400, "La asistencia no puede ser negativa")
     fin.actual_attendance = data.actual_attendance
@@ -3059,6 +3133,28 @@ def set_event_finance(
     fin.updated_at = now_iso
     db.commit()
     return _serialize_finance(fin)
+
+
+@app.post("/admin/events/{event_id}/close")
+def close_event(
+    event_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db),
+):
+    """Cierra el evento a mano: congela su resumen y lo pasa al histórico. Útil
+    cuando el admin ya ha registrado los datos finales y no quiere esperar al
+    cierre automático."""
+    admin = get_user_from_token(cred.credentials, db)
+    require_admin(admin)
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    if not ev:
+        raise HTTPException(404, "Evento no encontrado")
+    _ensure_event_domain_access(admin, ev, db)
+    if ev.archived_at:
+        return {"ok": True, "already_closed": True}
+    _close_event(db, ev)
+    db.commit()
+    return {"ok": True, "archived_at": ev.archived_at}
 
 
 def _to_float(value):
@@ -3090,56 +3186,84 @@ def admin_metrics(
     events = q.all()
     event_ids = [e.id for e in events]
 
+    # Conteo en vivo para los no archivados; los archivados usan su snapshot.
     counts = _bulk_event_counts(db, event_ids) if event_ids else {}
-    total_yes = sum(c["yes"] for c in counts.values())
-    total_no = sum(c["no"] for c in counts.values())
-    total_companions = sum(c["companions"] for c in counts.values())
-    total_guest_yes = sum(c["guest_yes"] for c in counts.values())
-    total_guest_companions = sum(c["guest_companions"] for c in counts.values())
-
     finances = (
         db.query(EventFinance).filter(EventFinance.event_id.in_(event_ids)).all()
         if event_ids else []
     )
     finance_by_event = {f.event_id: f for f in finances}
-    events_with_fee = sum(1 for f in finances if f.has_registration_fee)
-    total_collected = 0.0
-    has_collected = False
-    for f in finances:
-        amount = _to_float(f.collected_amount)
-        if amount is not None:
-            total_collected += amount
-            has_collected = True
 
-    # Desglose por evento + totales de asistencia. La asistencia "estimada" sale
-    # de las confirmaciones en la app; la "real" usa el dato manual cuando existe
-    # (no todos los asistentes confirman), y si no, cae a la estimada.
-    total_estimated = 0
-    total_real = 0
+    today_str = datetime.utcnow().date().strftime("%Y-%m-%d")
+
+    total_yes = total_no = total_companions = total_guest_yes = total_guest_companions = 0
+    total_estimated = total_real = 0
+    total_collected = 0.0
+    total_expenses = 0.0
+    has_collected = has_expenses = False
+    events_with_fee = 0
     per_event = []
-    # Orden por fecha descendente para ver primero lo más reciente.
+
+    # Orden por fecha descendente: primero lo más reciente.
     for e in sorted(events, key=lambda x: (x.date or ""), reverse=True):
-        c = counts.get(e.id, {"yes": 0, "no": 0, "companions": 0, "guest_yes": 0, "guest_no": 0, "guest_companions": 0})
-        estimated = c["yes"] + c["companions"] + c["guest_yes"] + c["guest_companions"]
         fin = finance_by_event.get(e.id)
+        archived = bool(e.archived_at)
+
+        if archived and fin:
+            yes = fin.snap_militant_yes or 0
+            no = fin.snap_militant_no or 0
+            comp = fin.snap_companions or 0
+            gyes = fin.snap_guest_yes or 0
+            gcomp = fin.snap_guest_companions or 0
+        else:
+            c = counts.get(e.id, {"yes": 0, "no": 0, "companions": 0, "guest_yes": 0, "guest_no": 0, "guest_companions": 0})
+            yes, no, comp, gyes, gcomp = c["yes"], c["no"], c["companions"], c["guest_yes"], c["guest_companions"]
+
+        estimated = yes + comp + gyes + gcomp
         actual = fin.actual_attendance if (fin and fin.actual_attendance is not None) else None
+
+        collected = _to_float(fin.collected_amount) if fin else None
+        expenses = _to_float(fin.expenses_amount) if fin else None
+        profitability = None
+        if collected is not None or expenses is not None:
+            profitability = round((collected or 0.0) - (expenses or 0.0), 2)
+
+        status = "closed" if archived else ("upcoming" if e.date >= today_str else "pending_close")
+
+        # Acumular totales.
+        total_yes += yes; total_no += no; total_companions += comp
+        total_guest_yes += gyes; total_guest_companions += gcomp
         total_estimated += estimated
         total_real += actual if actual is not None else estimated
+        if fin and fin.has_registration_fee:
+            events_with_fee += 1
+        if collected is not None:
+            total_collected += collected; has_collected = True
+        if expenses is not None:
+            total_expenses += expenses; has_expenses = True
+
         per_event.append({
             "event_id": e.id,
             "title": e.title,
             "date": e.date,
             "visibility": e.visibility,
-            "militant_yes": c["yes"],
-            "militant_no": c["no"],
-            "militant_companions": c["companions"],
-            "guest_yes": c["guest_yes"],
-            "guest_companions": c["guest_companions"],
+            "status": status,
+            "militant_yes": yes,
+            "militant_no": no,
+            "militant_companions": comp,
+            "guest_yes": gyes,
+            "guest_companions": gcomp,
             "estimated_attendance": estimated,
             "actual_attendance": actual,
             "has_registration_fee": bool(fin.has_registration_fee) if fin else False,
             "collected_amount": fin.collected_amount if fin else None,
+            "expenses_amount": fin.expenses_amount if fin else None,
+            "profitability": profitability,
         })
+
+    net_profit = None
+    if has_collected or has_expenses:
+        net_profit = round(total_collected - total_expenses, 2)
 
     return {
         "total_events": len(events),
@@ -3149,8 +3273,7 @@ def admin_metrics(
             "militant_companions": total_companions,
             "guest_yes": total_guest_yes,
             "guest_companions": total_guest_companions,
-            # attendees_total se mantiene por compatibilidad (= estimada).
-            "attendees_total": total_estimated,
+            "attendees_total": total_estimated,  # compat
             "attendees_estimated": total_estimated,
             "attendees_real": total_real,
         },
@@ -3158,6 +3281,8 @@ def admin_metrics(
             "events_with_fee": events_with_fee,
             "events_with_finance_record": len(finances),
             "total_collected": round(total_collected, 2) if has_collected else None,
+            "total_expenses": round(total_expenses, 2) if has_expenses else None,
+            "net_profit": net_profit,
         },
         "events": per_event,
     }

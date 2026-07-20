@@ -168,6 +168,10 @@ export const adminAPI = {
     return request(`/admin/events/${eventId}/finance`, "PUT", payload);
   },
 
+  closeEvent(eventId) {
+    return request(`/admin/events/${eventId}/close`, "POST");
+  },
+
   // Métricas del ámbito
   getMetrics() {
     return request("/admin/metrics");

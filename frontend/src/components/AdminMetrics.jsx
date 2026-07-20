@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import {
   Title, Text, Card, SimpleGrid, Group, Badge, Loader, Center, Stack, Button,
-  Modal, TextInput, Switch, Textarea, NumberInput,
+  Modal, TextInput, Switch, Textarea, NumberInput, Alert,
 } from "@mantine/core";
 import {
   IconChartBar, IconCoin, IconUsers, IconCalendarEvent, IconPencil,
+  IconArchive, IconReceipt2, IconAlertCircle,
 } from "@tabler/icons-react";
 import { adminAPI } from "../api/adminApi.js";
 import { formatDate } from "../utils/datetime.js";
@@ -21,15 +22,19 @@ function StatCard({ icon, label, value, hint }) {
 }
 
 // Modal de datos del evento: asistencia real (cuando no todos confirman en la
-// app) + actividad económica.
+// app) + actividad económica (ingresos y gastos → rentabilidad).
 function EventDataModal({ event, onClose }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [closing, setClosing] = useState(false);
   const [attendance, setAttendance] = useState("");
   const [hasFee, setHasFee] = useState(false);
   const [feeAmount, setFeeAmount] = useState("");
   const [collected, setCollected] = useState("");
+  const [expenses, setExpenses] = useState("");
   const [notes, setNotes] = useState("");
+
+  const isClosed = event.status === "closed";
 
   useEffect(() => {
     let cancelled = false;
@@ -40,6 +45,7 @@ function EventDataModal({ event, onClose }) {
         setHasFee(Boolean(f.has_registration_fee));
         setFeeAmount(f.fee_amount || "");
         setCollected(f.collected_amount || "");
+        setExpenses(f.expenses_amount || "");
         setNotes(f.notes || "");
       })
       .catch(() => {})
@@ -54,6 +60,7 @@ function EventDataModal({ event, onClose }) {
         has_registration_fee: hasFee,
         fee_amount: feeAmount.trim(),
         collected_amount: collected.trim(),
+        expenses_amount: expenses.trim(),
         actual_attendance: attendance === "" || attendance === null ? null : Number(attendance),
         notes: notes.trim(),
       });
@@ -65,6 +72,31 @@ function EventDataModal({ event, onClose }) {
       setSaving(false);
     }
   }
+
+  async function closeNow() {
+    if (!window.confirm("Cerrar el evento congela su resumen y descarta el detalle de respuestas. Pasará al histórico. ¿Continuar?")) return;
+    try {
+      setClosing(true);
+      // Guardar primero por si hay cambios sin aplicar.
+      await adminAPI.setEventFinance(event.event_id, {
+        has_registration_fee: hasFee,
+        fee_amount: feeAmount.trim(),
+        collected_amount: collected.trim(),
+        expenses_amount: expenses.trim(),
+        actual_attendance: attendance === "" || attendance === null ? null : Number(attendance),
+        notes: notes.trim(),
+      });
+      await adminAPI.closeEvent(event.event_id);
+      notifySuccess("Evento cerrado y archivado en el histórico");
+      onClose(true);
+    } catch (e) {
+      notifyError(e?.message || "No se pudo cerrar el evento");
+    } finally {
+      setClosing(false);
+    }
+  }
+
+  const busy = saving || closing;
 
   return (
     <Modal opened onClose={() => onClose(false)} title={`Datos · ${event.title}`} centered>
@@ -82,20 +114,19 @@ function EventDataModal({ event, onClose }) {
               min={0}
               placeholder={`Dejar vacío = usar ${event.estimated_attendance}`}
               value={attendance}
-              onChange={(v) => setAttendance(v)}
+              onChange={setAttendance}
+              disabled={busy}
             />
           </div>
 
           <div>
             <Text size="sm" fw={600} mb={4}>Actividad económica</Text>
-            <Text size="xs" c="dimmed" mb={6}>
-              La mayoría de eventos no tienen cuota. Rellena solo cuando aplique.
-            </Text>
             <Switch
               label="Tuvo cuota de inscripción"
               checked={hasFee}
               onChange={(e) => setHasFee(e.currentTarget.checked)}
               mb="xs"
+              disabled={busy}
             />
             {hasFee && (
               <TextInput
@@ -104,14 +135,25 @@ function EventDataModal({ event, onClose }) {
                 value={feeAmount}
                 onChange={(e) => setFeeAmount(e.currentTarget.value)}
                 mb="xs"
+                disabled={busy}
               />
             )}
-            <TextInput
-              label="Recaudación total (€)"
-              placeholder="Ej: 250"
-              value={collected}
-              onChange={(e) => setCollected(e.currentTarget.value)}
-            />
+            <Group grow>
+              <TextInput
+                label="Ingresos / recaudación (€)"
+                placeholder="Ej: 250"
+                value={collected}
+                onChange={(e) => setCollected(e.currentTarget.value)}
+                disabled={busy}
+              />
+              <TextInput
+                label="Gastos (€)"
+                placeholder="Ej: 80"
+                value={expenses}
+                onChange={(e) => setExpenses(e.currentTarget.value)}
+                disabled={busy}
+              />
+            </Group>
           </div>
 
           <Textarea
@@ -120,14 +162,68 @@ function EventDataModal({ event, onClose }) {
             minRows={2}
             value={notes}
             onChange={(e) => setNotes(e.currentTarget.value)}
+            disabled={busy}
           />
-          <Group justify="flex-end">
-            <Button variant="default" onClick={() => onClose(false)} disabled={saving}>Cancelar</Button>
-            <Button onClick={save} loading={saving}>Guardar</Button>
+
+          <Group justify="space-between">
+            {!isClosed && event.status === "pending_close" ? (
+              <Button variant="light" color="orange" leftSection={<IconArchive size={16} />} onClick={closeNow} loading={closing} disabled={saving}>
+                Cerrar evento
+              </Button>
+            ) : <span />}
+            <Group>
+              <Button variant="default" onClick={() => onClose(false)} disabled={busy}>Cancelar</Button>
+              {!isClosed && <Button onClick={save} loading={saving} disabled={closing}>Guardar</Button>}
+            </Group>
           </Group>
         </Stack>
       )}
     </Modal>
+  );
+}
+
+function money(v) {
+  return v === null || v === undefined ? "—" : `${v} €`;
+}
+
+function EventRow({ ev, onEdit }) {
+  const overridden = ev.actual_attendance != null && ev.actual_attendance !== ev.estimated_attendance;
+  return (
+    <Card withBorder padding="sm" radius="md">
+      <Group justify="space-between" wrap="nowrap" align="flex-start">
+        <div style={{ minWidth: 0 }}>
+          <Group gap={6} wrap="nowrap">
+            <Text fw={600} truncate>{ev.title}</Text>
+            <Badge variant="light" color={ev.visibility === "public" ? "teal" : "blue"} size="sm">
+              {ev.visibility === "public" ? "Público" : "Interno"}
+            </Badge>
+          </Group>
+          <Text size="xs" c="dimmed">{formatDate(ev.date)}</Text>
+          <Group gap="md" mt={6}>
+            <Text size="sm">
+              Asistencia:{" "}
+              <b>{ev.actual_attendance != null ? ev.actual_attendance : ev.estimated_attendance}</b>
+              {overridden && (
+                <Text component="span" size="xs" c="dimmed"> (app: {ev.estimated_attendance})</Text>
+              )}
+            </Text>
+            {(ev.collected_amount || ev.expenses_amount) && (
+              <Text size="xs" c="dimmed">
+                Ingresos {money(ev.collected_amount)} · Gastos {money(ev.expenses_amount)}
+                {ev.profitability != null && (
+                  <Text component="span" fw={600} c={ev.profitability >= 0 ? "teal" : "red"}>
+                    {" "}· Rent. {ev.profitability} €
+                  </Text>
+                )}
+              </Text>
+            )}
+          </Group>
+        </div>
+        <Button size="xs" variant="light" leftSection={<IconPencil size={14} />} onClick={() => onEdit(ev)}>
+          Editar
+        </Button>
+      </Group>
+    </Card>
   );
 }
 
@@ -158,81 +254,67 @@ export default function AdminMetrics() {
   const attendeesReal = p.attendees_real ?? p.attendees_total ?? 0;
   const attendeesEstimated = p.attendees_estimated ?? p.attendees_total ?? 0;
 
+  const pending = events.filter((e) => e.status === "pending_close");
+  const closed = events.filter((e) => e.status === "closed");
+  const upcoming = events.filter((e) => e.status === "upcoming");
+
   return (
     <Stack gap="lg">
       <Title order={3}>Métricas del ámbito</Title>
 
       <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md">
-        <StatCard icon={<IconCalendarEvent size={18} />} label="Eventos" value={metrics.total_events} />
-        <StatCard
-          icon={<IconUsers size={18} />}
-          label="Asistencia"
-          value={attendeesReal}
-          hint={attendeesReal !== attendeesEstimated ? `estimada en app: ${attendeesEstimated}` : "estimada por confirmaciones"}
-        />
-        <StatCard icon={<IconChartBar size={18} />} label="Respuestas Sí/No"
-          value={`${p.militant_yes ?? 0}/${p.militant_no ?? 0}`} hint="militancia" />
-        <StatCard icon={<IconCoin size={18} />} label="Recaudación"
+        <StatCard icon={<IconUsers size={18} />} label="Asistencia" value={attendeesReal}
+          hint={attendeesReal !== attendeesEstimated ? `estimada en app: ${attendeesEstimated}` : "por confirmaciones"} />
+        <StatCard icon={<IconCoin size={18} />} label="Ingresos"
           value={f.total_collected != null ? `${f.total_collected} €` : "—"}
           hint={`${f.events_with_fee ?? 0} con cuota`} />
+        <StatCard icon={<IconReceipt2 size={18} />} label="Gastos"
+          value={f.total_expenses != null ? `${f.total_expenses} €` : "—"} />
+        <StatCard icon={<IconChartBar size={18} />} label="Rentabilidad"
+          value={f.net_profit != null ? `${f.net_profit} €` : "—"}
+          hint="ingresos − gastos" />
       </SimpleGrid>
 
+      {pending.length > 0 && (
+        <div>
+          <Alert color="orange" icon={<IconAlertCircle size={18} />} mb="sm">
+            {pending.length} evento(s) pasados pendientes de cerrar. Registra la asistencia
+            real, ingresos y gastos; se cerrarán solos pasado el periodo de gracia.
+          </Alert>
+          <Stack gap="xs">
+            {pending.map((ev) => <EventRow key={ev.event_id} ev={ev} onEdit={setDataEvent} />)}
+          </Stack>
+        </div>
+      )}
+
+      {upcoming.length > 0 && (
+        <div>
+          <Title order={5} mb="xs">Próximos</Title>
+          <Stack gap="xs">
+            {upcoming.map((ev) => <EventRow key={ev.event_id} ev={ev} onEdit={setDataEvent} />)}
+          </Stack>
+        </div>
+      )}
+
       <div>
-        <Title order={4} mb="xs">Por evento</Title>
-        <Text size="sm" c="dimmed" mb="sm">
-          Participación de cada evento. Toca «Editar» para registrar la asistencia real
-          (si asistió más gente de la que confirmó) y la actividad económica.
-        </Text>
-        {events.length === 0 ? (
-          <Text c="dimmed" size="sm">No hay eventos en tu ámbito.</Text>
+        <Group gap={6} mb="xs">
+          <IconArchive size={18} />
+          <Title order={5}>Histórico</Title>
+        </Group>
+        {closed.length === 0 ? (
+          <Text c="dimmed" size="sm">Aún no hay eventos cerrados. Los eventos pasados pasan aquí al cerrarse (se conservan ~24 meses).</Text>
         ) : (
           <Stack gap="xs">
-            {events.map((ev) => {
-              const overridden = ev.actual_attendance != null && ev.actual_attendance !== ev.estimated_attendance;
-              return (
-                <Card key={ev.event_id} withBorder padding="sm" radius="md">
-                  <Group justify="space-between" wrap="nowrap" align="flex-start">
-                    <div style={{ minWidth: 0 }}>
-                      <Group gap={6} wrap="nowrap">
-                        <Text fw={600} truncate>{ev.title}</Text>
-                        <Badge variant="light" color={ev.visibility === "public" ? "teal" : "blue"} size="sm">
-                          {ev.visibility === "public" ? "Público" : "Interno"}
-                        </Badge>
-                      </Group>
-                      <Text size="xs" c="dimmed">{formatDate(ev.date)}</Text>
-                      <Group gap="md" mt={6}>
-                        <Text size="sm">
-                          Asistencia:{" "}
-                          <b>{ev.actual_attendance != null ? ev.actual_attendance : ev.estimated_attendance}</b>
-                          {overridden && (
-                            <Text component="span" size="xs" c="dimmed"> (app: {ev.estimated_attendance})</Text>
-                          )}
-                        </Text>
-                        <Text size="xs" c="dimmed">
-                          Sí {ev.militant_yes} · No {ev.militant_no}
-                          {ev.militant_companions > 0 && ` · +${ev.militant_companions} acomp.`}
-                          {(ev.guest_yes > 0 || ev.guest_companions > 0) && ` · invitados ${ev.guest_yes + ev.guest_companions}`}
-                        </Text>
-                        {ev.collected_amount && (
-                          <Text size="xs" c="dimmed">Recaudado: {ev.collected_amount} €</Text>
-                        )}
-                      </Group>
-                    </div>
-                    <Button
-                      size="xs"
-                      variant="light"
-                      leftSection={<IconPencil size={14} />}
-                      onClick={() => setDataEvent(ev)}
-                    >
-                      Editar
-                    </Button>
-                  </Group>
-                </Card>
-              );
-            })}
+            {closed.map((ev) => <EventRow key={ev.event_id} ev={ev} onEdit={setDataEvent} />)}
           </Stack>
         )}
       </div>
+
+      {events.length === 0 && (
+        <Center py="md">
+          <Group gap="xs"><IconCalendarEvent size={20} /><Text c="dimmed">No hay eventos en tu ámbito.</Text></Group>
+        </Center>
+      )}
 
       {dataEvent && (
         <EventDataModal
