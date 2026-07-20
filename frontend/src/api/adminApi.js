@@ -159,24 +159,6 @@ export const adminAPI = {
     return request("/admin/notifications/send", "POST", payload);
   },
 
-  // Actividad económica del evento
-  getEventFinance(eventId) {
-    return request(`/admin/events/${eventId}/finance`);
-  },
-
-  setEventFinance(eventId, payload) {
-    return request(`/admin/events/${eventId}/finance`, "PUT", payload);
-  },
-
-  closeEvent(eventId) {
-    return request(`/admin/events/${eventId}/close`, "POST");
-  },
-
-  // Métricas del ámbito
-  getMetrics() {
-    return request("/admin/metrics");
-  },
-
   // ---- Organigrama / estructura ----
   orgScope() {
     return request("/me/org-scope");
