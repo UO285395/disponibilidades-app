@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import {
   Title, Text, Card, SimpleGrid, Group, Badge, Loader, Center, Stack, Button,
-  Modal, TextInput, Switch, Textarea,
+  Modal, TextInput, Switch, Textarea, NumberInput,
 } from "@mantine/core";
-import { IconChartBar, IconCoin, IconUsers, IconCalendarEvent } from "@tabler/icons-react";
+import {
+  IconChartBar, IconCoin, IconUsers, IconCalendarEvent, IconPencil,
+} from "@tabler/icons-react";
 import { adminAPI } from "../api/adminApi.js";
 import { formatDate } from "../utils/datetime.js";
 import { notifyError, notifySuccess } from "../utils/notify.js";
@@ -18,9 +20,12 @@ function StatCard({ icon, label, value, hint }) {
   );
 }
 
-function FinanceModal({ event, onClose }) {
+// Modal de datos del evento: asistencia real (cuando no todos confirman en la
+// app) + actividad económica.
+function EventDataModal({ event, onClose }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [attendance, setAttendance] = useState("");
   const [hasFee, setHasFee] = useState(false);
   const [feeAmount, setFeeAmount] = useState("");
   const [collected, setCollected] = useState("");
@@ -28,9 +33,10 @@ function FinanceModal({ event, onClose }) {
 
   useEffect(() => {
     let cancelled = false;
-    adminAPI.getEventFinance(event.id)
+    adminAPI.getEventFinance(event.event_id)
       .then((f) => {
         if (cancelled) return;
+        setAttendance(f.actual_attendance ?? "");
         setHasFee(Boolean(f.has_registration_fee));
         setFeeAmount(f.fee_amount || "");
         setCollected(f.collected_amount || "");
@@ -39,18 +45,19 @@ function FinanceModal({ event, onClose }) {
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [event.id]);
+  }, [event.event_id]);
 
   async function save() {
     try {
       setSaving(true);
-      await adminAPI.setEventFinance(event.id, {
+      await adminAPI.setEventFinance(event.event_id, {
         has_registration_fee: hasFee,
         fee_amount: feeAmount.trim(),
         collected_amount: collected.trim(),
+        actual_attendance: attendance === "" || attendance === null ? null : Number(attendance),
         notes: notes.trim(),
       });
-      notifySuccess("Actividad económica guardada");
+      notifySuccess("Datos del evento guardados");
       onClose(true);
     } catch (e) {
       notifyError(e?.message || "No se pudo guardar");
@@ -60,34 +67,53 @@ function FinanceModal({ event, onClose }) {
   }
 
   return (
-    <Modal opened onClose={() => onClose(false)} title={`Economía · ${event.title}`} centered>
+    <Modal opened onClose={() => onClose(false)} title={`Datos · ${event.title}`} centered>
       {loading ? (
         <Center py="lg"><Loader /></Center>
       ) : (
         <Stack gap="md">
-          <Text size="sm" c="dimmed">
-            La mayoría de eventos no tienen cuota. Registra aquí los importes solo
-            cuando aplique; alimentan las métricas del ámbito.
-          </Text>
-          <Switch
-            label="Tuvo cuota de inscripción"
-            checked={hasFee}
-            onChange={(e) => setHasFee(e.currentTarget.checked)}
-          />
-          {hasFee && (
-            <TextInput
-              label="Importe de la cuota (€)"
-              placeholder="Ej: 10"
-              value={feeAmount}
-              onChange={(e) => setFeeAmount(e.currentTarget.value)}
+          <div>
+            <Text size="sm" fw={600}>Asistencia real</Text>
+            <Text size="xs" c="dimmed" mb={6}>
+              Confirmaciones en la app: <b>{event.estimated_attendance}</b>. Si asistió
+              más gente de la que avisó, indica aquí el total real (prevalece en las métricas).
+            </Text>
+            <NumberInput
+              min={0}
+              placeholder={`Dejar vacío = usar ${event.estimated_attendance}`}
+              value={attendance}
+              onChange={(v) => setAttendance(v)}
             />
-          )}
-          <TextInput
-            label="Recaudación total (€)"
-            placeholder="Ej: 250"
-            value={collected}
-            onChange={(e) => setCollected(e.currentTarget.value)}
-          />
+          </div>
+
+          <div>
+            <Text size="sm" fw={600} mb={4}>Actividad económica</Text>
+            <Text size="xs" c="dimmed" mb={6}>
+              La mayoría de eventos no tienen cuota. Rellena solo cuando aplique.
+            </Text>
+            <Switch
+              label="Tuvo cuota de inscripción"
+              checked={hasFee}
+              onChange={(e) => setHasFee(e.currentTarget.checked)}
+              mb="xs"
+            />
+            {hasFee && (
+              <TextInput
+                label="Importe de la cuota (€)"
+                placeholder="Ej: 10"
+                value={feeAmount}
+                onChange={(e) => setFeeAmount(e.currentTarget.value)}
+                mb="xs"
+              />
+            )}
+            <TextInput
+              label="Recaudación total (€)"
+              placeholder="Ej: 250"
+              value={collected}
+              onChange={(e) => setCollected(e.currentTarget.value)}
+            />
+          </div>
+
           <Textarea
             label="Notas (opcional)"
             autosize
@@ -107,15 +133,13 @@ function FinanceModal({ event, onClose }) {
 
 export default function AdminMetrics() {
   const [metrics, setMetrics] = useState(null);
-  const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [financeEvent, setFinanceEvent] = useState(null);
+  const [dataEvent, setDataEvent] = useState(null);
 
   async function reload() {
     try {
-      const [m, evs] = await Promise.all([adminAPI.getMetrics(), adminAPI.listEvents()]);
+      const m = await adminAPI.getMetrics();
       setMetrics(m);
-      setEvents(evs || []);
     } catch (e) {
       notifyError(e?.message || "No se pudieron cargar las métricas");
     } finally {
@@ -130,6 +154,9 @@ export default function AdminMetrics() {
 
   const p = metrics.participation || {};
   const f = metrics.finance || {};
+  const events = metrics.events || [];
+  const attendeesReal = p.attendees_real ?? p.attendees_total ?? 0;
+  const attendeesEstimated = p.attendees_estimated ?? p.attendees_total ?? 0;
 
   return (
     <Stack gap="lg">
@@ -137,8 +164,12 @@ export default function AdminMetrics() {
 
       <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md">
         <StatCard icon={<IconCalendarEvent size={18} />} label="Eventos" value={metrics.total_events} />
-        <StatCard icon={<IconUsers size={18} />} label="Asistencia" value={p.attendees_total ?? 0}
-          hint={`${p.militant_yes ?? 0} militantes · ${p.guest_yes ?? 0} visitantes`} />
+        <StatCard
+          icon={<IconUsers size={18} />}
+          label="Asistencia"
+          value={attendeesReal}
+          hint={attendeesReal !== attendeesEstimated ? `estimada en app: ${attendeesEstimated}` : "estimada por confirmaciones"}
+        />
         <StatCard icon={<IconChartBar size={18} />} label="Respuestas Sí/No"
           value={`${p.militant_yes ?? 0}/${p.militant_no ?? 0}`} hint="militancia" />
         <StatCard icon={<IconCoin size={18} />} label="Recaudación"
@@ -147,41 +178,66 @@ export default function AdminMetrics() {
       </SimpleGrid>
 
       <div>
-        <Title order={4} mb="sm">Actividad económica por evento</Title>
+        <Title order={4} mb="xs">Por evento</Title>
         <Text size="sm" c="dimmed" mb="sm">
-          Registra recaudación y cuota de los eventos que la tuvieron.
+          Participación de cada evento. Toca «Editar» para registrar la asistencia real
+          (si asistió más gente de la que confirmó) y la actividad económica.
         </Text>
         {events.length === 0 ? (
-          <Text c="dimmed" size="sm">No hay eventos.</Text>
+          <Text c="dimmed" size="sm">No hay eventos en tu ámbito.</Text>
         ) : (
           <Stack gap="xs">
-            {events.map((ev) => (
-              <Card key={ev.id} withBorder padding="sm" radius="md">
-                <Group justify="space-between" wrap="nowrap">
-                  <div style={{ minWidth: 0 }}>
-                    <Text fw={600} truncate>{ev.title}</Text>
-                    <Text size="xs" c="dimmed">{formatDate(ev.date)}</Text>
-                  </div>
-                  <Group gap="xs" wrap="nowrap">
-                    <Badge variant="light" color={ev.visibility === "public" ? "teal" : "blue"} size="sm">
-                      {ev.visibility === "public" ? "Público" : "Interno"}
-                    </Badge>
-                    <Button size="xs" variant="light" leftSection={<IconCoin size={14} />}
-                      onClick={() => setFinanceEvent(ev)}>
-                      Economía
+            {events.map((ev) => {
+              const overridden = ev.actual_attendance != null && ev.actual_attendance !== ev.estimated_attendance;
+              return (
+                <Card key={ev.event_id} withBorder padding="sm" radius="md">
+                  <Group justify="space-between" wrap="nowrap" align="flex-start">
+                    <div style={{ minWidth: 0 }}>
+                      <Group gap={6} wrap="nowrap">
+                        <Text fw={600} truncate>{ev.title}</Text>
+                        <Badge variant="light" color={ev.visibility === "public" ? "teal" : "blue"} size="sm">
+                          {ev.visibility === "public" ? "Público" : "Interno"}
+                        </Badge>
+                      </Group>
+                      <Text size="xs" c="dimmed">{formatDate(ev.date)}</Text>
+                      <Group gap="md" mt={6}>
+                        <Text size="sm">
+                          Asistencia:{" "}
+                          <b>{ev.actual_attendance != null ? ev.actual_attendance : ev.estimated_attendance}</b>
+                          {overridden && (
+                            <Text component="span" size="xs" c="dimmed"> (app: {ev.estimated_attendance})</Text>
+                          )}
+                        </Text>
+                        <Text size="xs" c="dimmed">
+                          Sí {ev.militant_yes} · No {ev.militant_no}
+                          {ev.militant_companions > 0 && ` · +${ev.militant_companions} acomp.`}
+                          {(ev.guest_yes > 0 || ev.guest_companions > 0) && ` · invitados ${ev.guest_yes + ev.guest_companions}`}
+                        </Text>
+                        {ev.collected_amount && (
+                          <Text size="xs" c="dimmed">Recaudado: {ev.collected_amount} €</Text>
+                        )}
+                      </Group>
+                    </div>
+                    <Button
+                      size="xs"
+                      variant="light"
+                      leftSection={<IconPencil size={14} />}
+                      onClick={() => setDataEvent(ev)}
+                    >
+                      Editar
                     </Button>
                   </Group>
-                </Group>
-              </Card>
-            ))}
+                </Card>
+              );
+            })}
           </Stack>
         )}
       </div>
 
-      {financeEvent && (
-        <FinanceModal
-          event={financeEvent}
-          onClose={(changed) => { setFinanceEvent(null); if (changed) reload(); }}
+      {dataEvent && (
+        <EventDataModal
+          event={dataEvent}
+          onClose={(changed) => { setDataEvent(null); if (changed) reload(); }}
         />
       )}
     </Stack>

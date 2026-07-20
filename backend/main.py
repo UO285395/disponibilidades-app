@@ -143,6 +143,15 @@ def ensure_legacy_schema_compatibility():
                     conn.execute(text("ALTER TABLE users ADD COLUMN availability_reminder_opt_in INTEGER DEFAULT 0"))
                     print("✅ Columna users.availability_reminder_opt_in añadida")
 
+        # event_finances es una tabla nueva; si ya existe sin la columna de
+        # asistencia real (creada en un despliegue anterior), la añadimos.
+        if "event_finances" in table_names:
+            finance_columns = {column["name"] for column in inspector.get_columns("event_finances")}
+            if "actual_attendance" not in finance_columns:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE event_finances ADD COLUMN actual_attendance INTEGER"))
+                print("✅ Columna event_finances.actual_attendance añadida")
+
         if "device_tokens" in table_names:
             device_token_columns = {column["name"] for column in inspector.get_columns("device_tokens")}
             with engine.begin() as conn:
@@ -560,6 +569,7 @@ class EventFinanceUpdate(BaseModel):
     has_registration_fee: bool = False
     fee_amount: str | None = None
     collected_amount: str | None = None
+    actual_attendance: int | None = None
     notes: str | None = None
 
 class CensusFieldCreate(BaseModel):
@@ -2991,12 +3001,14 @@ def _serialize_finance(fin) -> dict:
             "has_registration_fee": False,
             "fee_amount": "",
             "collected_amount": "",
+            "actual_attendance": None,
             "notes": "",
         }
     return {
         "has_registration_fee": bool(fin.has_registration_fee),
         "fee_amount": fin.fee_amount or "",
         "collected_amount": fin.collected_amount or "",
+        "actual_attendance": fin.actual_attendance,
         "notes": fin.notes or "",
     }
 
@@ -3039,6 +3051,9 @@ def set_event_finance(
     fin.has_registration_fee = 1 if data.has_registration_fee else 0
     fin.fee_amount = (data.fee_amount or "").strip() or None
     fin.collected_amount = (data.collected_amount or "").strip() or None
+    if data.actual_attendance is not None and data.actual_attendance < 0:
+        raise HTTPException(400, "La asistencia no puede ser negativa")
+    fin.actual_attendance = data.actual_attendance
     fin.notes = (data.notes or "").strip() or None
     fin.updated_by = admin.id
     fin.updated_at = now_iso
@@ -3086,6 +3101,7 @@ def admin_metrics(
         db.query(EventFinance).filter(EventFinance.event_id.in_(event_ids)).all()
         if event_ids else []
     )
+    finance_by_event = {f.event_id: f for f in finances}
     events_with_fee = sum(1 for f in finances if f.has_registration_fee)
     total_collected = 0.0
     has_collected = False
@@ -3095,6 +3111,36 @@ def admin_metrics(
             total_collected += amount
             has_collected = True
 
+    # Desglose por evento + totales de asistencia. La asistencia "estimada" sale
+    # de las confirmaciones en la app; la "real" usa el dato manual cuando existe
+    # (no todos los asistentes confirman), y si no, cae a la estimada.
+    total_estimated = 0
+    total_real = 0
+    per_event = []
+    # Orden por fecha descendente para ver primero lo más reciente.
+    for e in sorted(events, key=lambda x: (x.date or ""), reverse=True):
+        c = counts.get(e.id, {"yes": 0, "no": 0, "companions": 0, "guest_yes": 0, "guest_no": 0, "guest_companions": 0})
+        estimated = c["yes"] + c["companions"] + c["guest_yes"] + c["guest_companions"]
+        fin = finance_by_event.get(e.id)
+        actual = fin.actual_attendance if (fin and fin.actual_attendance is not None) else None
+        total_estimated += estimated
+        total_real += actual if actual is not None else estimated
+        per_event.append({
+            "event_id": e.id,
+            "title": e.title,
+            "date": e.date,
+            "visibility": e.visibility,
+            "militant_yes": c["yes"],
+            "militant_no": c["no"],
+            "militant_companions": c["companions"],
+            "guest_yes": c["guest_yes"],
+            "guest_companions": c["guest_companions"],
+            "estimated_attendance": estimated,
+            "actual_attendance": actual,
+            "has_registration_fee": bool(fin.has_registration_fee) if fin else False,
+            "collected_amount": fin.collected_amount if fin else None,
+        })
+
     return {
         "total_events": len(events),
         "participation": {
@@ -3103,13 +3149,17 @@ def admin_metrics(
             "militant_companions": total_companions,
             "guest_yes": total_guest_yes,
             "guest_companions": total_guest_companions,
-            "attendees_total": total_yes + total_companions + total_guest_yes + total_guest_companions,
+            # attendees_total se mantiene por compatibilidad (= estimada).
+            "attendees_total": total_estimated,
+            "attendees_estimated": total_estimated,
+            "attendees_real": total_real,
         },
         "finance": {
             "events_with_fee": events_with_fee,
             "events_with_finance_record": len(finances),
             "total_collected": round(total_collected, 2) if has_collected else None,
         },
+        "events": per_event,
     }
 
 

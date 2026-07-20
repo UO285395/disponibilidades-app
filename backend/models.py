@@ -212,6 +212,9 @@ class EventFinance(Base):
     has_registration_fee = Column(Integer, nullable=False, default=0)
     fee_amount = Column(String, nullable=True)        # importe de la cuota (texto para evitar problemas de coma/punto)
     collected_amount = Column(String, nullable=True)  # recaudación total
+    # Asistencia real registrada a mano: no todos los asistentes confirman en la
+    # app, así que este dato prevalece sobre el conteo de "Sí" cuando se rellena.
+    actual_attendance = Column(Integer, nullable=True)
     notes = Column(String, nullable=True)
     updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_at = Column(String, nullable=True)
