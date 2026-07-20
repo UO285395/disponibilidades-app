@@ -202,7 +202,35 @@ def ensure_legacy_schema_compatibility():
         print(f"⚠️ No se pudo verificar compatibilidad de esquema: {exc}")
 
 
+def cleanup_removed_finance_artifacts():
+    """Elimina de la base de datos lo que quedó huérfano al retirar el panel de
+    Métricas/finanzas por evento (la contabilidad se lleva en otra aplicación):
+    la tabla `event_finances` y la columna `events.archived_at`. Idempotente:
+    si ya no existen, no hace nada."""
+    try:
+        inspector = inspect(engine)
+        table_names = set(inspector.get_table_names())
+
+        if "event_finances" in table_names:
+            with engine.begin() as conn:
+                conn.execute(text("DROP TABLE event_finances"))
+            print("🗑️ Tabla event_finances eliminada (finanzas retiradas del producto)")
+
+        if "events" in table_names:
+            event_columns = {column["name"] for column in inspector.get_columns("events")}
+            if "archived_at" in event_columns:
+                with engine.begin() as conn:
+                    # El índice que se creó sobre la columna debe caer primero,
+                    # o el DROP COLUMN falla (SQLite) al quedar huérfano.
+                    conn.execute(text("DROP INDEX IF EXISTS ix_events_archived_at"))
+                    conn.execute(text("ALTER TABLE events DROP COLUMN archived_at"))
+                print("🗑️ Columna events.archived_at eliminada")
+    except Exception as exc:
+        print(f"⚠️ No se pudo limpiar artefactos de finanzas retiradas: {exc}")
+
+
 ensure_legacy_schema_compatibility()
+cleanup_removed_finance_artifacts()
 org_service.ensure_org_hierarchy_schema_compatibility(engine, SessionLocal)
 
 
