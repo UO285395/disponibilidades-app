@@ -425,15 +425,18 @@ def require_superadmin(user: User):
 # LIMPIEZA AUTOMÁTICA CENTRALIZADA
 # =========================================================
 _last_cleanup_at: datetime | None = None
-_CLEANUP_MIN_INTERVAL_SECONDS = 600
+# Los eventos caducados solo se borran por día (no hay urgencia de minutos) y
+# no hay tantos: basta con pasar una vez a la semana.
+_CLEANUP_MIN_INTERVAL_SECONDS = 7 * 24 * 3600
 
 
 def maybe_cleanup_expired_data(db: Session):
-    """Ejecuta la limpieza como mucho una vez cada 10 minutos.
+    """Ejecuta la limpieza como mucho una vez por semana.
 
-    Antes se llamaba en CADA lectura del calendario, así que una simple consulta
-    hacía borrados y un commit. Sacarlo del camino de lectura evita escrituras
-    innecesarias y acelera el refresco.
+    Se engancha al mismo heartbeat que ya despierta el planificador de
+    recordatorios (ver _reminder_scheduler_loop), así que no añade ningún
+    hilo ni wake-up nuevo: solo una consulta de más en un tick que de todas
+    formas ya se estaba ejecutando.
     """
     global _last_cleanup_at
     now = datetime.utcnow()
@@ -5592,13 +5595,20 @@ def _process_availability_reminders(db):
         _availability_reminder_sent_weeks.add(key)
 
 
-def _reminder_scheduler_loop(interval_seconds=300):
+def _reminder_scheduler_loop(interval_seconds=900):
     stop = threading.Event()
     while not stop.wait(interval_seconds):
         db = SessionLocal()
         try:
             _process_due_event_reminders(db)
             _process_availability_reminders(db)
+            # La limpieza de eventos caducados antes dependía de que alguien
+            # visitara /admin/availability (ver maybe_cleanup_expired_data);
+            # si nadie abría esa pantalla, los eventos pasados se quedaban en
+            # la base de datos indefinidamente. Al colgarla de este bucle, se
+            # ejecuta sola (respeta su propio throttle semanal) independiente
+            # del uso que se le dé a la app.
+            maybe_cleanup_expired_data(db)
         except Exception:
             logger.exception("Error en el planificador de recordatorios")
         finally:
