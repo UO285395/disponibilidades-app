@@ -2,8 +2,9 @@ import { useState } from "react";
 import { Card, Title, Text, TextInput, NumberInput, Button, Group, Stack, Anchor } from "@mantine/core";
 import { IconCheck } from "@tabler/icons-react";
 import { eventsAPI } from "../api/api.js";
+import EventAvailabilityPicker from "./EventAvailabilityPicker.jsx";
 
-export default function GuestEventResponse({ eventId }) {
+export default function GuestEventResponse({ eventId, eventType, date }) {
   const [guestName, setGuestName] = useState("");
   const [companions, setCompanions] = useState(0);
   const [sending, setSending] = useState(null);
@@ -23,6 +24,35 @@ export default function GuestEventResponse({ eventId }) {
     } finally {
       setSending(false);
     }
+  }
+
+  if (eventType === "disponibilidad") {
+    return (
+      <Card shadow="sm" p="md" radius="md" mt="md">
+        <Title order={5} mb="xs">
+          Indica tu disponibilidad
+        </Title>
+        <Text size="sm" c="dimmed" mb="md">
+          No hace falta cuenta ni email, solo tu nombre si quieres que lo sepamos.
+        </Text>
+
+        <Stack gap="sm">
+          <TextInput
+            label="Tu nombre (opcional)"
+            placeholder="Nombre y apellidos"
+            value={guestName}
+            onChange={(e) => setGuestName(e.target.value)}
+          />
+
+          <EventAvailabilityPicker
+            date={date}
+            fetchSlots={() => eventsAPI.getGuestEventAvailability(eventId)}
+            createSlot={(hour) => eventsAPI.createGuestEventAvailability(eventId, hour, guestName)}
+            deleteSlot={(slotId) => eventsAPI.deleteGuestEventAvailability(eventId, slotId)}
+          />
+        </Stack>
+      </Card>
+    );
   }
 
   if (done) {

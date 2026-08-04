@@ -37,6 +37,8 @@ from models import (
     EventResponse,
     EventCompanion,
     EventReminder,
+    EventAvailabilitySlot,
+    GuestEventAvailabilitySlot,
     GuestResponse,
     GuestPolicy,
     CensusConfig,
@@ -457,6 +459,14 @@ def cleanup_expired_data(db: Session):
           .filter(EventResponse.event_id.in_(expired_event_ids))\
           .delete(synchronize_session=False)
 
+        db.query(EventAvailabilitySlot)\
+          .filter(EventAvailabilitySlot.event_id.in_(expired_event_ids))\
+          .delete(synchronize_session=False)
+
+        db.query(GuestEventAvailabilitySlot)\
+          .filter(GuestEventAvailabilitySlot.event_id.in_(expired_event_ids))\
+          .delete(synchronize_session=False)
+
         db.query(Event)\
           .filter(Event.id.in_(expired_event_ids))\
           .delete(synchronize_session=False)
@@ -568,6 +578,10 @@ class EventResponseCreate(BaseModel):
     justification: str | None
 
 
+class EventAvailabilitySlotCreate(BaseModel):
+    hour: int
+
+
 class EventCompanionUpdate(BaseModel):
     count: int
 
@@ -651,6 +665,16 @@ class GuestResponseCreate(BaseModel):
     answer: str = "saved"
     companions: int = 0
     guest_identifier: str | None = None
+
+
+class GuestEventAvailabilitySlotCreate(BaseModel):
+    hour: int
+    guest_identifier: str
+    guest_name: str | None = None
+
+
+class GuestEventAvailabilityIdentify(BaseModel):
+    guest_identifier: str
 
 class SpaceCreate(BaseModel):
     name: str
@@ -1959,8 +1983,8 @@ def create_event(
         allowed_domain = _get_domain(admin.email)
 
     event_type = (data.event_type or "participativo").strip().lower()
-    if event_type not in ["informativo", "participativo"]:
-        raise HTTPException(400, "event_type inválido: usa informativo o participativo")
+    if event_type not in ["informativo", "participativo", "disponibilidad"]:
+        raise HTTPException(400, "event_type inválido: usa informativo, participativo o disponibilidad")
 
     # Organigrama: resolver unidad propietaria y modo de distribución.
     try:
@@ -2115,7 +2139,10 @@ def _visible_events_for_user(
 
 
 def _empty_counts() -> dict:
-    return {"yes": 0, "no": 0, "companions": 0, "guest_yes": 0, "guest_no": 0, "guest_companions": 0}
+    return {
+        "yes": 0, "no": 0, "companions": 0, "guest_yes": 0, "guest_no": 0, "guest_companions": 0,
+        "availability_responders": 0, "guest_availability_responders": 0,
+    }
 
 
 def _bulk_event_counts(db: Session, event_ids: list[int]) -> dict[int, dict]:
@@ -2171,6 +2198,28 @@ def _bulk_event_counts(db: Session, event_ids: list[int]) -> dict[int, dict]:
             counts[eid]["guest_companions"] += int(comp or 0)
         elif answer == "no":
             counts[eid]["guest_no"] += n
+
+    # Militantes: nº de personas distintas que han marcado alguna franja (eventos "disponibilidad")
+    rows = (
+        db.query(EventAvailabilitySlot.event_id, func.count(func.distinct(EventAvailabilitySlot.user_id)))
+        .filter(EventAvailabilitySlot.event_id.in_(event_ids))
+        .group_by(EventAvailabilitySlot.event_id)
+        .all()
+    )
+    for eid, n in rows:
+        if eid in counts:
+            counts[eid]["availability_responders"] = int(n or 0)
+
+    # Visitantes: nº de personas distintas que han marcado alguna franja
+    rows = (
+        db.query(GuestEventAvailabilitySlot.event_id, func.count(func.distinct(GuestEventAvailabilitySlot.guest_identifier)))
+        .filter(GuestEventAvailabilitySlot.event_id.in_(event_ids))
+        .group_by(GuestEventAvailabilitySlot.event_id)
+        .all()
+    )
+    for eid, n in rows:
+        if eid in counts:
+            counts[eid]["guest_availability_responders"] = int(n or 0)
 
     return counts
 
@@ -2259,6 +2308,9 @@ def _serialize_event_with_counts(db: Session, e: Event, counts: dict | None = No
         "guest_attendees_total": guest_attendees_total,
         # Suma de ambos
         "attendees_grand_total": attendees_total + guest_attendees_total,
+        # Eventos "disponibilidad": nº de personas distintas que han marcado alguna franja
+        "availability_responder_count": counts["availability_responders"],
+        "guest_availability_responder_count": counts["guest_availability_responders"],
     }
 
 
@@ -2763,6 +2815,327 @@ def respond_event_guest(
     }
 
 
+def _require_disponibilidad_event(event: Event) -> None:
+    if (event.event_type or "").strip().lower() != "disponibilidad":
+        raise HTTPException(400, "Este evento no admite disponibilidad horaria")
+
+
+def _require_event_not_past(event: Event) -> None:
+    today_str = datetime.utcnow().date().strftime("%Y-%m-%d")
+    if event.date < today_str:
+        raise HTTPException(410, "No puedes marcar disponibilidad para un evento ya pasado")
+
+
+def _require_valid_availability_hour(hour: int) -> int:
+    if hour < 8 or hour > 23:
+        raise HTTPException(400, "hour debe ser un entero entre 8 y 23")
+    return hour
+
+
+@app.get("/events/{event_id}/availability/my")
+def my_event_availability(
+    event_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    user = get_user_from_token(cred.credentials, db)
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(404, "Evento no encontrado")
+    _require_disponibilidad_event(event)
+
+    rows = (
+        db.query(EventAvailabilitySlot)
+        .filter(EventAvailabilitySlot.event_id == event_id, EventAvailabilitySlot.user_id == user.id)
+        .all()
+    )
+    return [{"id": s.id, "hour": s.hour} for s in rows]
+
+
+@app.post("/events/{event_id}/availability/my")
+def create_my_event_availability(
+    event_id: int,
+    data: EventAvailabilitySlotCreate,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    user = get_user_from_token(cred.credentials, db)
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(404, "Evento no encontrado")
+    _require_disponibilidad_event(event)
+    _require_event_not_past(event)
+    hour = _require_valid_availability_hour(data.hour)
+
+    existing = (
+        db.query(EventAvailabilitySlot)
+        .filter(
+            EventAvailabilitySlot.event_id == event_id,
+            EventAvailabilitySlot.user_id == user.id,
+            EventAvailabilitySlot.hour == hour,
+        )
+        .first()
+    )
+    if existing:
+        return {"id": existing.id, "hour": existing.hour}
+
+    slot = EventAvailabilitySlot(
+        event_id=event_id,
+        user_id=user.id,
+        hour=hour,
+        created_at=datetime.utcnow().isoformat(),
+    )
+    db.add(slot)
+    try:
+        db.commit()
+    except IntegrityError:
+        # Carrera: otra petición creó la franja a la vez.
+        db.rollback()
+        existing = (
+            db.query(EventAvailabilitySlot)
+            .filter(
+                EventAvailabilitySlot.event_id == event_id,
+                EventAvailabilitySlot.user_id == user.id,
+                EventAvailabilitySlot.hour == hour,
+            )
+            .first()
+        )
+        if existing:
+            return {"id": existing.id, "hour": existing.hour}
+        raise HTTPException(400, "No se pudo registrar la franja")
+
+    db.refresh(slot)
+    return {"id": slot.id, "hour": slot.hour}
+
+
+@app.delete("/events/{event_id}/availability/my/{slot_id}")
+def delete_my_event_availability(
+    event_id: int,
+    slot_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    user = get_user_from_token(cred.credentials, db)
+
+    slot = (
+        db.query(EventAvailabilitySlot)
+        .filter(
+            EventAvailabilitySlot.id == slot_id,
+            EventAvailabilitySlot.event_id == event_id,
+            EventAvailabilitySlot.user_id == user.id,
+        )
+        .first()
+    )
+    if not slot:
+        raise HTTPException(404, "Franja no encontrada")
+
+    db.delete(slot)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/events/{event_id}/availability/guest")
+def guest_event_availability(
+    event_id: int,
+    guest_identifier: str = Query(...),
+    db: Session = Depends(get_db)
+):
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(404, "Evento no encontrado")
+
+    event_visibility = (event.visibility or "internal").strip().lower()
+    if event_visibility != "public":
+        raise HTTPException(403, "Solo los eventos públicos aceptan respuestas de visitantes")
+    _require_disponibilidad_event(event)
+
+    guest_identifier_hash = hashlib.sha256((guest_identifier or "").strip().encode("utf-8")).hexdigest()
+    rows = (
+        db.query(GuestEventAvailabilitySlot)
+        .filter(
+            GuestEventAvailabilitySlot.event_id == event_id,
+            GuestEventAvailabilitySlot.guest_identifier == guest_identifier_hash,
+        )
+        .all()
+    )
+    return [{"id": s.id, "hour": s.hour} for s in rows]
+
+
+@app.post("/events/{event_id}/availability/guest")
+def create_guest_event_availability(
+    event_id: int,
+    data: GuestEventAvailabilitySlotCreate,
+    db: Session = Depends(get_db)
+):
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(404, "Evento no encontrado")
+
+    event_visibility = (event.visibility or "internal").strip().lower()
+    if event_visibility != "public":
+        raise HTTPException(403, "Solo los eventos públicos aceptan respuestas de visitantes")
+    _require_disponibilidad_event(event)
+    _require_event_not_past(event)
+    hour = _require_valid_availability_hour(data.hour)
+
+    domain_tag = _resolve_guest_domain_tag_from_event(event)
+    policy = db.query(GuestPolicy).filter(GuestPolicy.domain_tag == domain_tag).first()
+    if policy and not bool(policy.guest_responses_enabled):
+        raise HTTPException(403, "Respuestas de visitantes deshabilitadas para este dominio")
+
+    guest_identifier_raw = (data.guest_identifier or "").strip()
+    if not guest_identifier_raw:
+        raise HTTPException(400, "guest_identifier requerido")
+    guest_identifier = hashlib.sha256(guest_identifier_raw.encode("utf-8")).hexdigest()
+
+    existing = (
+        db.query(GuestEventAvailabilitySlot)
+        .filter(
+            GuestEventAvailabilitySlot.event_id == event_id,
+            GuestEventAvailabilitySlot.guest_identifier == guest_identifier,
+            GuestEventAvailabilitySlot.hour == hour,
+        )
+        .first()
+    )
+    if existing:
+        existing.guest_name = data.guest_name
+        db.commit()
+        return {"id": existing.id, "hour": existing.hour}
+
+    slot = GuestEventAvailabilitySlot(
+        event_id=event_id,
+        guest_identifier=guest_identifier,
+        guest_name=data.guest_name,
+        hour=hour,
+        created_at=datetime.utcnow().isoformat(),
+    )
+    db.add(slot)
+    try:
+        db.commit()
+    except IntegrityError:
+        # Carrera: otra petición creó la franja a la vez.
+        db.rollback()
+        existing = (
+            db.query(GuestEventAvailabilitySlot)
+            .filter(
+                GuestEventAvailabilitySlot.event_id == event_id,
+                GuestEventAvailabilitySlot.guest_identifier == guest_identifier,
+                GuestEventAvailabilitySlot.hour == hour,
+            )
+            .first()
+        )
+        if existing:
+            return {"id": existing.id, "hour": existing.hour}
+        raise HTTPException(400, "No se pudo registrar la franja")
+
+    db.refresh(slot)
+    return {"id": slot.id, "hour": slot.hour}
+
+
+@app.delete("/events/{event_id}/availability/guest/{slot_id}")
+def delete_guest_event_availability(
+    event_id: int,
+    slot_id: int,
+    data: GuestEventAvailabilityIdentify,
+    db: Session = Depends(get_db)
+):
+    guest_identifier = hashlib.sha256((data.guest_identifier or "").strip().encode("utf-8")).hexdigest()
+
+    slot = (
+        db.query(GuestEventAvailabilitySlot)
+        .filter(
+            GuestEventAvailabilitySlot.id == slot_id,
+            GuestEventAvailabilitySlot.event_id == event_id,
+            GuestEventAvailabilitySlot.guest_identifier == guest_identifier,
+        )
+        .first()
+    )
+    if not slot:
+        raise HTTPException(404, "Franja no encontrada")
+
+    db.delete(slot)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/events/{event_id}/availability")
+def event_availability(
+    event_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    """Vista admin: franjas marcadas por militantes en un evento 'disponibilidad'."""
+    admin = get_user_from_token(cred.credentials, db)
+    require_admin(admin)
+
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    if not ev:
+        raise HTTPException(404, "Evento no encontrado")
+
+    _ensure_event_domain_access(admin, ev, db)
+
+    rows = (
+        db.query(EventAvailabilitySlot, User)
+        .join(User, User.id == EventAvailabilitySlot.user_id)
+        .filter(EventAvailabilitySlot.event_id == event_id)
+        .all()
+    )
+
+    by_user = {}
+    for slot, user in rows:
+        entry = by_user.setdefault(user.id, {
+            "user_id": user.id,
+            "user_full_name": user.full_name,
+            "user_domain": _get_domain(user.email),
+            "hours": [],
+        })
+        entry["hours"].append(slot.hour)
+
+    results = list(by_user.values())
+    for entry in results:
+        entry["hours"].sort()
+    return results
+
+
+@app.get("/events/{event_id}/guest-availability")
+def event_guest_availability(
+    event_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db)
+):
+    """Vista admin: franjas marcadas por visitantes sin cuenta en un evento
+    público 'disponibilidad'. Se sirven aparte de las de militantes."""
+    admin = get_user_from_token(cred.credentials, db)
+    require_admin(admin)
+
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    if not ev:
+        raise HTTPException(404, "Evento no encontrado")
+
+    _ensure_event_domain_access(admin, ev, db)
+
+    rows = (
+        db.query(GuestEventAvailabilitySlot)
+        .filter(GuestEventAvailabilitySlot.event_id == event_id)
+        .all()
+    )
+
+    by_guest = {}
+    for slot in rows:
+        entry = by_guest.setdefault(slot.guest_identifier, {
+            "guest_name": slot.guest_name,
+            "hours": [],
+        })
+        entry["hours"].append(slot.hour)
+
+    results = list(by_guest.values())
+    for entry in results:
+        entry["hours"].sort()
+    return results
+
+
 @app.get("/my-event-responses")
 def my_event_responses(
     cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
@@ -3024,6 +3397,14 @@ def delete_event(
 
     db.query(EventResponse)\
       .filter(EventResponse.event_id == event_id)\
+      .delete(synchronize_session=False)
+
+    db.query(EventAvailabilitySlot)\
+      .filter(EventAvailabilitySlot.event_id == event_id)\
+      .delete(synchronize_session=False)
+
+    db.query(GuestEventAvailabilitySlot)\
+      .filter(GuestEventAvailabilitySlot.event_id == event_id)\
       .delete(synchronize_session=False)
 
     db.delete(ev)
@@ -5022,8 +5403,8 @@ def edit_event(
         allowed_domain = _get_domain(admin.email)
 
     event_type = (data.event_type or ev.event_type or "participativo").strip().lower()
-    if event_type not in ["informativo", "participativo"]:
-        raise HTTPException(400, "event_type inválido: usa informativo o participativo")
+    if event_type not in ["informativo", "participativo", "disponibilidad"]:
+        raise HTTPException(400, "event_type inválido: usa informativo, participativo o disponibilidad")
 
     was_public = (ev.visibility or "internal").strip().lower() == "public"
 

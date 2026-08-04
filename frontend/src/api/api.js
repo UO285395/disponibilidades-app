@@ -376,6 +376,39 @@ export const eventsAPI = {
       guest_identifier: getOrCreateGuestId(),
     }, false);
   },
+
+  // ------------------- DISPONIBILIDAD POR EVENTO -------------------
+
+  getMyEventAvailability(event_id) {
+    return request(`/events/${event_id}/availability/my`);
+  },
+
+  createMyEventAvailability(event_id, hour) {
+    return request(`/events/${event_id}/availability/my`, "POST", { hour });
+  },
+
+  deleteMyEventAvailability(event_id, slot_id) {
+    return request(`/events/${event_id}/availability/my/${slot_id}`, "DELETE");
+  },
+
+  getGuestEventAvailability(event_id) {
+    const qs = `?guest_identifier=${encodeURIComponent(getOrCreateGuestId())}`;
+    return request(`/events/${event_id}/availability/guest${qs}`, "GET", null, false);
+  },
+
+  createGuestEventAvailability(event_id, hour, guestName) {
+    return request(`/events/${event_id}/availability/guest`, "POST", {
+      hour,
+      guest_name: guestName || null,
+      guest_identifier: getOrCreateGuestId(),
+    }, false);
+  },
+
+  deleteGuestEventAvailability(event_id, slot_id) {
+    return request(`/events/${event_id}/availability/guest/${slot_id}`, "DELETE", {
+      guest_identifier: getOrCreateGuestId(),
+    }, false);
+  },
 };
 
 // ------------------- CALENDARIO (export iCalendar) -------------------

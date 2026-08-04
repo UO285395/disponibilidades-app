@@ -20,6 +20,7 @@ const DISTRIBUTION_OPTIONS = [
 const EVENT_TYPE_OPTIONS = [
   { value: "participativo", label: "Participativo (pide respuesta sí/no)" },
   { value: "informativo", label: "Informativo" },
+  { value: "disponibilidad", label: "Disponibilidad (elige franjas horarias)" },
 ];
 
 const VISIBILITY_BADGE = {
@@ -511,28 +512,42 @@ export default function AdminEvents({ currentUser }) {
               </>
             )}
 
-            {/* Resumen de votos: militantes y visitantes por separado */}
-            <div style={{ marginTop: "10px" }}>
-              <b>Militancia:</b>
-              <div>Sí: {ev.yes_count ?? 0}</div>
-              <div>No: {ev.no_count ?? 0}</div>
-              <div>+ Simpas: {ev.companions_total ?? 0}</div>
-              <div>Subtotal: {ev.attendees_total ?? 0}</div>
+            {/* Resumen: para "disponibilidad" no hay sí/no, sino nº de gente con franjas marcadas */}
+            {ev.event_type === "disponibilidad" ? (
+              <div style={{ marginTop: "10px" }}>
+                <b>Militancia:</b>
+                <div>Con disponibilidad indicada: {ev.availability_responder_count ?? 0}</div>
 
-              {ev.visibility === "public" && (
-                <>
-                  <b style={{ display: "block", marginTop: "8px" }}>Visitantes (sin cuenta):</b>
-                  <div>Sí: {ev.guest_yes_count ?? 0}</div>
-                  <div>No: {ev.guest_no_count ?? 0}</div>
-                  <div>+ Acompañantes: {ev.guest_companions_total ?? 0}</div>
-                  <div>Subtotal: {ev.guest_attendees_total ?? 0}</div>
-                </>
-              )}
-
-              <div style={{ marginTop: "8px" }}>
-                <b>Asistencia total: {ev.attendees_grand_total ?? ev.attendees_total ?? 0}</b>
+                {ev.visibility === "public" && (
+                  <>
+                    <b style={{ display: "block", marginTop: "8px" }}>Visitantes (sin cuenta):</b>
+                    <div>Con disponibilidad indicada: {ev.guest_availability_responder_count ?? 0}</div>
+                  </>
+                )}
               </div>
-            </div>
+            ) : (
+              <div style={{ marginTop: "10px" }}>
+                <b>Militancia:</b>
+                <div>Sí: {ev.yes_count ?? 0}</div>
+                <div>No: {ev.no_count ?? 0}</div>
+                <div>+ Simpas: {ev.companions_total ?? 0}</div>
+                <div>Subtotal: {ev.attendees_total ?? 0}</div>
+
+                {ev.visibility === "public" && (
+                  <>
+                    <b style={{ display: "block", marginTop: "8px" }}>Visitantes (sin cuenta):</b>
+                    <div>Sí: {ev.guest_yes_count ?? 0}</div>
+                    <div>No: {ev.guest_no_count ?? 0}</div>
+                    <div>+ Acompañantes: {ev.guest_companions_total ?? 0}</div>
+                    <div>Subtotal: {ev.guest_attendees_total ?? 0}</div>
+                  </>
+                )}
+
+                <div style={{ marginTop: "8px" }}>
+                  <b>Asistencia total: {ev.attendees_grand_total ?? ev.attendees_total ?? 0}</b>
+                </div>
+              </div>
+            )}
 
             <Group mt="sm">
               <Button

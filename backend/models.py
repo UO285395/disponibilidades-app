@@ -172,6 +172,43 @@ class GuestResponse(Base):
     event = relationship("Event")
 
 
+class EventAvailabilitySlot(Base):
+    """Franja horaria (1h) marcada por un militante para un evento tipo
+    'disponibilidad'. Análogo a EventResponse pero para el tercer tipo de
+    evento: en vez de sí/no, el militante marca huecos de un día fijo."""
+    __tablename__ = "event_availability_slots"
+    __table_args__ = (
+        UniqueConstraint("event_id", "user_id", "hour", name="ux_event_availability_slots_event_user_hour"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    hour = Column(Integer, nullable=False)  # 8..23, hora de inicio del bloque de 1h (08:00-24:00)
+    created_at = Column(String, nullable=True)
+
+    event = relationship("Event")
+    user = relationship("User")
+
+
+class GuestEventAvailabilitySlot(Base):
+    """Análogo a GuestResponse: franja horaria marcada por un visitante sin
+    cuenta en un evento público tipo 'disponibilidad'."""
+    __tablename__ = "guest_event_availability_slots"
+    __table_args__ = (
+        UniqueConstraint("event_id", "guest_identifier", "hour", name="ux_guest_event_availability_slots_event_guest_hour"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
+    guest_identifier = Column(String, nullable=False, index=True)  # sha256 hash, misma convención que GuestResponse
+    guest_name = Column(String, nullable=True)
+    hour = Column(Integer, nullable=False)
+    created_at = Column(String, nullable=True)
+
+    event = relationship("Event")
+
+
 class EventReminder(Base):
     """Recordatorio de evento que el propio usuario activa (opt-in). Nunca se
     crea automáticamente: solo existe si la persona pulsó "Recordármelo". El

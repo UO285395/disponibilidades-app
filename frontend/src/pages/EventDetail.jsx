@@ -14,6 +14,12 @@ import EventAttachments from "../components/EventAttachments.jsx";
 import { formatDate, formatTime } from "../utils/datetime.js";
 import { notifySuccess, notifyError } from "../utils/notify.js";
 
+const EVENT_TYPE_BADGE = {
+  informativo: { label: "Informativo", color: "blue" },
+  participativo: { label: "Participativo", color: "teal" },
+  disponibilidad: { label: "Disponibilidad", color: "grape" },
+};
+
 function InfoRow({ icon, children }) {
   return (
     <Group gap={8} wrap="nowrap">
@@ -102,8 +108,8 @@ export default function EventDetail() {
       <Card shadow="sm" padding="lg">
         <Group justify="space-between" align="flex-start" mb="sm" wrap="nowrap">
           <Title order={2} style={{ flex: 1 }}>{event.title}</Title>
-          <Badge variant="light" color={event.event_type === "informativo" ? "blue" : "teal"}>
-            {event.event_type === "informativo" ? "Informativo" : "Participativo"}
+          <Badge variant="light" color={EVENT_TYPE_BADGE[event.event_type]?.color || "teal"}>
+            {EVENT_TYPE_BADGE[event.event_type]?.label || "Participativo"}
           </Badge>
         </Group>
 
@@ -158,7 +164,7 @@ export default function EventDetail() {
         </Card>
       ) : (
         <Box mt="md">
-          <GuestEventResponse eventId={event.id} />
+          <GuestEventResponse eventId={event.id} eventType={event.event_type} date={event.date} />
         </Box>
       )}
     </Box>

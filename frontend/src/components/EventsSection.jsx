@@ -11,6 +11,7 @@ import {
 import { eventsAPI, calendarAPI } from "../api/api.js";
 import AddToCalendarButton from "./AddToCalendarButton.jsx";
 import EventAttachments from "./EventAttachments.jsx";
+import EventAvailabilityPicker from "./EventAvailabilityPicker.jsx";
 import { formatDate, formatTime } from "../utils/datetime.js";
 import { notifyError } from "../utils/notify.js";
 
@@ -413,86 +414,97 @@ export default function EventsSection() {
                   )}
                 </Group>
 
-                {answered && !editing && (
-                  <Group justify="space-between" align="center">
-                    <Badge
-                      variant="light"
-                      color={currentAnswer === "no" ? "red" : "teal"}
-                      size="lg"
-                      leftSection={currentAnswer === "no" ? <IconX size={16} /> : <IconCheck size={16} />}
-                    >
-                      {currentAnswer === "no" ? "Respondiste: No" : "Respondiste: Sí"}
-                    </Badge>
-                    <Anchor
-                      component="button"
-                      type="button"
-                      size="sm"
-                      onClick={() => { setEditingFor(eventId); setNoPendingFor(null); }}
-                    >
-                      Cambiar respuesta
-                    </Anchor>
-                  </Group>
-                )}
-
-                {showButtons && (
+                {ev.event_type === "disponibilidad" ? (
+                  <EventAvailabilityPicker
+                    date={ev.date}
+                    fetchSlots={() => eventsAPI.getMyEventAvailability(eventId)}
+                    createSlot={(hour) => eventsAPI.createMyEventAvailability(eventId, hour)}
+                    deleteSlot={(slotId) => eventsAPI.deleteMyEventAvailability(eventId, slotId)}
+                  />
+                ) : (
                   <>
-                    <Group grow gap="sm">
-                      <Button
-                        color="teal"
-                        variant={currentAnswer === "si" ? "filled" : "outline"}
-                        leftSection={<IconCheck size={18} />}
-                        loading={busy && !showingNo}
-                        disabled={busy}
-                        onClick={() => respond(eventId, "si")}
-                      >
-                        Sí
-                      </Button>
-                      <Button
-                        color="red"
-                        variant={showingNo || currentAnswer === "no" ? "filled" : "outline"}
-                        leftSection={<IconX size={18} />}
-                        disabled={busy}
-                        onClick={() => (showingNo ? cancelNo() : startNo(eventId))}
-                      >
-                        No
-                      </Button>
-                    </Group>
-
-                    {editing && (
-                      <Anchor
-                        component="button"
-                        type="button"
-                        size="sm"
-                        c="dimmed"
-                        mt={6}
-                        onClick={() => { setEditingFor(null); cancelNo(); }}
-                      >
-                        Cancelar
-                      </Anchor>
+                    {answered && !editing && (
+                      <Group justify="space-between" align="center">
+                        <Badge
+                          variant="light"
+                          color={currentAnswer === "no" ? "red" : "teal"}
+                          size="lg"
+                          leftSection={currentAnswer === "no" ? <IconX size={16} /> : <IconCheck size={16} />}
+                        >
+                          {currentAnswer === "no" ? "Respondiste: No" : "Respondiste: Sí"}
+                        </Badge>
+                        <Anchor
+                          component="button"
+                          type="button"
+                          size="sm"
+                          onClick={() => { setEditingFor(eventId); setNoPendingFor(null); }}
+                        >
+                          Cambiar respuesta
+                        </Anchor>
+                      </Group>
                     )}
 
-                    <Collapse in={showingNo}>
-                      <Stack gap="xs" mt="sm">
-                        <TextInput
-                          placeholder="Justificación (opcional)"
-                          value={justificationDraft}
-                          onChange={(e) => setJustificationDraft(e.currentTarget.value)}
-                          disabled={busy}
-                        />
+                    {showButtons && (
+                      <>
                         <Group grow gap="sm">
-                          <Button variant="default" onClick={cancelNo} disabled={busy}>
-                            Cancelar
+                          <Button
+                            color="teal"
+                            variant={currentAnswer === "si" ? "filled" : "outline"}
+                            leftSection={<IconCheck size={18} />}
+                            loading={busy && !showingNo}
+                            disabled={busy}
+                            onClick={() => respond(eventId, "si")}
+                          >
+                            Sí
                           </Button>
                           <Button
                             color="red"
-                            loading={busy}
-                            onClick={() => respond(eventId, "no", justificationDraft.trim())}
+                            variant={showingNo || currentAnswer === "no" ? "filled" : "outline"}
+                            leftSection={<IconX size={18} />}
+                            disabled={busy}
+                            onClick={() => (showingNo ? cancelNo() : startNo(eventId))}
                           >
-                            Confirmar No
+                            No
                           </Button>
                         </Group>
-                      </Stack>
-                    </Collapse>
+
+                        {editing && (
+                          <Anchor
+                            component="button"
+                            type="button"
+                            size="sm"
+                            c="dimmed"
+                            mt={6}
+                            onClick={() => { setEditingFor(null); cancelNo(); }}
+                          >
+                            Cancelar
+                          </Anchor>
+                        )}
+
+                        <Collapse in={showingNo}>
+                          <Stack gap="xs" mt="sm">
+                            <TextInput
+                              placeholder="Justificación (opcional)"
+                              value={justificationDraft}
+                              onChange={(e) => setJustificationDraft(e.currentTarget.value)}
+                              disabled={busy}
+                            />
+                            <Group grow gap="sm">
+                              <Button variant="default" onClick={cancelNo} disabled={busy}>
+                                Cancelar
+                              </Button>
+                              <Button
+                                color="red"
+                                loading={busy}
+                                onClick={() => respond(eventId, "no", justificationDraft.trim())}
+                              >
+                                Confirmar No
+                              </Button>
+                            </Group>
+                          </Stack>
+                        </Collapse>
+                      </>
+                    )}
                   </>
                 )}
               </Card>

@@ -42,33 +42,68 @@ function formatRespuesta(answer) {
   return String(answer ?? "");
 }
 
+function formatHours(hours) {
+  return (hours || []).map((h) => `${h}-${h + 1}`).join(", ");
+}
+
+// Recuento de respondientes distintos por hora (8-23), combinando militantes y visitantes.
+function summarizeHourCounts(availability, guestAvailability) {
+  const counts = new Map();
+  [...availability, ...guestAvailability].forEach((entry) => {
+    (entry.hours || []).forEach((hour) => {
+      counts.set(hour, (counts.get(hour) || 0) + 1);
+    });
+  });
+  return Array.from({ length: 16 }, (_, i) => i + 8).map((hour) => ({
+    hour,
+    count: counts.get(hour) || 0,
+  }));
+}
+
 export default function AdminEventResponses() {
   const { id } = useParams();
   const [responses, setResponses] = useState([]);
   const [guestResponses, setGuestResponses] = useState([]);
+  const [availability, setAvailability] = useState([]);
+  const [guestAvailability, setGuestAvailability] = useState([]);
   const [eventName, setEventName] = useState("");
+  const [eventType, setEventType] = useState("participativo");
   const [isPublic, setIsPublic] = useState(false);
   const [filterDomain, setFilterDomain] = useState("");
   const [loadError, setLoadError] = useState("");
   const navigate = useNavigate();
+
+  const isAvailabilityEvent = eventType === "disponibilidad";
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
-        // 1) Obtener respuestas de militantes
-        const resp = await adminAPI.getEventResponses(id);
+        // 1) Obtener título y tipo del evento
+        const ev = await adminAPI.getEvent(id);
         if (cancelled) return;
-        setResponses(resp);
+        setEventName(ev.title);
+        setEventType(ev.event_type || "participativo");
+        setIsPublic(ev.visibility === "public");
         setLoadError("");
 
-        // 2) Obtener título del evento
-        const ev = await adminAPI.getEvent(id);
-        if (!cancelled) {
-          setEventName(ev.title);
-          setIsPublic(ev.visibility === "public");
+        if (ev.event_type === "disponibilidad") {
+          // 2) Franjas horarias de militantes
+          const slots = await adminAPI.getEventAvailability(id);
+          if (!cancelled) setAvailability(slots);
+
+          // 3) Franjas horarias de visitantes (solo eventos públicos)
+          if (ev.visibility === "public") {
+            const guestSlots = await adminAPI.getEventGuestAvailability(id);
+            if (!cancelled) setGuestAvailability(guestSlots);
+          }
+          return;
         }
+
+        // 2) Obtener respuestas de militantes
+        const resp = await adminAPI.getEventResponses(id);
+        if (!cancelled) setResponses(resp);
 
         // 3) Respuestas de visitantes (solo tienen sentido en eventos públicos)
         if (ev.visibility === "public") {
@@ -106,6 +141,21 @@ export default function AdminEventResponses() {
     });
   }, [responses, filterDomain]);
 
+  const filteredAvailability = useMemo(() => {
+    const domainSearch = filterDomain.trim().toLowerCase();
+    if (!domainSearch) return availability;
+
+    return availability.filter((a) => {
+      const domain = String(a.user_domain || "").toLowerCase();
+      return domain.includes(domainSearch);
+    });
+  }, [availability, filterDomain]);
+
+  const hourCounts = useMemo(
+    () => summarizeHourCounts(filteredAvailability, isPublic ? guestAvailability : []),
+    [filteredAvailability, guestAvailability, isPublic]
+  );
+
   const { si, no } = resumirVotos(filteredResponses);
   const simpas = filteredResponses.reduce((acc, r) => acc + Number(r.companions_count || 0), 0);
 
@@ -128,6 +178,32 @@ export default function AdminEventResponses() {
   }, [guestResponses]);
 
   function exportCsv() {
+    if (isAvailabilityEvent) {
+      const rows = [
+        ...filteredAvailability.map((a) => ({
+          tipo: "Militante",
+          nombre: a.user_full_name,
+          colectivo: a.user_domain || "",
+          franjas: formatHours(a.hours),
+        })),
+        ...(isPublic ? guestAvailability.map((g) => ({
+          tipo: "Visitante",
+          nombre: g.guest_name || "Anónimo",
+          colectivo: "",
+          franjas: formatHours(g.hours),
+        })) : []),
+      ];
+      const columns = [
+        { key: "tipo", label: "Tipo" },
+        { key: "nombre", label: "Nombre" },
+        { key: "colectivo", label: "Colectivo" },
+        { key: "franjas", label: "Franjas horarias" },
+      ];
+      const safeName = (eventName || "evento").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+      downloadCsv(`disponibilidad-${safeName}.csv`, rows, columns);
+      return;
+    }
+
     const rows = [
       ...filteredResponses.map((r) => ({
         tipo: "Militante",
@@ -177,7 +253,9 @@ export default function AdminEventResponses() {
     );
   }
 
-  const hasAnyResponse = filteredResponses.length > 0 || guestResponses.length > 0;
+  const hasAnyResponse = isAvailabilityEvent
+    ? filteredAvailability.length > 0 || guestAvailability.length > 0
+    : filteredResponses.length > 0 || guestResponses.length > 0;
 
   return (
     <Box p="lg">
@@ -206,85 +284,144 @@ export default function AdminEventResponses() {
         mb="lg"
       />
 
-      {/* ========================================
-          RESUMEN DE VOTOS (militancia y visitantes por separado)
-         ======================================== */}
-      <Card withBorder shadow="sm" p="lg" mb="lg">
-        <Title order={4} mb="md">Resumen de votos</Title>
-
-        <SimpleGrid cols={{ base: 2, sm: isPublic ? 4 : 2 }} spacing="md">
-          <div>
-            <Text size="xs" c="dimmed" tt="uppercase" fw={600}>Militancia</Text>
-            <Group gap="xs" mt={4}>
-              <Badge color="teal" variant="light" size="lg">Sí {si}</Badge>
-              <Badge color="red" variant="light" size="lg">No {no}</Badge>
+      {isAvailabilityEvent ? (
+        <>
+          {/* ========================================
+              RESUMEN POR HORA (militantes + visitantes)
+             ======================================== */}
+          <Card withBorder shadow="sm" p="lg" mb="lg">
+            <Title order={4} mb="md">Disponibilidad por franja</Title>
+            <Group gap="xs">
+              {hourCounts.map(({ hour, count }) => (
+                <Badge key={hour} color={count > 0 ? "teal" : "gray"} variant={count > 0 ? "filled" : "light"}>
+                  {hour}-{hour + 1}h: {count}
+                </Badge>
+              ))}
             </Group>
-            <Text size="sm" c="dimmed" mt={6}>+ Simpas: {simpas}</Text>
-            <Text size="sm" c="dimmed">Participación: {participationPct}%</Text>
-            <Text size="sm" fw={600} mt={2}>Asistencia: {si + simpas}</Text>
-          </div>
-
-          {isPublic && (
-            <div>
-              <Text size="xs" c="dimmed" tt="uppercase" fw={600}>Visitantes</Text>
-              <Group gap="xs" mt={4}>
-                <Badge color="teal" variant="light" size="lg">Sí {guestSummary.si}</Badge>
-                <Badge color="red" variant="light" size="lg">No {guestSummary.no}</Badge>
-              </Group>
-              <Text size="sm" c="dimmed" mt={6}>+ Acompañantes: {guestSummary.companions}</Text>
-              <Text size="sm" fw={600} mt={2}>Asistencia: {guestSummary.si + guestSummary.companions}</Text>
-            </div>
-          )}
-        </SimpleGrid>
-
-        <Text fw={700} mt="md" size="lg">
-          Asistencia total: {si + simpas + (isPublic ? guestSummary.si + guestSummary.companions : 0)}
-        </Text>
-      </Card>
-
-      {/* ========================================
-          RESPUESTAS DE VISITANTES
-         ======================================== */}
-      {isPublic && (
-        <Card shadow="sm" p="lg" mb="lg">
-          <Title order={4} mb="sm">Visitantes sin cuenta ({guestResponses.length})</Title>
-          {guestResponses.length === 0 ? (
-            <Text size="sm" c="dimmed">Ningún visitante ha respondido todavía.</Text>
-          ) : (
-            guestResponses.map((g) => (
-              <Text key={g.id} size="sm">
-                {g.guest_name || "Anónimo"} — <b>{formatRespuesta(g.answer)}</b>
-                {g.companions > 0 && ` · +${g.companions} acompañante(s)`}
-              </Text>
-            ))
-          )}
-        </Card>
-      )}
-
-      <Title order={4} mb="sm">Militancia</Title>
-      {filteredResponses.length === 0 && (
-        <Text>No hay respuestas de militantes todavía.</Text>
-      )}
-
-      {filteredResponses.map((r, idx) => (
-        <Card key={r.user_id ?? idx} mt="md" shadow="sm" p="lg">
-          <Text fw={600}>{r.user_full_name}</Text>
-          <Text c="dimmed" size="sm">
-            Colectivo: {r.user_domain || "-"}
-          </Text>
-          <Text>
-            <b>Respuesta:</b> {formatRespuesta(r.answer)}
-          </Text>
-          <Text>
-            <b>+ Simpas:</b> {r.companions_count ?? 0}
-          </Text>
-          {r.justification && (
-            <Text>
-              <b>Justificación:</b> {r.justification}
+            <Text size="sm" c="dimmed" mt="md">
+              Militantes con disponibilidad: {filteredAvailability.length}
+              {isPublic && ` · Visitantes con disponibilidad: ${guestAvailability.length}`}
             </Text>
+          </Card>
+
+          {/* ========================================
+              VISITANTES SIN CUENTA
+             ======================================== */}
+          {isPublic && (
+            <Card shadow="sm" p="lg" mb="lg">
+              <Title order={4} mb="sm">Visitantes sin cuenta ({guestAvailability.length})</Title>
+              {guestAvailability.length === 0 ? (
+                <Text size="sm" c="dimmed">Ningún visitante ha indicado disponibilidad todavía.</Text>
+              ) : (
+                guestAvailability.map((g, idx) => (
+                  <Text key={idx} size="sm">
+                    {g.guest_name || "Anónimo"} — <b>{formatHours(g.hours)}</b>
+                  </Text>
+                ))
+              )}
+            </Card>
           )}
-        </Card>
-      ))}
+
+          <Title order={4} mb="sm">Militancia</Title>
+          {filteredAvailability.length === 0 && (
+            <Text>No hay disponibilidad de militantes todavía.</Text>
+          )}
+
+          {filteredAvailability.map((a, idx) => (
+            <Card key={a.user_id ?? idx} mt="md" shadow="sm" p="lg">
+              <Text fw={600}>{a.user_full_name}</Text>
+              <Text c="dimmed" size="sm">
+                Colectivo: {a.user_domain || "-"}
+              </Text>
+              <Text>
+                <b>Franjas:</b> {formatHours(a.hours)}
+              </Text>
+            </Card>
+          ))}
+        </>
+      ) : (
+        <>
+          {/* ========================================
+              RESUMEN DE VOTOS (militancia y visitantes por separado)
+             ======================================== */}
+          <Card withBorder shadow="sm" p="lg" mb="lg">
+            <Title order={4} mb="md">Resumen de votos</Title>
+
+            <SimpleGrid cols={{ base: 2, sm: isPublic ? 4 : 2 }} spacing="md">
+              <div>
+                <Text size="xs" c="dimmed" tt="uppercase" fw={600}>Militancia</Text>
+                <Group gap="xs" mt={4}>
+                  <Badge color="teal" variant="light" size="lg">Sí {si}</Badge>
+                  <Badge color="red" variant="light" size="lg">No {no}</Badge>
+                </Group>
+                <Text size="sm" c="dimmed" mt={6}>+ Simpas: {simpas}</Text>
+                <Text size="sm" c="dimmed">Participación: {participationPct}%</Text>
+                <Text size="sm" fw={600} mt={2}>Asistencia: {si + simpas}</Text>
+              </div>
+
+              {isPublic && (
+                <div>
+                  <Text size="xs" c="dimmed" tt="uppercase" fw={600}>Visitantes</Text>
+                  <Group gap="xs" mt={4}>
+                    <Badge color="teal" variant="light" size="lg">Sí {guestSummary.si}</Badge>
+                    <Badge color="red" variant="light" size="lg">No {guestSummary.no}</Badge>
+                  </Group>
+                  <Text size="sm" c="dimmed" mt={6}>+ Acompañantes: {guestSummary.companions}</Text>
+                  <Text size="sm" fw={600} mt={2}>Asistencia: {guestSummary.si + guestSummary.companions}</Text>
+                </div>
+              )}
+            </SimpleGrid>
+
+            <Text fw={700} mt="md" size="lg">
+              Asistencia total: {si + simpas + (isPublic ? guestSummary.si + guestSummary.companions : 0)}
+            </Text>
+          </Card>
+
+          {/* ========================================
+              RESPUESTAS DE VISITANTES
+             ======================================== */}
+          {isPublic && (
+            <Card shadow="sm" p="lg" mb="lg">
+              <Title order={4} mb="sm">Visitantes sin cuenta ({guestResponses.length})</Title>
+              {guestResponses.length === 0 ? (
+                <Text size="sm" c="dimmed">Ningún visitante ha respondido todavía.</Text>
+              ) : (
+                guestResponses.map((g) => (
+                  <Text key={g.id} size="sm">
+                    {g.guest_name || "Anónimo"} — <b>{formatRespuesta(g.answer)}</b>
+                    {g.companions > 0 && ` · +${g.companions} acompañante(s)`}
+                  </Text>
+                ))
+              )}
+            </Card>
+          )}
+
+          <Title order={4} mb="sm">Militancia</Title>
+          {filteredResponses.length === 0 && (
+            <Text>No hay respuestas de militantes todavía.</Text>
+          )}
+
+          {filteredResponses.map((r, idx) => (
+            <Card key={r.user_id ?? idx} mt="md" shadow="sm" p="lg">
+              <Text fw={600}>{r.user_full_name}</Text>
+              <Text c="dimmed" size="sm">
+                Colectivo: {r.user_domain || "-"}
+              </Text>
+              <Text>
+                <b>Respuesta:</b> {formatRespuesta(r.answer)}
+              </Text>
+              <Text>
+                <b>+ Simpas:</b> {r.companions_count ?? 0}
+              </Text>
+              {r.justification && (
+                <Text>
+                  <b>Justificación:</b> {r.justification}
+                </Text>
+              )}
+            </Card>
+          ))}
+        </>
+      )}
     </Box>
   );
 }
