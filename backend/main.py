@@ -2690,14 +2690,12 @@ def respond_event_guest(
     raw_answer = (data.answer or "saved").strip().lower()
     if raw_answer in ["si", "sí", "yes"]:
         normalized_answer = "si"
-    elif raw_answer in ["no"]:
-        normalized_answer = "no"
     elif raw_answer in ["abstain", "abstener", "abstencion", "abstención"]:
         normalized_answer = "abstain"
     elif raw_answer in ["saved", "guardar", "recordar"]:
         normalized_answer = "saved"
     else:
-        raise HTTPException(400, "answer inválida (usa si, no, abstain o saved)")
+        raise HTTPException(400, "answer inválida (usa si, abstain o saved)")
 
     companions = int(data.companions or 0)
     if companions < 0:

@@ -10,18 +10,18 @@ export default function GuestEventResponse({ eventId }) {
   const [done, setDone] = useState(null);
   const [error, setError] = useState(null);
 
-  async function respond(answer) {
+  async function respond() {
     if (sending) return;
     setError(null);
 
     try {
-      setSending(answer);
-      await eventsAPI.respondGuest(eventId, { guestName, answer, companions });
-      setDone(answer);
+      setSending(true);
+      await eventsAPI.respondGuest(eventId, { guestName, answer: "si", companions });
+      setDone(true);
     } catch (e) {
       setError(e?.message || "No se pudo enviar la respuesta. Inténtalo de nuevo.");
     } finally {
-      setSending(null);
+      setSending(false);
     }
   }
 
@@ -31,10 +31,10 @@ export default function GuestEventResponse({ eventId }) {
         <Group gap="xs" mb={4}>
           <IconCheck size={20} color="var(--mantine-color-teal-6)" />
           <Text c="teal" fw={600}>
-            {done === "si" ? "¡Gracias por confirmar tu asistencia!" : "Gracias por responder."}
+            ¡Gracias por confirmar tu asistencia!
           </Text>
         </Group>
-        <Anchor component="button" type="button" size="sm" onClick={() => setDone(null)}>
+        <Anchor component="button" type="button" size="sm" onClick={() => setDone(false)}>
           Cambiar mi respuesta
         </Anchor>
       </Card>
@@ -44,7 +44,7 @@ export default function GuestEventResponse({ eventId }) {
   return (
     <Card shadow="sm" p="md" radius="md" mt="md">
       <Title order={5} mb="xs">
-        ¿Vas a asistir?
+        Confirma tu asistencia
       </Title>
       <Text size="sm" c="dimmed" mb="md">
         No hace falta cuenta ni email, solo tu nombre si quieres que lo sepamos.
@@ -68,14 +68,9 @@ export default function GuestEventResponse({ eventId }) {
 
         {error && <Text c="red" size="sm">{error}</Text>}
 
-        <Group grow>
-          <Button color="teal" loading={sending === "si"} disabled={!!sending} onClick={() => respond("si")}>
-            Sí, voy
-          </Button>
-          <Button color="red" variant="outline" loading={sending === "no"} disabled={!!sending} onClick={() => respond("no")}>
-            No puedo
-          </Button>
-        </Group>
+        <Button color="teal" loading={sending} disabled={sending} onClick={respond}>
+          Sí, voy
+        </Button>
       </Stack>
     </Card>
   );
