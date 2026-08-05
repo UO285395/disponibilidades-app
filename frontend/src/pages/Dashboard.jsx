@@ -6,7 +6,7 @@ import {
 } from "@mantine/core";
 import {
   IconCalendarTime, IconCalendarEvent, IconBuildingCommunity, IconDotsVertical,
-  IconUserShield, IconKey, IconLogout, IconBell,
+  IconUserShield, IconKey, IconLogout,
 } from "@tabler/icons-react";
 import { clearToken, eventsAPI } from "../api/api.js";
 import { useSessionUser } from "../hooks/useSessionUser.js";
@@ -14,7 +14,6 @@ import MobileWeekCalendar from "../components/MobileWeekCalendar.jsx";
 import EventsSection from "../components/EventsSection.jsx";
 import SpaceReservations from "../components/SpaceReservations.jsx";
 import ChangePasswordModal from "../components/ChangePasswordModal.jsx";
-import ReminderPrefsModal from "../components/ReminderPrefsModal.jsx";
 import SessionExpiredModal from "../components/SessionExpiredModal.jsx";
 
 function initials(name) {
@@ -31,7 +30,6 @@ export default function Dashboard() {
   const [offsetWeeks, setOffsetWeeks] = useState("0");
   const navigate = useNavigate();
   const [changePasswordOpened, setChangePasswordOpened] = useState(false);
-  const [reminderPrefsOpened, setReminderPrefsOpened] = useState(false);
   const [pendingEvents, setPendingEvents] = useState(0);
 
   // Conteo ligero de eventos sin responder para el badge de la pestaña.
@@ -99,9 +97,6 @@ export default function Dashboard() {
                 Panel de administración
               </Menu.Item>
             )}
-            <Menu.Item leftSection={<IconBell size={18} />} onClick={() => setReminderPrefsOpened(true)}>
-              Recordatorios
-            </Menu.Item>
             <Menu.Item leftSection={<IconKey size={18} />} onClick={() => setChangePasswordOpened(true)}>
               Cambiar contraseña
             </Menu.Item>
@@ -116,11 +111,6 @@ export default function Dashboard() {
       <ChangePasswordModal
         opened={changePasswordOpened}
         onClose={() => setChangePasswordOpened(false)}
-      />
-
-      <ReminderPrefsModal
-        opened={reminderPrefsOpened}
-        onClose={() => setReminderPrefsOpened(false)}
       />
 
       <Tabs defaultValue={defaultTab} variant="outline" keepMounted={false}>

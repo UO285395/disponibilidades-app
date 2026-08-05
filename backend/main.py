@@ -4534,6 +4534,11 @@ def _get_applicable_policies(db: Session, domain: str, tags: set[str] | None = N
 
 def _is_feature_enabled(db: Session, domain: str, feature: str, role: str = "user",
                         tags: set[str] | None = None, unit_id: int | None = None):
+    # Módulos eliminados en la distribución para comités externos: census y
+    # notifications requieren infraestructura adicional (correo/FCM) que estos
+    # comités no configuran. Nunca se habilitan, ni siquiera para superadmin.
+    if feature in {"census", "notifications"}:
+        return False
     if role == "superadmin":
         return True
 

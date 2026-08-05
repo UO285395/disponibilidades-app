@@ -5,7 +5,7 @@ import {
 } from "@mantine/core";
 import {
   IconCalendarEvent, IconCalendarTime, IconBuildingCommunity, IconUsers,
-  IconSitemap, IconAdjustments, IconClipboardList, IconChartBar, IconBell,
+  IconSitemap, IconAdjustments, IconChartBar,
   IconChevronDown, IconArrowLeft, IconLogout, IconDotsVertical,
 } from "@tabler/icons-react";
 import { clearToken } from "../api/api.js";
@@ -20,8 +20,6 @@ const AdminEvents = lazy(() => import("../components/AdminEvents.jsx"));
 const AdminAvailabilitiesCalendar = lazy(() => import("../components/AdminAvailabilitiesCalendar.jsx"));
 const AdminSpaces = lazy(() => import("../components/AdminSpaces.jsx"));
 const AdminDomainPolicies = lazy(() => import("../components/AdminDomainPolicies.jsx"));
-const AdminCensus = lazy(() => import("../components/AdminCensus.jsx"));
-const AdminNotifications = lazy(() => import("../components/AdminNotifications.jsx"));
 const AdminSurveys = lazy(() => import("../components/AdminSurveys.jsx"));
 const AdminOrgStructure = lazy(() => import("../components/AdminOrgStructure.jsx"));
 
@@ -34,9 +32,7 @@ const SECTIONS = [
   { value: "users", label: "Usuarios", icon: IconUsers, can: (u) => u.role === "superadmin" || u.users_enabled, render: (u) => <AdminUsers currentUser={u} /> },
   { value: "organigrama", label: "Organigrama", icon: IconSitemap, can: (u) => u.role === "admin" || u.role === "superadmin", render: () => <AdminOrgStructure /> },
   { value: "domain-policies", label: "Políticas", icon: IconAdjustments, can: (u) => u.role === "superadmin" || u.domain_policies_enabled, render: () => <AdminDomainPolicies /> },
-  { value: "censo", label: "Censo", icon: IconClipboardList, can: (u) => u.role === "superadmin" || u.census_enabled, render: () => <AdminCensus /> },
   { value: "surveys", label: "Encuestas", icon: IconChartBar, can: (u) => u.role === "superadmin" || u.surveys_enabled, render: () => <AdminSurveys /> },
-  { value: "notifications", label: "Notificaciones", icon: IconBell, can: (u) => u.role === "superadmin" || u.notifications_enabled, render: () => <AdminNotifications /> },
 ];
 
 export default function AdminDashboard() {
