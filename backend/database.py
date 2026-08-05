@@ -5,11 +5,12 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if DATABASE_URL:
-    # Railway Postgres
+    # PostgreSQL remoto (Railway, Neon, Supabase, Render…)
+    # Se exige SSL en cualquier proveedor remoto; SQLite local no pasa por aquí.
     engine = create_engine(
         DATABASE_URL,
         pool_pre_ping=True,
-        connect_args={"sslmode": "require"} if "railway" in DATABASE_URL else {}
+        connect_args={"sslmode": "require"},
     )
 else:
     # Modo local → SQLite

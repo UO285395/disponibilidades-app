@@ -236,6 +236,58 @@ cleanup_removed_finance_artifacts()
 org_service.ensure_org_hierarchy_schema_compatibility(engine, SessionLocal)
 
 
+def bootstrap_initial_admin():
+    """Crea el primer superadmin si la BD está vacía y las variables
+    INITIAL_ADMIN_EMAIL / INITIAL_ADMIN_PASSWORD están definidas.
+
+    Este mecanismo está pensado para el primer arranque en un servidor nuevo:
+    define las variables, despliega, entra a la app, y luego elimínalas del
+    panel de entorno para no dejar la contraseña expuesta.
+
+    Si el usuario ya existe (re-despliegue, reinicio) no hace nada.
+    """
+    initial_email = os.getenv("INITIAL_ADMIN_EMAIL", "").strip().lower()
+    initial_password = os.getenv("INITIAL_ADMIN_PASSWORD", "").strip()
+
+    if not initial_email or not initial_password:
+        return  # Variables no definidas: modo normal
+
+    from passlib.context import CryptContext as _CC
+    _pwd = _CC(schemes=["argon2"], deprecated="auto")
+
+    db = SessionLocal()
+    try:
+        existing = db.query(models.User).filter(models.User.email == initial_email).first()
+        if existing:
+            print(f"ℹ️  Bootstrap: el superadmin '{initial_email}' ya existe, sin cambios.")
+            return
+
+        # Asegurar que existe la unidad raíz (la crea si falta)
+        root_unit = org_service.get_root_unit(db)
+        if root_unit is None:
+            root_unit = org_service.ensure_colectivo_for_domain(db, initial_email.split("@")[-1])
+
+        admin = models.User(
+            email=initial_email,
+            full_name="Administrador",
+            hashed_password=_pwd.hash(initial_password),
+            role="superadmin",
+            org_unit_id=root_unit.id if root_unit else None,
+        )
+        db.add(admin)
+        db.commit()
+        print(f"✅ Bootstrap: superadmin '{initial_email}' creado. Elimina las variables "
+              "INITIAL_ADMIN_EMAIL e INITIAL_ADMIN_PASSWORD del servidor después de entrar.")
+    except Exception as exc:
+        db.rollback()
+        print(f"⚠️  Bootstrap fallido: {exc}")
+    finally:
+        db.close()
+
+
+bootstrap_initial_admin()
+
+
 # =========================================================
 # CONFIG JWT
 # =========================================================

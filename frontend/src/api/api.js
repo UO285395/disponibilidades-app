@@ -1,6 +1,9 @@
 import { Capacitor } from "@capacitor/core";
 
-const API_URL = "https://backend-disponibilidad-production.up.railway.app";
+// En producción se configura VITE_API_URL en las variables de entorno del
+// hosting (Render, Netlify, Vercel…). Si no se define, se usa la URL de Railway
+// para que la instalación original siga funcionando sin cambios.
+const API_URL = import.meta.env.VITE_API_URL || "https://backend-disponibilidad-production.up.railway.app";
 const AUTH_CHANGE_EVENT = "auth-changed";
 
 const TOKEN_KEY = "token";
