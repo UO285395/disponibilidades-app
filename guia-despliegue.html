@@ -1,0 +1,882 @@
+<title>Guía de despliegue — App de Disponibilidad</title>
+<style>
+  /* ─── Tokens ────────────────────────────────────────────── */
+  :root {
+    --bg:        #F5F6FA;
+    --surface:   #FFFFFF;
+    --border:    #DDE1EE;
+    --text:      #1C2035;
+    --muted:     #6B7591;
+    --accent:    #3451D1;
+    --accent-lt: #EBF0FF;
+    --tip:       #1A8A5E;
+    --tip-lt:    #E6F7F1;
+    --warn:      #C05C1A;
+    --warn-lt:   #FEF3EB;
+    --step-bg:   #3451D1;
+    --code-bg:   #ECEEF6;
+    --radius:    10px;
+    --shadow:    0 2px 12px rgba(20,30,80,.07);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:        #0D0F1A;
+      --surface:   #161929;
+      --border:    #252A42;
+      --text:      #DDE1F0;
+      --muted:     #7A81A5;
+      --accent:    #6B8EFF;
+      --accent-lt: #1A2040;
+      --tip:       #34C88A;
+      --tip-lt:    #0D2921;
+      --warn:      #F09050;
+      --warn-lt:   #2A1A0A;
+      --step-bg:   #4D6BFF;
+      --code-bg:   #1C2038;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg:#F5F6FA;--surface:#FFFFFF;--border:#DDE1EE;--text:#1C2035;
+    --muted:#6B7591;--accent:#3451D1;--accent-lt:#EBF0FF;
+    --tip:#1A8A5E;--tip-lt:#E6F7F1;--warn:#C05C1A;--warn-lt:#FEF3EB;
+    --step-bg:#3451D1;--code-bg:#ECEEF6;
+  }
+  :root[data-theme="dark"] {
+    --bg:#0D0F1A;--surface:#161929;--border:#252A42;--text:#DDE1F0;
+    --muted:#7A81A5;--accent:#6B8EFF;--accent-lt:#1A2040;
+    --tip:#34C88A;--tip-lt:#0D2921;--warn:#F09050;--warn-lt:#2A1A0A;
+    --step-bg:#4D6BFF;--code-bg:#1C2038;
+  }
+
+  /* ─── Reset & base ──────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    color: var(--text);
+    background: var(--bg);
+  }
+
+  /* ─── Layout ─────────────────────────────────────────────── */
+  .wrap   { max-width: 780px; margin: 0 auto; padding: 0 24px 80px; }
+  .spacer { height: 48px; }
+
+  /* ─── Header ─────────────────────────────────────────────── */
+  .header {
+    background: var(--accent);
+    color: #fff;
+    padding: 48px 24px 40px;
+  }
+  .header-inner { max-width: 780px; margin: 0 auto; }
+  .header-eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    opacity: .75;
+    margin-bottom: 12px;
+  }
+  .header h1 {
+    font-size: clamp(26px, 5vw, 38px);
+    font-weight: 700;
+    line-height: 1.2;
+    text-wrap: balance;
+    margin-bottom: 12px;
+  }
+  .header-sub {
+    font-size: 16px;
+    opacity: .85;
+    max-width: 560px;
+    text-wrap: balance;
+  }
+
+  /* ─── TOC ────────────────────────────────────────────────── */
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    margin-top: 32px;
+    box-shadow: var(--shadow);
+  }
+  .toc-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+  .toc ol { padding-left: 20px; }
+  .toc li { margin: 4px 0; }
+  .toc a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 14px;
+  }
+  .toc a:hover { text-decoration: underline; }
+
+  /* ─── Prereq badges ─────────────────────────────────────── */
+  .accounts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 24px 0;
+  }
+  .account-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    box-shadow: var(--shadow);
+    flex: 1 1 200px;
+    min-width: 180px;
+  }
+  .account-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .account-info { display: flex; flex-direction: column; }
+  .account-name { font-weight: 600; font-size: 15px; }
+  .account-url  { font-size: 12px; color: var(--muted); }
+  .account-free {
+    font-size: 10px;
+    background: var(--tip-lt);
+    color: var(--tip);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    margin-top: 2px;
+    display: inline-block;
+    width: fit-content;
+  }
+
+  /* ─── Step sections ─────────────────────────────────────── */
+  .step-section {
+    margin-top: 40px;
+  }
+  .step-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .step-badge {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--step-bg);
+    color: #fff;
+    font-size: 16px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .step-section h2 {
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.3;
+  }
+  .step-section h2 .service {
+    color: var(--accent);
+  }
+
+  /* ─── Card ───────────────────────────────────────────────── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .card + .card { margin-top: 12px; }
+
+  /* ─── Sub-steps ─────────────────────────────────────────── */
+  .substep {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: 0 14px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    align-items: start;
+  }
+  .substep:last-child { border-bottom: none; }
+  .substep-num {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--accent-lt);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 2px;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .substep-body {}
+  .substep-action {
+    font-weight: 600;
+    margin-bottom: 4px;
+    font-size: 15px;
+  }
+  .substep-desc {
+    font-size: 14px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  /* ─── Code / values ─────────────────────────────────────── */
+  code, .mono {
+    font-family: 'Courier New', 'Menlo', monospace;
+    font-size: 13px;
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 2px 6px;
+    color: var(--text);
+  }
+  .code-block {
+    background: var(--code-bg);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    font-family: 'Courier New', 'Menlo', monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    overflow-x: auto;
+    margin: 8px 0;
+    border: 1px solid var(--border);
+  }
+  .code-label {
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  /* ─── Env var table ─────────────────────────────────────── */
+  .env-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    margin: 10px 0;
+  }
+  .env-table th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .env-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .env-table tr:last-child td { border-bottom: none; }
+  .env-table td:first-child code { font-weight: 700; }
+  .env-optional { color: var(--muted); font-style: italic; font-size: 12px; }
+  .env-req { color: var(--warn); font-size: 12px; font-weight: 700; }
+  .table-wrap { overflow-x: auto; }
+
+  /* ─── Callout boxes ──────────────────────────────────────── */
+  .callout {
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    margin: 16px 0;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    font-size: 14px;
+  }
+  .callout-icon { font-size: 18px; flex-shrink: 0; line-height: 1.5; }
+  .callout-body { line-height: 1.65; }
+  .callout-body strong { display: block; margin-bottom: 2px; }
+  .callout.tip   { background: var(--tip-lt); color: var(--tip); }
+  .callout.warn  { background: var(--warn-lt); color: var(--warn); }
+  .callout.info  { background: var(--accent-lt); color: var(--accent); }
+  .callout.tip  .callout-body,
+  .callout.warn .callout-body,
+  .callout.info .callout-body { color: var(--text); }
+
+  /* ─── Screenshot placeholder ─────────────────────────────── */
+  .screenshot {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    margin: 10px 0;
+    font-size: 13px;
+    color: var(--muted);
+    font-style: italic;
+  }
+  .screenshot::before {
+    content: '🖥 ';
+  }
+
+  /* ─── Section title separators ──────────────────────────── */
+  .section-eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-top: 48px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+  }
+
+  /* ─── Final checklist ────────────────────────────────────── */
+  .checklist { list-style: none; padding: 0; }
+  .checklist li {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 15px;
+  }
+  .checklist li:last-child { border-bottom: none; }
+  .check-box {
+    width: 22px; height: 22px;
+    border: 2px solid var(--border);
+    border-radius: 5px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  /* ─── Footer ─────────────────────────────────────────────── */
+  .footer {
+    border-top: 1px solid var(--border);
+    padding: 24px 0 0;
+    margin-top: 48px;
+    font-size: 13px;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  @media (max-width: 520px) {
+    .header { padding: 32px 20px 28px; }
+    .wrap { padding: 0 16px 60px; }
+  }
+</style>
+
+<!-- ─── Header ─────────────────────────────────────────────────── -->
+<header class="header">
+  <div class="header-inner">
+    <p class="header-eyebrow">Documento de instalación</p>
+    <h1>Poner en marcha la aplicación de disponibilidad</h1>
+    <p class="header-sub">Guía paso a paso para instalar la aplicación en un servidor nuevo.</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- ─── Índice ──────────────────────────────────────────────── -->
+  <nav class="toc">
+    <p class="toc-title">Contenido</p>
+    <ol>
+      <li><a href="#cuentas">Cuentas necesarias</a></li>
+      <li><a href="#base-datos">Paso 1 — Crear la base de datos (Neon)</a></li>
+      <li><a href="#backend">Paso 2 — Desplegar el servidor (Render)</a></li>
+      <li><a href="#frontend">Paso 3 — Publicar la web (Netlify)</a></li>
+      <li><a href="#primer-acceso">Paso 4 — Primer acceso y configuración</a></li>
+      <li><a href="#checklist">Lista de comprobación final</a></li>
+    </ol>
+  </nav>
+
+  <div class="spacer"></div>
+
+  <!-- ─── Cuentas ──────────────────────────────────────────────── -->
+  <section id="cuentas">
+    <p class="section-eyebrow">Antes de empezar</p>
+    <div class="step-section">
+      <div class="step-header">
+        <div style="font-size:26px">📋</div>
+        <h2>Cuentas necesarias</h2>
+      </div>
+      <p style="margin-bottom:18px; font-size:15px; color:var(--muted);">
+        Necesitarás crear cuenta en tres servicios gratuitos.
+      </p>
+      <div class="accounts">
+        <div class="account-card">
+          <div class="account-icon" style="background:#1c1c1e; color:#fff;">🐙</div>
+          <div class="account-info">
+            <span class="account-name">GitHub</span>
+            <span class="account-url">github.com</span>
+            <span class="account-free">GRATUITO</span>
+          </div>
+        </div>
+        <div class="account-card">
+          <div class="account-icon" style="background:#00E699; color:#0a0a0a;">⚡</div>
+          <div class="account-info">
+            <span class="account-name">Neon</span>
+            <span class="account-url">neon.tech</span>
+            <span class="account-free">GRATUITO</span>
+          </div>
+        </div>
+        <div class="account-card">
+          <div class="account-icon" style="background:#46E3B7; color:#0a2a1a;">☁️</div>
+          <div class="account-info">
+            <span class="account-name">Render</span>
+            <span class="account-url">render.com</span>
+            <span class="account-free">GRATUITO</span>
+          </div>
+        </div>
+        <div class="account-card">
+          <div class="account-icon" style="background:#00AD9F; color:#fff;">🌐</div>
+          <div class="account-info">
+            <span class="account-name">Netlify</span>
+            <span class="account-url">netlify.com</span>
+            <span class="account-free">GRATUITO</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout info">
+        <span class="callout-icon">ℹ️</span>
+        <div class="callout-body">
+          <strong>URL del repositorio de GitHub</strong> https://github.com/UO285395/disponibilidades-app/tree/distribucion-comites </br>
+ Necesitarás esa URL en los Pasos 2 y 3.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── PASO 1: Neon ─────────────────────────────────────────── -->
+  <section id="base-datos">
+    <p class="section-eyebrow">Paso 1</p>
+    <div class="step-section">
+      <div class="step-header">
+        <div class="step-badge">1</div>
+        <h2>Crear la base de datos en <span class="service">Neon</span></h2>
+      </div>
+      <p style="margin-bottom:16px; font-size:15px; color:var(--muted);">
+        La base de datos es donde la aplicación guarda toda la información (usuarios, eventos, disponibilidades…). Neon la ofrece gratis para proyectos pequeños.
+      </p>
+
+      <div class="card">
+        <div class="substep">
+          <div class="substep-num">1</div>
+          <div class="substep-body">
+            <p class="substep-action">Entra en <a href="https://neon.tech" target="_blank" style="color:var(--accent);">neon.tech</a> y crea una cuenta</p>
+            <p class="substep-desc">Haz clic en <strong>Sign Up</strong>. Puedes registrarte con tu cuenta de Google o con un email y contraseña.</p>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">2</div>
+          <div class="substep-body">
+            <p class="substep-action">Crea un nuevo proyecto</p>
+            <p class="substep-desc">Después de entrar, Neon te pedirá que crees un proyecto. Ponle el nombre que quieras (por ejemplo: <code>disponibilidad</code>). Elige la región <strong>Europe (Frankfurt)</strong>. Haz clic en <strong>Create project</strong>.</p>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">3</div>
+          <div class="substep-body">
+            <p class="substep-action">Copia la cadena de conexión</p>
+            <p class="substep-desc">
+              Neon mostrará una pantalla con la información de conexión. Haz clic en el botón <strong>Copy</strong> que hay junto al campo llamado <strong>Connection string</strong> o <strong>DATABASE_URL</strong>. Guarda ese texto en un bloc de notas, lo necesitarás pronto.<br><br>
+              El texto copiado tendrá un aspecto parecido a este:
+            </p>
+            <div class="code-label">Ejemplo (el tuyo será diferente)</div>
+            <div class="code-block">postgresql://usuario:contraseña@ep-abc-123.eu-central-1.aws.neon.tech/neondb?sslmode=require</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout tip">
+        <span class="callout-icon">✅</span>
+        <div class="callout-body">
+          <strong>Listo con Neon</strong>
+          Ya tienes tu base de datos. Guarda bien la cadena de conexión que copiaste: es tu <strong>DATABASE_URL</strong> y la usarás en el siguiente paso.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── PASO 2: Render backend ───────────────────────────────── -->
+  <section id="backend">
+    <p class="section-eyebrow">Paso 2</p>
+    <div class="step-section">
+      <div class="step-header">
+        <div class="step-badge">2</div>
+        <h2>Desplegar el servidor en <span class="service">Render</span></h2>
+      </div>
+      <p style="margin-bottom:16px; font-size:15px; color:var(--muted);">
+        El servidor es el motor de la aplicación. Render lo ejecuta de forma gratuita y lo mantiene en marcha.
+      </p>
+
+      <div class="callout warn">
+        <span class="callout-icon">⚠️</span>
+        <div class="callout-body">
+          <strong>El servidor puede tardar unos segundos en responder la primera vez</strong>
+          En el plan gratuito, si nadie usa la esta usando se pone en reposo para no consumir recursos. Al volver a entrar, tarda unos segundos en arrancar. Esto es normal.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="substep">
+          <div class="substep-num">1</div>
+          <div class="substep-body">
+            <p class="substep-action">Entra en <a href="https://render.com" target="_blank" style="color:var(--accent);">render.com</a> y crea una cuenta</p>
+            <p class="substep-desc">Haz clic en <strong>Get Started for Free</strong>. Puedes usar tu cuenta de GitHub para registrarte (es lo más cómodo).</p>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">2</div>
+          <div class="substep-body">
+            <p class="substep-action">Crea un nuevo servicio web</p>
+            <p class="substep-desc">
+              En el panel de Render, haz clic en el botón <strong>+ New</strong> (arriba a la derecha) y luego en <strong>Web Service</strong>.
+            </p>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">3</div>
+          <div class="substep-body">
+            <p class="substep-action">Conecta el repositorio de GitHub</p>
+            <p class="substep-desc">
+              Render te pedirá que conectes tu cuenta de GitHub. Haz clic en <strong>Connect account</strong> y autoriza el acceso. Después, busca el repositorio de la aplicación (la URL que te proporcionó la persona técnica) y haz clic en <strong>Connect</strong>.
+            </p>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">4</div>
+          <div class="substep-body">
+            <p class="substep-action">Configura el servicio</p>
+            <p class="substep-desc">Rellena los campos del formulario así:</p>
+            <div class="table-wrap">
+              <table class="env-table" style="margin-top:8px;">
+                <tr>
+                  <th>Campo</th>
+                  <th>Valor</th>
+                </tr>
+                <tr>
+                  <td><strong>Name</strong></td>
+                  <td>disponibilidad-backend <span class="env-optional">(o el nombre que quieras)</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Region</strong></td>
+                  <td>Frankfurt (EU Central)</td>
+                </tr>
+                <tr>
+                  <td><strong>Branch</strong></td>
+                  <td><code>distribucion-comites</code> </br> <strong>IMPORTANTE, una branch es una "version" de la aplicacion, es importante escoger la adecuada</strong></td>
+                </tr>
+                <tr>
+                  <td><strong>Root Directory</strong></td>
+                  <td><code>backend</code></td>
+                </tr>
+                <tr>
+                  <td><strong>Runtime</strong></td>
+                  <td>Python 3</td>
+                </tr>
+                <tr>
+                  <td><strong>Build Command</strong></td>
+                  <td><code>pip install -r requirements.txt</code></td>
+                </tr>
+                <tr>
+                  <td><strong>Start Command</strong></td>
+                  <td><code>uvicorn main:app --host 0.0.0.0 --port $PORT</code></td>
+                </tr>
+                <tr>
+                  <td><strong>Instance Type</strong></td>
+                  <td>Free</td>
+                </tr>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">5</div>
+          <div class="substep-body">
+            <p class="substep-action">Añade las variables de entorno</p>
+            <p class="substep-desc">
+              Más abajo en el mismo formulario verás una sección llamada <strong>Environment Variables</strong>. Haz clic en <strong>Add Environment Variable</strong> y añade estas cuatro variables:
+            </p>
+            <div class="table-wrap">
+              <table class="env-table" style="margin-top:10px;">
+                <tr>
+                  <th style="width:220px;">Nombre (Key)</th>
+                  <th>Valor (Value)</th>
+                </tr>
+                <tr>
+                  <td><code>DATABASE_URL</code> <span class="env-req">obligatorio</span></td>
+                  <td>Pega aquí la cadena de conexión que copiaste de Neon en el Paso 1</td>
+                </tr>
+                <tr>
+                  <td><code>SECRET_KEY</code> <span class="env-req">obligatorio</span></td>
+                  <td>Una contraseña larga y aleatoria. Puedes inventarte una (mezcla letras, números y símbolos, mínimo 32 caracteres). <strong>No la pierdas.</strong></td>
+                </tr>
+                <tr>
+                  <td><code>INITIAL_ADMIN_EMAIL</code> <span class="env-req">solo 1ª vez</span></td>
+                  <td>El email con el que quieres entrar como administrador por primera vez (p.ej. <code>admin@tupartido.es</code>)</td>
+                </tr>
+                <tr>
+                  <td><code>INITIAL_ADMIN_PASSWORD</code> <span class="env-req">solo 1ª vez</span></td>
+                  <td>La contraseña provisional para ese primer administrador. Cámbiala en la app justo después de entrar.</td>
+                </tr>
+              </table>
+            </div>
+            <div class="callout warn" style="margin-top:12px;">
+              <span class="callout-icon">⚠️</span>
+              <div class="callout-body">
+                <strong>Importante — elimina las variables de arranque después del primer acceso</strong>
+                Las variables <code>INITIAL_ADMIN_EMAIL</code> e <code>INITIAL_ADMIN_PASSWORD</code> son solo para crear el primer administrador. Una vez hayas entrado a la app con esas credenciales, vuelve a Render, edita el servicio y <strong>elimina esas dos variables</strong>. Así nadie podrá usarlas para acceder.
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">6</div>
+          <div class="substep-body">
+            <p class="substep-action">Haz clic en «Create Web Service» y espera</p>
+            <p class="substep-desc">
+              Render tardará entre 3 y 8 minutos en preparar y arrancar el servidor la primera vez. Verás un registro de actividad en pantalla. Cuando aparezca el mensaje <strong>Your service is live 🎉</strong>, el servidor está listo.<br><br>
+              Apunta la URL del servidor: aparece en la parte superior de la página, con un formato parecido a:
+            </p>
+            <div class="code-block">https://disponibilidad-backend.onrender.com</div>
+            <p class="substep-desc" style="margin-top:8px;">Guárdala, la necesitarás en el Paso 3.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── PASO 3: Netlify frontend ─────────────────────────────── -->
+  <section id="frontend">
+    <p class="section-eyebrow">Paso 3</p>
+    <div class="step-section">
+      <div class="step-header">
+        <div class="step-badge">3</div>
+        <h2>Publicar la web en <span class="service">Netlify</span></h2>
+      </div>
+      <p style="margin-bottom:16px; font-size:15px; color:var(--muted);">
+        La web es lo que verán los usuarios en el navegador. Netlify la publica de forma gratuita y rápida.
+      </p>
+
+      <div class="card">
+        <div class="substep">
+          <div class="substep-num">1</div>
+          <div class="substep-body">
+            <p class="substep-action">Entra en <a href="https://netlify.com" target="_blank" style="color:var(--accent);">netlify.com</a> y crea una cuenta</p>
+            <p class="substep-desc">Haz clic en <strong>Sign up</strong>. Puedes registrarte con tu cuenta de GitHub.</p>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">2</div>
+          <div class="substep-body">
+            <p class="substep-action">Crea un nuevo sitio desde GitHub</p>
+            <p class="substep-desc">En el panel de Netlify, haz clic en <strong>Add new site → Import an existing project</strong>. Elige <strong>GitHub</strong> y autoriza el acceso si te lo pide. Después, selecciona el repositorio de la aplicación.</p>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">3</div>
+          <div class="substep-body">
+            <p class="substep-action">Configura la publicación</p>
+            <p class="substep-desc">Rellena los campos de configuración así:</p>
+            <div class="table-wrap">
+              <table class="env-table" style="margin-top:8px;">
+                <tr><th>Campo</th><th>Valor</th></tr>
+                <tr>
+                  <td><strong>Branch to deploy</strong></td>
+                  <td><code>distribucion-comites</code></td>
+                </tr>
+                <tr>
+                  <td><strong>Base directory</strong></td>
+                  <td><code>frontend</code></td>
+                </tr>
+                <tr>
+                  <td><strong>Build command</strong></td>
+                  <td><code>npm run build</code></td>
+                </tr>
+                <tr>
+                  <td><strong>Publish directory</strong></td>
+                  <td><code>frontend/dist</code></td>
+                </tr>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">4</div>
+          <div class="substep-body">
+            <p class="substep-action">Añade la variable de entorno antes de publicar</p>
+            <p class="substep-desc">
+              En esa misma pantalla, busca la sección <strong>Environment variables</strong> (puede que tengas que hacer clic en <strong>Show advanced</strong>). Añade esta variable:
+            </p>
+            <div class="table-wrap">
+              <table class="env-table" style="margin-top:8px;">
+                <tr>
+                  <th style="width:200px;">Nombre (Key)</th>
+                  <th>Valor (Value)</th>
+                </tr>
+                <tr>
+                  <td><code>VITE_API_URL</code> <span class="env-req">obligatorio</span></td>
+                  <td>La URL del servidor que guardaste al final del Paso 2 (p.ej. <code>https://disponibilidad-backend.onrender.com</code>). <strong>Sin barra al final.</strong></td>
+                </tr>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">5</div>
+          <div class="substep-body">
+            <p class="substep-action">Haz clic en «Deploy site»</p>
+            <p class="substep-desc">
+              Netlify tardará 1–3 minutos en construir y publicar la web. Cuando termine, verás un enlace verde con la dirección de tu web, algo como:
+            </p>
+            <div class="code-block">https://nombre-aleatorio-12345.netlify.app</div>
+            <p class="substep-desc" style="margin-top:8px;">
+              Puedes cambiar ese nombre por uno más legible en <strong>Site settings → Domain management → Site name</strong>.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout tip">
+        <span class="callout-icon">✅</span>
+        <div class="callout-body">
+          <strong>La web ya está publicada</strong>
+          Ahora tienes la aplicación en marcha. Cualquier miembro del comité puede acceder desde el navegador, sin instalar nada.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── PASO 4: Primer acceso ────────────────────────────────── -->
+  <section id="primer-acceso">
+    <p class="section-eyebrow">Paso 4</p>
+    <div class="step-section">
+      <div class="step-header">
+        <div class="step-badge">4</div>
+        <h2>Primer acceso y configuración inicial</h2>
+      </div>
+      <p style="margin-bottom:16px; font-size:15px; color:var(--muted);">
+        La primera vez que entres tendrás que configurar la estructura básica de la organización.
+      </p>
+
+      <div class="card">
+        <div class="substep">
+          <div class="substep-num">1</div>
+          <div class="substep-body">
+            <p class="substep-action">Entra en la aplicación con el administrador provisional</p>
+            <p class="substep-desc">
+              Abre la URL de Netlify en el navegador. En la pantalla de inicio de sesión, escribe el email y la contraseña que pusiste en las variables <code>INITIAL_ADMIN_EMAIL</code> e <code>INITIAL_ADMIN_PASSWORD</code> durante el Paso 2.
+            </p>
+            <div class="callout info" style="margin-top:10px;">
+              <span class="callout-icon">ℹ️</span>
+              <div class="callout-body">Si la pantalla tarda mucho en cargar la primera vez, es normal.</div>
+            </div>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">2</div>
+          <div class="substep-body">
+            <p class="substep-action">Cambia la contraseña</p>
+            <p class="substep-desc">
+              Ve a tu perfil (icono de usuario arriba a la derecha) y cambia la contraseña.            </p>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">3</div>
+          <div class="substep-body">
+            <p class="substep-action">Elimina las variables de arranque en Render</p>
+            <p class="substep-desc">
+              Vuelve a <a href="https://render.com" target="_blank" style="color:var(--accent);">render.com</a>, entra en tu servicio y ve a <strong>Environment</strong>. Elimina las variables <code>INITIAL_ADMIN_EMAIL</code> e <code>INITIAL_ADMIN_PASSWORD</code>. Render pedirá confirmación para reiniciar el servicio: acepta. Este paso es obligatorio para proteger la aplicación.
+            </p>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">4</div>
+          <div class="substep-body">
+            <p class="substep-action">Configura la estructura del comité</p>
+            <p class="substep-desc">
+              En el panel de administración verás la sección <strong>Organigrama</strong>. Desde allí podrás crear los colectivos y comites necesarios. Esto es importante para evitar el horizontalismo.
+            </p>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">5</div>
+          <div class="substep-body">
+            <p class="substep-action">Añade el resto de militantes</p>
+            <p class="substep-desc">
+              Ve a <strong>Usuarios → Añadir usuario</strong> para crear las cuentas de los demás. La contraseña provisional la estableces tú; ellos podrán cambiarla al entrar.
+
+		Por defecto, deberias asignar a cada militante a su colectivo de base aunque sea miembro del comite. Como miembro del comite asigna solo a aquellas personas que quieras qu etengan permiso sobre estructuras inferiores.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+ 
+  <!-- ─── Mantener servidor activo ────────────────────────────── -->
+  <section>
+    <p class="section-eyebrow">Opcional pero recomendado</p>
+    <div class="step-section">
+      <div class="step-header">
+        <div style="font-size:26px">⏰</div>
+        <h2>Evitar que el servidor entre en reposo</h2>
+      </div>
+      <p style="margin-bottom:16px; font-size:15px; color:var(--muted);">
+        En el plan gratuito de Render, el servidor se "duerme" si nadie lo usa durante 15 minutos.
+        Para evitarlo (ahorrarse esos segundos de carga), configura un ping automático gratuito con <strong>cron-job.org</strong>.
+      </p>
+      <div class="card">
+        <div class="substep">
+          <div class="substep-num">1</div>
+          <div class="substep-body">
+            <p class="substep-action">Entra en <a href="https://cron-job.org" target="_blank" style="color:var(--accent);">cron-job.org</a> y crea una cuenta gratuita</p>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">2</div>
+          <div class="substep-body">
+            <p class="substep-action">Crea un nuevo cronjob</p>
+            <p class="substep-desc">Haz clic en <strong>CREATE CRONJOB</strong> y rellena:
+            <ul style="margin-top:8px; padding-left:1.2rem; line-height:2;">
+              <li><strong>URL:</strong> la URL de Render seguida de <code>/docs</code> (ej: <code>https://disponibilidad-backend.onrender.com/docs</code>)</li>
+              <li><strong>Execution schedule:</strong> <em>Every 10 minutes</em></li>
+            </ul>
+            </p>
+          </div>
+        </div>
+        <div class="substep">
+          <div class="substep-num">3</div>
+          <div class="substep-body">
+            <p class="substep-action">Guarda y olvídate</p>
+            <p class="substep-desc">A partir de ahora, cron-job.org enviará un pequeño mensaje al servidor cada 10 minutos para mantenerlo despierto. No se requiere ninguna otra configuración.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <p>Aplicación de disponibilidad CJC</p>
+  </footer>
+</div>

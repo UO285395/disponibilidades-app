@@ -572,8 +572,32 @@ class ChangePassword(BaseModel):
     confirm_new_password: str
 
 
+class EventCreate(BaseModel):
+    title: str
+    description: str | None = None
+    date: str
+    start_time: str | None = None
+    allowed_domain: str | None = None
+
+    visibility: str = "internal"
+    event_type: str = "participativo"
+
+    location: str | None = None
+    external_url: str | None = None
+    attachments: list[dict] | None = None
+    metadata: dict | None = None
+
+    is_recurring: bool = False
+    recurrence_rule: str | None = None
+
+    org_unit_id: int | None = None
+    distribution_mode: str | None = None
+    target_unit_ids: list[int] | None = None
 
 
+class EventResponseCreate(BaseModel):
+    answer: str
+    justification: str | None = None
 
 
 
