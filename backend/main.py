@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Body, Query, Request, Response
+﻿from fastapi import FastAPI, Depends, HTTPException, Body, Query, Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -9,25 +9,15 @@ from jose import jwt, JWTError
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 
-import base64
-import csv
 import hashlib
 import html
-import io
-import importlib
 import json
 import logging
 import os
 import secrets
-import socket
-import smtplib
 import threading
 import urllib.error
 import urllib.request
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
 
 import models
 from models import (
@@ -36,13 +26,10 @@ from models import (
     Event,
     EventResponse,
     EventCompanion,
-    EventReminder,
     EventAvailabilitySlot,
     GuestEventAvailabilitySlot,
     GuestResponse,
     GuestPolicy,
-    CensusConfig,
-    CensusField,
     Survey,
     SurveyField,
     SurveyResponse,
@@ -486,9 +473,9 @@ def maybe_cleanup_expired_data(db: Session):
     """Ejecuta la limpieza como mucho una vez por semana.
 
     Se engancha al mismo heartbeat que ya despierta el planificador de
-    recordatorios (ver _reminder_scheduler_loop), así que no añade ningún
-    hilo ni wake-up nuevo: solo una consulta de más en un tick que de todas
-    formas ya se estaba ejecutando.
+    limpieza (_cleanup_loop), así que no añade ningún hilo ni wake-up
+    nuevo: solo una consulta de más en un tick que de todas formas ya se
+    estaba ejecutando.
     """
     global _last_cleanup_at
     now = datetime.utcnow()
@@ -585,52 +572,34 @@ class ChangePassword(BaseModel):
     confirm_new_password: str
 
 
-class DeviceTokenRegister(BaseModel):
-    token: str
-    platform: str = "android"
-    device_id: str | None = None
-    device_identifier: str | None = None
-    user_role: str | None = None
-    domain_tag: str | None = None
-
-
-class AdminNotificationSend(BaseModel):
-    scope: str  # colectivo (estructura) | users | tag | all (legacy)
-    title: str
-    body: str
-    collective: str | None = None  # legacy (dominio); usar org_unit_id
-    org_unit_id: int | None = None  # estructura destino (incluye su rama)
-    user_ids: list[int] | None = None
-    group_tag: str | None = None  # etiqueta destino (dentro de tu ámbito)
-
-class AvailabilityCreate(BaseModel):
-    date: str
-    start_time: str
-    end_time: str
-
 class EventCreate(BaseModel):
     title: str
-    description: str | None
+    description: str | None = None
     date: str
-    start_time: str | None
-    allowed_domain: str | None
-    visibility: str | None = None
-    event_type: str | None = None
+    start_time: str | None = None
+    allowed_domain: str | None = None
+
+    visibility: str = "internal"
+    event_type: str = "participativo"
+
     location: str | None = None
     external_url: str | None = None
-    metadata: dict | None = None
-    is_recurring: bool | None = False
-    recurrence_rule: str | None = None
-    # Organigrama: unidad propietaria + modo de distribución.
-    org_unit_id: int | None = None
-    distribution_mode: str | None = None  # unit_only | subtree | custom
-    target_unit_ids: list[int] | None = None
-    # Adjuntos por enlace: lista de {name, url}.
     attachments: list[dict] | None = None
+    metadata: dict | None = None
+
+    is_recurring: bool = False
+    recurrence_rule: str | None = None
+
+    org_unit_id: int | None = None
+    distribution_mode: str | None = None
+    target_unit_ids: list[int] | None = None
+
 
 class EventResponseCreate(BaseModel):
     answer: str
-    justification: str | None
+    justification: str | None = None
+
+
 
 
 class EventAvailabilitySlotCreate(BaseModel):
@@ -641,32 +610,13 @@ class EventCompanionUpdate(BaseModel):
     count: int
 
 
-class EventReminderCreate(BaseModel):
-    # Minutos antes del evento en que avisar (p. ej. 60 = 1h antes, 1440 = 1 día).
-    minutes_before: int = 120
-    channels: list[str] = ["push"]
 
 
-class ReminderPrefsUpdate(BaseModel):
-    reminder_email: str | None = None
-    availability_reminder_opt_in: bool | None = None
 
 
-class CensusFieldCreate(BaseModel):
-    id: int | None = None
-    label: str
-    field_type: str = "text"
-    required: bool = True
-    order_index: int = 0
-    options: list[str] | None = None
-
-class CensusConfigCreate(BaseModel):
-    email_to: str
-    fields: list[CensusFieldCreate]
 
 
-class CensusTestEmailRequest(BaseModel):
-    email_to: str | None = None
+
 
 
 class SurveyFieldCreate(BaseModel):
@@ -3296,892 +3246,6 @@ def update_my_event_companions(
 
 
 # =========================================================
-# RECORDATORIOS DE EVENTO (opt-in del usuario)
-# =========================================================
-def _event_datetime(event) -> datetime | None:
-    """Combina fecha (YYYY-MM-DD) y hora (HH:MM) del evento. Si no hay hora, se
-    toma el inicio del día."""
-    if not event.date:
-        return None
-    try:
-        time_part = (event.start_time or "00:00")[:5]
-        return datetime.fromisoformat(f"{event.date}T{time_part}:00")
-    except (ValueError, TypeError):
-        try:
-            return datetime.fromisoformat(f"{event.date}T00:00:00")
-        except (ValueError, TypeError):
-            return None
-
-
-@app.get("/my-event-reminders")
-def my_event_reminders(
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db),
-):
-    user = get_user_from_token(cred.credentials, db)
-    items = db.query(EventReminder).filter(EventReminder.user_id == user.id).all()
-    return [
-        {
-            "event_id": r.event_id,
-            "remind_at": r.remind_at,
-            "channels": (r.channels or "push").split(","),
-            "sent": bool(r.sent),
-        }
-        for r in items
-    ]
-
-
-@app.put("/events/{event_id}/reminder")
-def set_event_reminder(
-    event_id: int,
-    data: EventReminderCreate,
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db),
-):
-    user = get_user_from_token(cred.credentials, db)
-
-    event = db.query(Event).filter(Event.id == event_id).first()
-    if not event:
-        raise HTTPException(404, "Evento no encontrado")
-    _ensure_event_domain_access(user, event, db)
-
-    event_dt = _event_datetime(event)
-    if not event_dt:
-        raise HTTPException(400, "El evento no tiene fecha válida para recordar")
-
-    minutes = max(0, int(data.minutes_before or 0))
-    remind_at = event_dt - timedelta(minutes=minutes)
-
-    valid_channels = [c for c in (data.channels or []) if c in ("push", "email")]
-    if not valid_channels:
-        valid_channels = ["push"]
-    channels = ",".join(valid_channels)
-
-    existing = (
-        db.query(EventReminder)
-        .filter(EventReminder.event_id == event_id, EventReminder.user_id == user.id)
-        .first()
-    )
-    now_iso = datetime.utcnow().isoformat()
-    if existing:
-        existing.remind_at = remind_at.isoformat()
-        existing.channels = channels
-        # Si el usuario reprograma, se vuelve a considerar pendiente.
-        existing.sent = 0
-    else:
-        db.add(EventReminder(
-            event_id=event_id,
-            user_id=user.id,
-            remind_at=remind_at.isoformat(),
-            channels=channels,
-            sent=0,
-            created_at=now_iso,
-        ))
-    db.commit()
-    return {"ok": True, "remind_at": remind_at.isoformat(), "channels": valid_channels}
-
-
-@app.delete("/events/{event_id}/reminder")
-def delete_event_reminder(
-    event_id: int,
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db),
-):
-    user = get_user_from_token(cred.credentials, db)
-    db.query(EventReminder).filter(
-        EventReminder.event_id == event_id,
-        EventReminder.user_id == user.id,
-    ).delete(synchronize_session=False)
-    db.commit()
-    return {"ok": True}
-
-
-@app.get("/me/reminder-prefs")
-def get_reminder_prefs(
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db),
-):
-    user = get_user_from_token(cred.credentials, db)
-    return {
-        "reminder_email": user.reminder_email or "",
-        "availability_reminder_opt_in": bool(user.availability_reminder_opt_in),
-    }
-
-
-@app.put("/me/reminder-prefs")
-def update_reminder_prefs(
-    data: ReminderPrefsUpdate,
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db),
-):
-    user = get_user_from_token(cred.credentials, db)
-    if data.reminder_email is not None:
-        email = data.reminder_email.strip()
-        if email and "@" not in email:
-            raise HTTPException(400, "El correo no es válido")
-        user.reminder_email = email or None
-    if data.availability_reminder_opt_in is not None:
-        user.availability_reminder_opt_in = 1 if data.availability_reminder_opt_in else 0
-    db.commit()
-    return {
-        "reminder_email": user.reminder_email or "",
-        "availability_reminder_opt_in": bool(user.availability_reminder_opt_in),
-    }
-
-
-
-@app.delete("/events/{event_id}")
-def delete_event(
-    event_id: int,
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    admin = get_user_from_token(cred.credentials, db)
-    require_admin(admin)
-
-    ev = db.query(Event).filter(Event.id == event_id).first()
-    if not ev:
-        raise HTTPException(404, "Evento no encontrado")
-
-    _ensure_event_domain_access(admin, ev, db)
-
-    # borrar primero respuestas asociadas
-    db.query(EventCompanion)\
-            .filter(EventCompanion.event_id == event_id)\
-            .delete(synchronize_session=False)
-
-    db.query(EventResponse)\
-      .filter(EventResponse.event_id == event_id)\
-      .delete(synchronize_session=False)
-
-    db.query(EventAvailabilitySlot)\
-      .filter(EventAvailabilitySlot.event_id == event_id)\
-      .delete(synchronize_session=False)
-
-    db.query(GuestEventAvailabilitySlot)\
-      .filter(GuestEventAvailabilitySlot.event_id == event_id)\
-      .delete(synchronize_session=False)
-
-    db.delete(ev)
-    db.commit()
-
-    return {"ok": True}
-
-
-# =========================================================
-# DISPONIBILIDADES
-# =========================================================
-@app.get("/availability/my")
-def get_my_availability(
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    user = get_user_from_token(cred.credentials, db)
-    if not _is_feature_enabled(db, _get_domain(user.email), "availabilities", user.role, set(_parse_group_tags(user.group_tag)), unit_id=user.org_unit_id):
-        raise HTTPException(403, "Disponibilidades deshabilitadas para tu dominio")
-    return db.query(Availability).filter(Availability.user_id == user.id).all()
-
-
-@app.post("/availability/my")
-def create_my_availability(
-    data: AvailabilityCreate,
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    user = get_user_from_token(cred.credentials, db)
-    if not _is_feature_enabled(db, _get_domain(user.email), "availabilities", user.role, set(_parse_group_tags(user.group_tag)), unit_id=user.org_unit_id):
-        raise HTTPException(403, "Disponibilidades deshabilitadas para tu dominio")
-
-    today = datetime.utcnow().date()
-    availability_date = datetime.strptime(data.date, "%Y-%m-%d").date()
-    if availability_date < today:
-        raise HTTPException(410, "No puedes votar disponibilidades en días pasados")
-
-    current_week_start = today - timedelta(days=today.weekday())
-    max_allowed_date = current_week_start + timedelta(days=20)  # semana actual + siguiente + posterior
-    if availability_date > max_allowed_date:
-        raise HTTPException(400, "Solo puedes votar disponibilidades para la semana actual, siguiente y posterior")
-
-    a = Availability(
-        user_id=user.id,
-        date=data.date,
-        start_time=data.start_time,
-        end_time=data.end_time
-    )
-    db.add(a)
-    db.commit()
-    db.refresh(a)
-    return a
-
-
-@app.delete("/availability/my/{avail_id}")
-def delete_availability(
-    avail_id: int,
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    user = get_user_from_token(cred.credentials, db)
-
-    a = db.query(Availability)\
-          .filter(Availability.id == avail_id,
-                  Availability.user_id == user.id)\
-          .first()
-
-    if not a:
-        raise HTTPException(404, "No encontrado")
-
-    db.delete(a)
-    db.commit()
-    return {"ok": True}
-
-
-@app.get("/admin/availability")
-def admin_all_availability(
-    request: Request,
-    response: Response,
-    unit_id: int | None = Query(None),
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    admin = get_user_from_token(cred.credentials, db)
-    require_admin(admin)
-
-    if not _is_feature_enabled(db, _get_domain(admin.email), "availabilities", admin.role, set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
-        raise HTTPException(403, "Disponibilidades deshabilitadas para tu dominio")
-
-    # La limpieza ya no ocurre en cada lectura (ver maybe_cleanup_expired_data):
-    # leer el calendario no debe provocar borrados ni commits.
-    maybe_cleanup_expired_data(db)
-
-    # Filtro por unidad del organigrama: incluye toda su rama (por niveles),
-    # sustituyendo al antiguo filtro por el dominio del email.
-    # El ámbito se resuelve en SQL (una consulta con join) en vez de comprobar
-    # permisos franja a franja, que disparaba ~4 consultas por registro.
-    allowed_unit_ids = org_service.authorized_subtree_unit_ids(db, admin)  # None = superadmin
-    if unit_id is not None:
-        if not org_service.can_manage_unit(db, admin, unit_id):
-            raise HTTPException(403, "No autorizado sobre esa unidad")
-        requested = set(org_service.subtree_unit_ids(db, unit_id))
-        allowed_unit_ids = list(requested if allowed_unit_ids is None else requested.intersection(allowed_unit_ids))
-
-    # joinedload: sin él, leer a.user en la serialización volvería a consultar
-    # por cada franja.
-    query = (
-        db.query(Availability)
-        .join(User, Availability.user_id == User.id)
-        .options(joinedload(Availability.user))
-    )
-    if allowed_unit_ids is not None:
-        query = query.filter(User.org_unit_id.in_(allowed_unit_ids)) if allowed_unit_ids else query.filter(False)
-    items = query.all()
-
-    unit_names = {u.id: u.name for u in db.query(models.OrgUnit).all()}
-
-    payload = [
-        {
-            "id": a.id,
-            "user": a.user.full_name,
-            "email": a.user.email,
-            "group_tag": a.user.group_tag,
-            "group_tags": _parse_group_tags(a.user.group_tag),
-            "org_unit_id": a.user.org_unit_id,
-            "org_unit_name": unit_names.get(a.user.org_unit_id),
-            "date": a.date,
-            "start_time": a.start_time,
-            "end_time": a.end_time,
-        }
-        for a in items
-    ]
-
-    # ETag: esta vista se sondea cada 15 s y casi nunca cambia. Si el cliente ya
-    # tiene esta misma respuesta, se le devuelve 304 sin cuerpo: el sondeo pasa a
-    # costar unos bytes en vez del listado entero (importa en la APK, con datos
-    # móviles).
-    etag = '"' + hashlib.md5(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest() + '"'
-    if request.headers.get("if-none-match") == etag:
-        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-cache"})
-
-    response.headers["ETag"] = etag
-    response.headers["Cache-Control"] = "no-cache"
-    return payload
-
-
-# =========================================================
-# CENSO
-# =========================================================
-
-def _census_config_to_dict(config: CensusConfig) -> dict:
-    return {
-        "id": config.id,
-        "email_to": config.email_to,
-        "url_token": config.url_token,
-        "fields": [
-            {
-                "id": f.id,
-                "label": f.label,
-                "field_type": f.field_type,
-                "required": bool(f.required),
-                "order_index": f.order_index,
-                "options": json.loads(f.options) if f.options else [],
-            }
-            for f in config.fields
-        ],
-    }
-
-
-def _env_bool(name: str, default: bool = False) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        value = os.getenv(name.lower())
-    if value is None:
-        return default
-    return value.strip().lower() in ["1", "true", "yes", "on"]
-
-
-def _env_str(name: str, default: str = "") -> str:
-    value = os.getenv(name)
-    if value is None:
-        value = os.getenv(name.lower())
-    if value is None:
-        return default
-    return str(value).strip()
-
-
-def _smtp_resolve_debug(host: str, port: int):
-    try:
-        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-        debug = []
-        for info in infos:
-            family, _, _, _, sockaddr = info
-            family_name = "IPv6" if family == socket.AF_INET6 else "IPv4" if family == socket.AF_INET else str(family)
-            debug.append({
-                "family": family_name,
-                "address": sockaddr[0],
-                "port": sockaddr[1],
-            })
-        return debug
-    except Exception as exc:
-        return [{"resolution_error": str(exc)}]
-
-
-def _with_forced_ipv4_resolution(callback):
-    original_getaddrinfo = socket.getaddrinfo
-
-    def ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-        return original_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
-
-    socket.getaddrinfo = ipv4_only_getaddrinfo
-    try:
-        return callback()
-    finally:
-        socket.getaddrinfo = original_getaddrinfo
-
-
-def _smtp_attempt_send(smtp_host: str, smtp_port: int, smtp_user: str, smtp_password: str, msg, use_ssl: bool, use_tls: bool):
-    if use_ssl:
-        print(f"ℹ️ Conectando por SMTP_SSL a {smtp_host}:{smtp_port}")
-        with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15) as server:
-            print("ℹ️ SMTP login iniciado (SSL)")
-            server.login(smtp_user, smtp_password)
-            print("ℹ️ SMTP login correcto (SSL), enviando mensaje")
-            server.send_message(msg)
-        return
-
-    print(f"ℹ️ Conectando por SMTP a {smtp_host}:{smtp_port}")
-    with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-        server.ehlo()
-        if use_tls:
-            print("ℹ️ Iniciando STARTTLS")
-            server.starttls()
-            server.ehlo()
-        print("ℹ️ SMTP login iniciado")
-        server.login(smtp_user, smtp_password)
-        print("ℹ️ SMTP login correcto, enviando mensaje")
-        server.send_message(msg)
-
-
-def _send_census_email_via_resend(email_to: str, csv_content: str):
-    resend_api_key = _env_str("RESEND_API_KEY", "")
-    resend_from = _env_str("RESEND_FROM", _env_str("SMTP_FROM", ""))
-    resend_api_url = _env_str("RESEND_API_URL", "https://api.resend.com/emails")
-
-    print(
-        "ℹ️ RESEND config census:",
-        {
-            "api_url": resend_api_url or "<empty>",
-            "from": resend_from or "<empty>",
-            "has_api_key": bool(resend_api_key),
-            "email_to": email_to,
-        },
-    )
-
-    if not resend_api_key or not resend_from:
-        msg = "Resend no configurado completamente (API_KEY/FROM)."
-        print(f"⚠️ {msg}")
-        return False, msg
-
-    attachment_b64 = base64.b64encode(csv_content.encode("utf-8")).decode("ascii")
-
-    resend_module = None
-    try:
-        resend_module = importlib.import_module("resend")
-    except Exception:
-        resend_module = None
-
-    if resend_module is not None:
-        try:
-            resend_module.api_key = resend_api_key
-            payload = {
-                "from": resend_from,
-                "to": [email_to],
-                "subject": "Nueva respuesta de censo",
-                "html": "<p>Adjunto se incluye una nueva respuesta del formulario de censo.</p>",
-                "attachments": [
-                    {
-                        "filename": "respuesta_censo.csv",
-                        "content": attachment_b64,
-                    }
-                ],
-            }
-
-            response = resend_module.Emails.send(payload)
-            print(
-                "✅ Email de censo enviado por Resend SDK",
-                {
-                    "response": str(response)[:500],
-                },
-            )
-            return True, "ok"
-        except Exception as exc:
-            print(f"⚠️ Resend SDK falló, usando fallback HTTP: {exc}")
-
-    payload = {
-        "from": resend_from,
-        "to": [email_to],
-        "subject": "Nueva respuesta de censo",
-        "text": "Adjunto se incluye una nueva respuesta del formulario de censo.",
-        "attachments": [
-            {
-                "filename": "respuesta_censo.csv",
-                "content": attachment_b64,
-            }
-        ],
-    }
-
-    request = urllib.request.Request(
-        resend_api_url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {resend_api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            raw_body = response.read().decode("utf-8", errors="replace")
-            print(
-                "✅ Email de censo enviado por Resend",
-                {
-                    "status": response.status,
-                    "body": raw_body[:500] if raw_body else "<empty>",
-                },
-            )
-            return True, "ok"
-    except urllib.error.HTTPError as exc:
-        error_body = exc.read().decode("utf-8", errors="replace")
-        error = f"Error enviando email por Resend: HTTP {exc.code} - {error_body}"
-        print(f"⚠️ {error}")
-        return False, error
-    except Exception as exc:
-        error = f"Error enviando email por Resend: {exc}"
-        print(f"⚠️ {error}")
-        return False, error
-
-
-def _send_census_email_via_smtp(email_to: str, csv_content: str):
-    smtp_host = _env_str("SMTP_HOST", "")
-    smtp_port_raw = _env_str("SMTP_PORT", "587")
-    smtp_user = _env_str("SMTP_USER", "")
-    smtp_password = _env_str("SMTP_PASSWORD", "")
-    smtp_from = _env_str("SMTP_FROM", smtp_user)
-    smtp_use_ssl = _env_bool("SMTP_USE_SSL", False)
-    smtp_use_tls = _env_bool("SMTP_USE_TLS", True)
-    smtp_force_ipv4 = _env_bool("SMTP_FORCE_IPV4", True)
-
-    try:
-        smtp_port = int(smtp_port_raw)
-    except ValueError:
-        msg = f"SMTP_PORT inválido: {smtp_port_raw}"
-        print(f"⚠️ {msg}")
-        return False, msg
-
-    if smtp_use_ssl and smtp_use_tls:
-        print("ℹ️ SMTP_USE_SSL y SMTP_USE_TLS activos a la vez; se prioriza SSL y se desactiva TLS.")
-        smtp_use_tls = False
-
-    print(
-        "ℹ️ SMTP config census:",
-        {
-            "host": smtp_host or "<empty>",
-            "port": smtp_port,
-            "use_ssl": smtp_use_ssl,
-            "use_tls": smtp_use_tls,
-            "force_ipv4": smtp_force_ipv4,
-            "from": smtp_from or "<empty>",
-            "has_user": bool(smtp_user),
-            "has_password": bool(smtp_password),
-            "email_to": email_to,
-        },
-    )
-    print("ℹ️ SMTP resolved addresses:", _smtp_resolve_debug(smtp_host, smtp_port))
-
-    if not smtp_host or not smtp_user or not smtp_password:
-        msg = "SMTP no configurado completamente (HOST/USER/PASSWORD)."
-        print(f"⚠️ {msg} CSV no enviado a {email_to}.")
-        return False, msg
-
-    msg = MIMEMultipart()
-    msg["From"] = smtp_from
-    msg["To"] = email_to
-    msg["Subject"] = "Nueva respuesta de censo"
-    msg.attach(MIMEText("Adjunto se incluye una nueva respuesta del formulario de censo.", "plain"))
-
-    attachment = MIMEBase("application", "octet-stream")
-    attachment.set_payload(csv_content.encode("utf-8"))
-    encoders.encode_base64(attachment)
-    attachment.add_header(
-        "Content-Disposition", "attachment", filename="respuesta_censo.csv"
-    )
-    msg.attach(attachment)
-
-    attempts = [
-        {
-            "port": smtp_port,
-            "use_ssl": smtp_use_ssl,
-            "use_tls": smtp_use_tls,
-            "label": "configured",
-        }
-    ]
-
-    is_gmail = smtp_host.strip().lower() in {"smtp.gmail.com", "smtp.googlemail.com"}
-    if is_gmail:
-        if smtp_port != 465 or not smtp_use_ssl:
-            attempts.append({"port": 465, "use_ssl": True, "use_tls": False, "label": "gmail-ssl-fallback"})
-        if smtp_port != 587 or smtp_use_ssl or not smtp_use_tls:
-            attempts.append({"port": 587, "use_ssl": False, "use_tls": True, "label": "gmail-starttls-fallback"})
-
-    last_error = None
-    for attempt in attempts:
-        print("ℹ️ SMTP attempt:", attempt)
-
-        def do_send():
-            _smtp_attempt_send(
-                smtp_host=smtp_host,
-                smtp_port=attempt["port"],
-                smtp_user=smtp_user,
-                smtp_password=smtp_password,
-                msg=msg,
-                use_ssl=attempt["use_ssl"],
-                use_tls=attempt["use_tls"],
-            )
-
-        try:
-            if smtp_force_ipv4:
-                _with_forced_ipv4_resolution(do_send)
-            else:
-                do_send()
-
-            print(f"✅ Email de censo enviado a {email_to}")
-            return True, "ok"
-        except Exception as e:
-            last_error = e
-            print(f"⚠️ SMTP attempt failed ({attempt['label']}): {e}")
-
-            error_text = str(e).lower()
-            if "timed out" not in error_text and "network is unreachable" not in error_text:
-                break
-
-    error = f"Error enviando email de censo: {last_error}"
-    print(f"⚠️ {error}")
-    return False, error
-
-
-def _send_census_email(email_to: str, csv_content: str):
-    provider = _env_str("CENSUS_EMAIL_PROVIDER", "").strip().lower()
-    resend_api_key = _env_str("RESEND_API_KEY", "")
-
-    if provider in {"resend", "http", "api"}:
-        print("ℹ️ Censo email transport seleccionado: resend")
-        return _send_census_email_via_resend(email_to, csv_content)
-
-    if provider == "smtp":
-        print("ℹ️ Censo email transport seleccionado: smtp")
-        return _send_census_email_via_smtp(email_to, csv_content)
-
-    if resend_api_key:
-        print("ℹ️ Censo email transport autodetectado: resend")
-        return _send_census_email_via_resend(email_to, csv_content)
-
-    print("ℹ️ Censo email transport por defecto: smtp")
-    return _send_census_email_via_smtp(email_to, csv_content)
-
-
-def _send_census_email_async(email_to: str, csv_content: str):
-    ok, msg = _send_census_email(email_to, csv_content)
-    if not ok:
-        print(f"⚠️ Envío async fallido: {msg}")
-
-
-# ---------------------------------------------------------
-# CORREO GENÉRICO (recordatorios): sin adjunto, reutiliza la misma config
-# Resend/SMTP que el censo. Best-effort; los fallos solo se registran.
-# ---------------------------------------------------------
-def _send_email_simple(email_to: str, subject: str, body_text: str):
-    resend_api_key = _env_str("RESEND_API_KEY", "")
-    resend_from = _env_str("RESEND_FROM", _env_str("SMTP_FROM", ""))
-    provider = _env_str("CENSUS_EMAIL_PROVIDER", "").strip().lower()
-
-    use_resend = (provider in {"resend", "http", "api"}) or (not provider and resend_api_key)
-    if use_resend and resend_api_key and resend_from:
-        payload = {
-            "from": resend_from,
-            "to": [email_to],
-            "subject": subject,
-            "text": body_text,
-        }
-        try:
-            resend_module = importlib.import_module("resend")
-            resend_module.api_key = resend_api_key
-            resend_module.Emails.send(payload)
-            return True, "ok"
-        except Exception as exc:
-            logger.warning("Resend recordatorio falló, intento SMTP: %s", exc)
-
-    # SMTP directo.
-    smtp_host = _env_str("SMTP_HOST", "")
-    smtp_user = _env_str("SMTP_USER", "")
-    smtp_password = _env_str("SMTP_PASSWORD", "")
-    smtp_from = _env_str("SMTP_FROM", smtp_user)
-    if not smtp_host or not smtp_user or not smtp_password:
-        return False, "email no configurado (Resend/SMTP)"
-
-    try:
-        smtp_port = int(_env_str("SMTP_PORT", "587"))
-    except ValueError:
-        return False, "SMTP_PORT inválido"
-
-    smtp_use_ssl = _env_bool("SMTP_USE_SSL", False)
-    smtp_use_tls = _env_bool("SMTP_USE_TLS", True)
-    if smtp_use_ssl and smtp_use_tls:
-        smtp_use_tls = False
-
-    msg = MIMEMultipart()
-    msg["From"] = smtp_from
-    msg["To"] = email_to
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body_text, "plain"))
-
-    def do_send():
-        _smtp_attempt_send(
-            smtp_host=smtp_host, smtp_port=smtp_port, smtp_user=smtp_user,
-            smtp_password=smtp_password, msg=msg, use_ssl=smtp_use_ssl, use_tls=smtp_use_tls,
-        )
-
-    try:
-        if _env_bool("SMTP_FORCE_IPV4", True):
-            _with_forced_ipv4_resolution(do_send)
-        else:
-            do_send()
-        return True, "ok"
-    except Exception as exc:
-        logger.warning("SMTP recordatorio falló para %s: %s", email_to, exc)
-        return False, str(exc)
-
-
-@app.get("/admin/census")
-def get_census_config(
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    if not cred or not cred.credentials:
-        raise HTTPException(401, "Token inválido")
-
-    admin = get_user_from_token(cred.credentials, db)
-    _require_superadmin_module_access(admin, db, "census")
-
-    config = db.query(CensusConfig).first()
-    if not config:
-        return None
-    return _census_config_to_dict(config)
-
-
-@app.put("/admin/census")
-def upsert_census_config(
-    data: CensusConfigCreate,
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    if not cred or not cred.credentials:
-        raise HTTPException(401, "Token inválido")
-
-    admin = get_user_from_token(cred.credentials, db)
-    _require_superadmin_module_access(admin, db, "census")
-
-    if not data.email_to.strip():
-        raise HTTPException(400, "Email destino obligatorio")
-
-    if not data.fields:
-        raise HTTPException(400, "Debes añadir al menos un campo")
-
-    for field in data.fields:
-        if not field.label or not field.label.strip():
-            raise HTTPException(400, "Todos los campos deben tener etiqueta")
-
-    config = db.query(CensusConfig).first()
-    if not config:
-        config = CensusConfig(
-            email_to=data.email_to.strip(),
-            url_token=secrets.token_urlsafe(16),
-        )
-        db.add(config)
-        db.flush()
-    else:
-        config.email_to = data.email_to.strip()
-
-    existing_fields_by_id = {field.id: field for field in config.fields}
-    incoming_ids = {field.id for field in data.fields if field.id is not None}
-
-    for field in list(config.fields):
-        if field.id not in incoming_ids:
-            db.delete(field)
-
-    for index, incoming in enumerate(data.fields):
-        options = [opt.strip() for opt in (incoming.options or []) if opt and opt.strip()]
-        options_json = json.dumps(options) if incoming.field_type == "select" and options else None
-
-        if incoming.id is not None and incoming.id in existing_fields_by_id:
-            field = existing_fields_by_id[incoming.id]
-            field.label = incoming.label.strip()
-            field.field_type = incoming.field_type
-            field.required = 1 if incoming.required else 0
-            field.order_index = index
-            field.options = options_json
-        else:
-            db.add(CensusField(
-                config_id=config.id,
-                label=incoming.label.strip(),
-                field_type=incoming.field_type,
-                required=1 if incoming.required else 0,
-                order_index=index,
-                options=options_json,
-            ))
-
-    db.commit()
-    db.refresh(config)
-    return _census_config_to_dict(config)
-
-
-@app.post("/admin/census/regenerate-token")
-def regenerate_census_token(
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    if not cred or not cred.credentials:
-        raise HTTPException(401, "Token inválido")
-
-    admin = get_user_from_token(cred.credentials, db)
-    _require_superadmin_module_access(admin, db, "census")
-
-    config = db.query(CensusConfig).first()
-    if not config:
-        raise HTTPException(404, "No hay configuración de censo")
-
-    config.url_token = secrets.token_urlsafe(16)
-    db.commit()
-    return {"url_token": config.url_token}
-
-
-@app.post("/admin/census/test-email")
-def test_census_email(
-    data: CensusTestEmailRequest | None = Body(default=None),
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    if not cred or not cred.credentials:
-        raise HTTPException(401, "Token inválido")
-
-    admin = get_user_from_token(cred.credentials, db)
-    _require_superadmin_module_access(admin, db, "census")
-
-    config = db.query(CensusConfig).first()
-    if not config:
-        raise HTTPException(404, "No hay configuración de censo")
-
-    target_email = (data.email_to.strip() if data and data.email_to else config.email_to.strip())
-    if not target_email:
-        raise HTTPException(400, "Email destino obligatorio")
-
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["Prueba", "Fecha"])
-    writer.writerow(["Test SMTP", datetime.utcnow().isoformat()])
-
-    ok, message = _send_census_email(target_email, output.getvalue())
-    if not ok:
-        raise HTTPException(500, message)
-
-    return {"ok": True, "message": "Email de prueba enviado", "email_to": target_email}
-
-
-@app.get("/censo/{token}/fields")
-def get_census_fields(token: str, db: Session = Depends(get_db)):
-    config = db.query(CensusConfig).filter(CensusConfig.url_token == token).first()
-    if not config:
-        raise HTTPException(404, "Formulario no encontrado")
-
-    return {
-        "fields": [
-            {
-                "id": f.id,
-                "label": f.label,
-                "field_type": f.field_type,
-                "required": bool(f.required),
-                "order_index": f.order_index,
-                "options": json.loads(f.options) if f.options else [],
-            }
-            for f in config.fields
-        ]
-    }
-
-
-@app.post("/censo/{token}")
-def submit_census(
-    token: str,
-    data: dict = Body(...),
-    db: Session = Depends(get_db)
-):
-    config = db.query(CensusConfig).filter(CensusConfig.url_token == token).first()
-    if not config:
-        raise HTTPException(404, "Formulario no encontrado")
-
-    output = io.StringIO()
-    writer = csv.writer(output)
-    fields_sorted = sorted(config.fields, key=lambda f: f.order_index)
-    writer.writerow([f.label for f in fields_sorted])
-    writer.writerow([str(data.get(str(f.id), "")) for f in fields_sorted])
-
-    # El envío de email se ejecuta en background para no bloquear la respuesta HTTP.
-    threading.Thread(
-        target=_send_census_email_async,
-        args=(config.email_to, output.getvalue()),
-        daemon=True,
-    ).start()
-    return {"ok": True}
-
-
-# =========================================================
 # ENCUESTAS
 # =========================================================
 
@@ -4534,6 +3598,11 @@ def _get_applicable_policies(db: Session, domain: str, tags: set[str] | None = N
 
 def _is_feature_enabled(db: Session, domain: str, feature: str, role: str = "user",
                         tags: set[str] | None = None, unit_id: int | None = None):
+    # Módulos eliminados en la distribución para comités externos: census y
+    # notifications requieren infraestructura adicional (correo/FCM) que estos
+    # comités no configuran. Nunca se habilitan, ni siquiera para superadmin.
+    if feature in {"census", "notifications"}:
+        return False
     if role == "superadmin":
         return True
 
@@ -4674,425 +3743,6 @@ def _can_admin_manage_user(admin: User, target_user: User, db: Session | None = 
     # Sin unidad (dato heredado): fallback por dominio del email.
     return org_service.can_manage_legacy_domain(db, admin, _get_domain(target_user.email))
 
-
-def _load_fcm_service_account():
-    raw = (
-        os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
-        or os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
-        or os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON", "").strip()
-    )
-
-    if not raw:
-        return None, None, "missing_fcm_config", (
-            "Falta configurar FIREBASE_SERVICE_ACCOUNT_JSON en Railway "
-            "(o FCM_SERVER_KEY para el modo legacy)"
-        )
-
-    try:
-        if raw.startswith("{"):
-            info = json.loads(raw)
-        else:
-            info = json.loads(base64.b64decode(raw).decode("utf-8"))
-    except Exception as exc:
-        return None, None, "invalid_fcm_service_account", f"Service account inválida: {exc}"
-
-    project_id = os.getenv("FIREBASE_PROJECT_ID", "").strip() or str(info.get("project_id") or "").strip()
-    if not project_id:
-        return None, None, "missing_firebase_project_id", (
-            "Falta FIREBASE_PROJECT_ID en Railway o project_id en la service account"
-        )
-
-    return info, project_id, None, None
-
-
-def _get_fcm_v1_access_token(service_account_info: dict):
-    try:
-        google_auth_requests = importlib.import_module("google.auth.transport.requests")
-        google_oauth2_service_account = importlib.import_module("google.oauth2.service_account")
-    except Exception as exc:
-        return None, "missing_google_auth_dependency", f"Dependencias FCM no instaladas: {exc}"
-
-    try:
-        credentials = google_oauth2_service_account.Credentials.from_service_account_info(
-            service_account_info,
-            scopes=["https://www.googleapis.com/auth/firebase.messaging"],
-        )
-        credentials.refresh(google_auth_requests.Request())
-        return credentials.token, None, None
-    except Exception as exc:
-        return None, "fcm_auth_error", f"No se pudo obtener access token FCM: {exc}"
-
-
-def _send_fcm_notification_legacy(tokens: list[str], title: str, body: str, server_key: str, data: dict | None = None):
-    endpoint = os.getenv("FCM_ENDPOINT", "https://fcm.googleapis.com/fcm/send").strip()
-
-    payload = {
-        "registration_ids": tokens,
-        "notification": {
-            "title": title,
-            "body": body,
-            "sound": "default",
-        },
-        "priority": "high",
-    }
-    if data:
-        payload["data"] = {str(k): str(v) for k, v in data.items()}
-
-    req = urllib.request.Request(
-        endpoint,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"key={server_key}",
-        },
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=15) as response:
-            raw = response.read().decode("utf-8")
-            parsed = json.loads(raw) if raw else {}
-            success = int(parsed.get("success", 0))
-            failure = int(parsed.get("failure", 0))
-            return {"sent": success, "failed": failure, "reason": "ok", "message": "ok"}
-    except Exception as exc:
-        print(f"⚠️ Error enviando push FCM legacy: {exc}")
-        return {"sent": 0, "failed": len(tokens), "reason": str(exc), "message": str(exc)}
-
-
-def _send_fcm_notification_v1(tokens: list[str], title: str, body: str, data: dict | None = None):
-    service_account_info, project_id, reason, message = _load_fcm_service_account()
-    if reason:
-        print(f"⚠️ Configuración FCM v1 incompleta: {message}")
-        return {"sent": 0, "failed": len(tokens), "reason": reason, "message": message}
-
-    access_token, reason, message = _get_fcm_v1_access_token(service_account_info)
-    if reason:
-        print(f"⚠️ Error autenticando FCM v1: {message}")
-        return {"sent": 0, "failed": len(tokens), "reason": reason, "message": message}
-
-    endpoint = os.getenv("FCM_V1_ENDPOINT", "").strip() or f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
-
-    sent = 0
-    failed = 0
-    last_error = "ok"
-
-    for token in tokens:
-        payload = {
-            "message": {
-                "token": token,
-                "notification": {
-                    "title": title,
-                    "body": body,
-                },
-                "android": {
-                    "priority": "high",
-                    "notification": {
-                        "sound": "default",
-                    },
-                },
-            }
-        }
-        if data:
-            payload["message"]["data"] = {str(k): str(v) for k, v in data.items()}
-
-        req = urllib.request.Request(
-            endpoint,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {access_token}",
-            },
-            method="POST",
-        )
-
-        try:
-            with urllib.request.urlopen(req, timeout=15):
-                sent += 1
-        except urllib.error.HTTPError as exc:
-            failed += 1
-            try:
-                last_error = exc.read().decode("utf-8")
-            except Exception:
-                last_error = str(exc)
-            print(f"⚠️ Error HTTP enviando push FCM v1: {last_error}")
-        except Exception as exc:
-            failed += 1
-            last_error = str(exc)
-            print(f"⚠️ Error enviando push FCM v1: {exc}")
-
-    if failed == 0:
-        return {"sent": sent, "failed": failed, "reason": "ok", "message": "ok"}
-    if sent > 0:
-        return {"sent": sent, "failed": failed, "reason": "partial_failure", "message": last_error}
-    return {"sent": sent, "failed": failed, "reason": "fcm_v1_error", "message": last_error}
-
-
-def _send_fcm_notification(tokens: list[str], title: str, body: str, data: dict | None = None):
-    if not tokens:
-        return {"sent": 0, "failed": 0, "reason": "no_tokens"}
-
-    # La API HTTP v1 (con service account) es la vigente. La API legacy (server
-    # key) fue DESACTIVADA por Google en 2024, asi que solo se usa como ultimo
-    # recurso si no hay service account configurada; nunca debe tapar a v1.
-    _, _, sa_reason, _ = _load_fcm_service_account()
-    if not sa_reason:
-        result = _send_fcm_notification_v1(tokens, title, body, data=data)
-    else:
-        server_key = os.getenv("FCM_SERVER_KEY", "").strip()
-        if server_key:
-            result = _send_fcm_notification_legacy(tokens, title, body, server_key, data=data)
-        else:
-            # Sin service account ni server key: v1 devuelve el motivo de config faltante.
-            result = _send_fcm_notification_v1(tokens, title, body, data=data)
-
-    reason = (result or {}).get("reason")
-    if reason and reason not in ("no_tokens",):
-        logger.warning("FCM envío incompleto: tokens=%d sent=%s failed=%s reason=%s",
-                       len(tokens), (result or {}).get("sent"), (result or {}).get("failed"), reason)
-    else:
-        logger.info("FCM enviado: tokens=%d sent=%s failed=%s",
-                    len(tokens), (result or {}).get("sent"), (result or {}).get("failed"))
-    return result
-
-
-def _device_token_freshness_filter():
-    # Tokens sin `last_used` (columna nueva, aún no repoblada por una
-    # re-registración del cliente) se tratan como frescos: no penalizamos
-    # dispositivos reales solo porque el campo todavía no se ha rellenado.
-    cutoff = (datetime.utcnow() - timedelta(days=30)).isoformat()
-    return or_(DeviceToken.last_used.is_(None), DeviceToken.last_used >= cutoff)
-
-
-def _notify_users_by_ids(db: Session, user_ids: list[int], title: str, body: str, data: dict | None = None):
-    if not user_ids:
-        return {"target_users": 0, "tokens": 0, "sent": 0, "failed": 0, "reason": "no_users"}
-
-    token_rows = (
-        db.query(DeviceToken)
-        .filter(
-            DeviceToken.user_id.in_(user_ids),
-            DeviceToken.active == 1,
-            _device_token_freshness_filter(),
-        )
-        .all()
-    )
-    unique_tokens = sorted({row.token for row in token_rows if row.token})
-
-    result = _send_fcm_notification(unique_tokens, title, body, data=data)
-    return {
-        "target_users": len(set(user_ids)),
-        "tokens": len(unique_tokens),
-        "sent": result["sent"],
-        "failed": result["failed"],
-        "reason": result["reason"],
-    }
-
-
-def _event_target_user_ids(db: Session, allowed_domain: str | None):
-    users = db.query(User).all()
-    if allowed_domain:
-        domain_norm = allowed_domain.strip().lower()
-        return [u.id for u in users if _get_domain(u.email) == domain_norm]
-    return [u.id for u in users]
-
-
-def _notify_guest_tokens_for_event(db: Session, event: Event, title: str, body: str):
-    """Notifica a los invitados (sin cuenta) suscritos a push cuando un
-    evento es público. Los militantes se notifican aparte via
-    _notify_users_by_ids; esta función implementa la Decisión #4 del plan
-    de escalado: los guests solo reciben notificaciones de eventos públicos."""
-    if (event.visibility or "internal").strip().lower() != "public":
-        return {"target_tokens": 0, "sent": 0, "failed": 0, "reason": "not_public"}
-
-    domain_tag = _resolve_guest_domain_tag_from_event(event)
-    policy = db.query(GuestPolicy).filter(GuestPolicy.domain_tag == domain_tag).first()
-    if policy and not bool(policy.guest_notifications_enabled):
-        return {"target_tokens": 0, "sent": 0, "failed": 0, "reason": "guest_notifications_disabled"}
-
-    token_rows = (
-        db.query(DeviceToken)
-        .filter(
-            DeviceToken.user_role == "guest",
-            DeviceToken.active == 1,
-            DeviceToken.domain_tag.in_({domain_tag, "public"}),
-            _device_token_freshness_filter(),
-        )
-        .all()
-    )
-    unique_tokens = sorted({row.token for row in token_rows if row.token})
-
-    result = _send_fcm_notification(unique_tokens, title, body, data={"recipient_type": "guest"})
-    return {
-        "target_tokens": len(unique_tokens),
-        "sent": result["sent"],
-        "failed": result["failed"],
-        "reason": result["reason"],
-    }
-
-
-@app.post("/device-tokens/register")
-def register_device_token(
-    data: DeviceTokenRegister,
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    user = None
-    if cred and cred.credentials:
-        try:
-            user = get_user_from_token(cred.credentials, db)
-        except HTTPException:
-            user = None
-
-    token_value = (data.token or "").strip()
-    if not token_value:
-        raise HTTPException(400, "Token de dispositivo obligatorio")
-
-    requested_role = (data.user_role or "").strip().lower()
-    if requested_role and requested_role not in ["guest", "user", "admin", "superadmin"]:
-        raise HTTPException(400, "user_role inválido")
-
-    if user:
-        effective_role = user.role
-        collective = _get_domain(user.email)
-        domain_tag = data.domain_tag or collective
-    else:
-        effective_role = requested_role or "guest"
-        if effective_role != "guest":
-            raise HTTPException(401, "Token de autenticación requerido para registrar roles no guest")
-        collective = (data.domain_tag or "public").strip().lower()
-        domain_tag = collective
-
-    now_iso = datetime.utcnow().isoformat()
-
-    existing = db.query(DeviceToken).filter(DeviceToken.token == token_value).first()
-    if existing:
-        existing.user_id = user.id if user else None
-        existing.platform = (data.platform or "android").strip().lower()
-        existing.device_id = data.device_id
-        existing.device_identifier = data.device_identifier
-        existing.user_role = effective_role
-        existing.domain_tag = domain_tag
-        existing.collective = collective
-        existing.active = 1
-        existing.updated_at = now_iso
-        existing.last_used = now_iso
-    else:
-        db.add(DeviceToken(
-            user_id=user.id if user else None,
-            token=token_value,
-            platform=(data.platform or "android").strip().lower(),
-            device_id=data.device_id,
-            device_identifier=data.device_identifier,
-            user_role=effective_role,
-            domain_tag=domain_tag,
-            collective=collective,
-            active=1,
-            updated_at=now_iso,
-            last_used=now_iso,
-        ))
-
-    db.commit()
-    return {"ok": True}
-
-
-@app.post("/admin/notifications/send")
-def send_admin_notification(
-    data: AdminNotificationSend,
-    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
-    db: Session = Depends(get_db)
-):
-    admin = get_user_from_token(cred.credentials if cred else None, db)
-    _require_superadmin_module_access(admin, db, "notifications")
-
-    scope = (data.scope or "").strip().lower()
-    title = (data.title or "").strip()
-    body = (data.body or "").strip()
-
-    if scope not in ["all", "colectivo", "users", "tag"]:
-        raise HTTPException(400, "scope inválido: usa colectivo (estructura), users, tag o all")
-    if not title or not body:
-        raise HTTPException(400, "title y body son obligatorios")
-
-    target_user_ids: list[int] = []
-    target_collective = None
-
-    if scope == "all":
-        if admin.role != "superadmin":
-            raise HTTPException(403, "Los admins delegados no pueden enviar notificaciones globales")
-        target_user_ids = [u.id for u in db.query(User.id).all()]
-    elif scope == "colectivo":
-        # Preferente: unidad del organigrama, que alcanza a toda su rama.
-        if data.org_unit_id is not None:
-            if not org_service.can_manage_unit(db, admin, data.org_unit_id):
-                raise HTTPException(403, "No autorizado para notificar esa unidad")
-            unit = db.query(OrgUnit).get(data.org_unit_id)
-            if not unit:
-                raise HTTPException(404, "Unidad no encontrada")
-            target_collective = unit.name
-            subtree_ids = set(org_service.subtree_unit_ids(db, data.org_unit_id))
-            target_user_ids = [
-                u.id for u in db.query(User).filter(User.org_unit_id.in_(subtree_ids)).all()
-            ]
-        else:
-            # Legacy: por dominio del email.
-            target_collective = (data.collective or "").strip().lower()
-            if not target_collective:
-                raise HTTPException(400, "Indica la unidad destino")
-            if admin.role != "superadmin" and not _can_admin_manage_domain(admin, target_collective, db):
-                raise HTTPException(403, "No autorizado para notificar ese colectivo")
-            users = db.query(User).all()
-            target_user_ids = [u.id for u in users if _get_domain(u.email) == target_collective]
-    elif scope == "tag":
-        # Etiqueta: transversal a la estructura, pero acotada al ámbito del
-        # admin (su propio nivel y los subordinados).
-        tag = _normalize_group_tag(data.group_tag or "")
-        if not tag:
-            raise HTTPException(400, "Indica la etiqueta destino")
-        target_collective = f"tag:{tag}"
-        target_user_ids = [
-            u.id for u in db.query(User).all()
-            if tag in set(_parse_group_tags(u.group_tag)) and _can_admin_manage_user(admin, u, db)
-        ]
-        if not target_user_ids:
-            raise HTTPException(404, "Ningún usuario de tu ámbito tiene esa etiqueta")
-    else:
-        target_user_ids = sorted(set(data.user_ids or []))
-        if not target_user_ids:
-            raise HTTPException(400, "user_ids obligatorio para scope=users")
-        if admin.role != "superadmin":
-            target_users = db.query(User).filter(User.id.in_(target_user_ids)).all()
-            if len(target_users) != len(target_user_ids):
-                raise HTTPException(404, "Alguno de los usuarios destino no existe")
-            for target_user in target_users:
-                if not _can_admin_manage_user(admin, target_user, db):
-                    raise HTTPException(403, "No autorizado para notificar a usuarios fuera de tu alcance")
-
-    notify_result = _notify_users_by_ids(db, target_user_ids, title, body, data={"recipient_type": "authenticated"})
-
-    dispatch = NotificationDispatch(
-        created_by=admin.id,
-        scope=scope,
-        title=title,
-        body=body,
-        target_collective=target_collective,
-        target_user_ids=json.dumps(target_user_ids),
-        sent_count=notify_result["sent"],
-        failed_count=notify_result["failed"],
-        created_at=datetime.utcnow().isoformat(),
-    )
-    db.add(dispatch)
-    db.commit()
-
-    return {
-        "ok": True,
-        "scope": scope,
-        "target_users": notify_result["target_users"],
-        "tokens": notify_result["tokens"],
-        "sent": notify_result["sent"],
-        "failed": notify_result["failed"],
-        "reason": notify_result["reason"],
-    }
 
 
 def _ensure_event_domain_access(user: User, event: Event, db: Session | None = None):
@@ -5533,156 +4183,50 @@ def edit_event(
     }
 
 
+
+
 # =========================================================
-# PLANIFICADOR EN SEGUNDO PLANO (recordatorios)
+
+
+
+
+
 # =========================================================
-# Un único hilo daemon que despierta periódicamente para:
-#   1) enviar los recordatorios de evento que el usuario haya activado (opt-in),
-#   2) enviar el recordatorio semanal de disponibilidad a quien lo pidió.
-# No hay envíos automáticos a quien no lo solicitó.
-#
-# Nota de zona horaria: la app guarda fechas/horas como texto local (España).
-# El servidor corre en UTC, así que comparamos contra "ahora local" = utcnow +
-# REMINDER_TZ_OFFSET_MINUTES (por defecto 120 = CEST verano; poner 60 en invierno).
+# PLANIFICADOR EN SEGUNDO PLANO (limpieza de datos caducados)
+# =========================================================
+# Hilo daemon minimalista: solo ejecuta la limpieza de eventos y
+# disponibilidades expiradas, sin ninguna conexion externa.
+# Intervalo: 900 s (15 min). Respeta el throttle interno de
+# maybe_cleanup_expired_data (minimo 10 min entre limpiezas reales).
 _scheduler_started = False
-_availability_reminder_sent_weeks = set()  # (user_id, "YYYY-WW") ya avisados esta ejecución
 
 
-def _reminder_now_local():
-    offset = 120
-    try:
-        offset = int(os.getenv("REMINDER_TZ_OFFSET_MINUTES", "120"))
-    except ValueError:
-        offset = 120
-    return datetime.utcnow() + timedelta(minutes=offset)
-
-
-def _user_active_tokens(db, user_id):
-    return [
-        t.token
-        for t in db.query(DeviceToken).filter(
-            DeviceToken.user_id == user_id, DeviceToken.active == 1
-        ).all()
-    ]
-
-
-def _process_due_event_reminders(db):
-    now_iso = _reminder_now_local().isoformat()
-    due = (
-        db.query(EventReminder)
-        .filter(EventReminder.sent == 0, EventReminder.remind_at <= now_iso)
-        .all()
-    )
-    for r in due:
-        try:
-            event = db.query(Event).filter(Event.id == r.event_id).first()
-            if not event or event.deleted_at:
-                r.sent = 1
-                continue
-            user = db.query(User).filter(User.id == r.user_id).first()
-            if not user:
-                r.sent = 1
-                continue
-
-            channels = (r.channels or "push").split(",")
-            title = "Recordatorio de evento"
-            body = event.title + " · " + (event.date or "")
-            if event.start_time:
-                body += f" {event.start_time[:5]}"
-
-            if "push" in channels:
-                tokens = _user_active_tokens(db, user.id)
-                if tokens:
-                    _send_fcm_notification(tokens, title, body, data={"event_id": str(event.id)})
-            if "email" in channels:
-                to = user.reminder_email or user.email
-                if to:
-                    threading.Thread(
-                        target=_send_email_simple, args=(to, title, body), daemon=True
-                    ).start()
-            r.sent = 1
-        except Exception:
-            logger.exception("Fallo procesando recordatorio de evento id=%s", r.id)
-            r.sent = 1  # evita reintentos infinitos de uno roto
-    db.commit()
-
-
-def _process_availability_reminders(db):
-    """Aviso semanal a quien lo pidió y no ha marcado disponibilidad esta semana.
-    Solo se dispara en la ventana lunes 09:00-09:59 (hora local) para no molestar,
-    y se deduplica en memoria por (usuario, semana)."""
-    now = _reminder_now_local()
-    if now.weekday() != 0 or now.hour != 9:  # lunes a las 9
-        return
-
-    iso_week = f"{now.isocalendar().year}-{now.isocalendar().week:02d}"
-    monday = (now - timedelta(days=now.weekday())).date()
-    week_dates = {(monday + timedelta(days=i)).isoformat() for i in range(7)}
-
-    opted_in = db.query(User).filter(User.availability_reminder_opt_in == 1).all()
-    for user in opted_in:
-        key = (user.id, iso_week)
-        if key in _availability_reminder_sent_weeks:
-            continue
-        has_availability = (
-            db.query(Availability)
-            .filter(Availability.user_id == user.id, Availability.date.in_(week_dates))
-            .first()
-        )
-        if has_availability:
-            _availability_reminder_sent_weeks.add(key)
-            continue
-
-        title = "Recuerda marcar tu disponibilidad"
-        body = "Aún no has indicado tu disponibilidad de esta semana. Entra en la app cuando puedas."
-        try:
-            tokens = _user_active_tokens(db, user.id)
-            if tokens:
-                _send_fcm_notification(tokens, title, body)
-            to = user.reminder_email or user.email
-            if to:
-                threading.Thread(target=_send_email_simple, args=(to, title, body), daemon=True).start()
-        except Exception:
-            logger.exception("Fallo enviando recordatorio de disponibilidad a user=%s", user.id)
-        _availability_reminder_sent_weeks.add(key)
-
-
-def _reminder_scheduler_loop(interval_seconds=900):
+def _cleanup_loop(interval_seconds=900):
     stop = threading.Event()
     while not stop.wait(interval_seconds):
         db = SessionLocal()
         try:
-            _process_due_event_reminders(db)
-            _process_availability_reminders(db)
-            # La limpieza de eventos caducados antes dependía de que alguien
-            # visitara /admin/availability (ver maybe_cleanup_expired_data);
-            # si nadie abría esa pantalla, los eventos pasados se quedaban en
-            # la base de datos indefinidamente. Al colgarla de este bucle, se
-            # ejecuta sola (respeta su propio throttle semanal) independiente
-            # del uso que se le dé a la app.
             maybe_cleanup_expired_data(db)
         except Exception:
-            logger.exception("Error en el planificador de recordatorios")
+            logger.exception("Error en el planificador de limpieza")
         finally:
             db.close()
 
 
-def _start_reminder_scheduler():
+def _start_cleanup_scheduler():
     global _scheduler_started
     if _scheduler_started:
         return
-    if os.getenv("ENABLE_REMINDER_SCHEDULER", "1").strip() not in ("1", "true", "True"):
-        logger.info("Planificador de recordatorios deshabilitado por entorno")
+    if os.getenv("ENABLE_CLEANUP_SCHEDULER", "1").strip() not in ("1", "true", "True"):
+        logger.info("Planificador de limpieza deshabilitado por entorno")
         return
     _scheduler_started = True
-    threading.Thread(target=_reminder_scheduler_loop, daemon=True).start()
-    logger.info("Planificador de recordatorios iniciado")
+    threading.Thread(target=_cleanup_loop, daemon=True).start()
+    logger.info("Planificador de limpieza iniciado")
 
 
-_start_reminder_scheduler()
+_start_cleanup_scheduler()
 
 
 # =========================================================
-
-
 

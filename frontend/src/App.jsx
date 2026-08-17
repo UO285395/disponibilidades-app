@@ -6,7 +6,6 @@ import Login from "./pages/Login.jsx";
 import PublicHome from "./pages/PublicHome.jsx";
 import EventDetail from "./pages/EventDetail.jsx";
 import { getToken, initializeAuthStorage, subscribeAuthChanges } from "./api/api.js";
-import { initMobileNotifications } from "./services/mobileNotifications.js";
 
 // Lo que un visitante NO necesita se carga solo al entrar. El panel de
 // administración es la mayor parte del código de la app: un visitante que solo
@@ -14,7 +13,6 @@ import { initMobileNotifications } from "./services/mobileNotifications.js";
 const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard.jsx"));
 const AdminEventResponses = lazy(() => import("./pages/AdminEventResponses.jsx"));
-const CensusForm = lazy(() => import("./pages/CensusForm.jsx"));
 const SurveyForm = lazy(() => import("./pages/SurveyForm.jsx"));
 
 function PageFallback() {
@@ -42,9 +40,6 @@ export default function App() {
         setReady(true);
       }
 
-      initMobileNotifications().catch((error) => {
-        console.error("No se pudo inicializar push móvil", error);
-      });
     })();
 
     const unsubscribe = subscribeAuthChanges((nextHasSession) => {
@@ -76,7 +71,6 @@ export default function App() {
 
           {/* Rutas públicas — sin autenticación */}
           <Route path="/eventos/:id" element={<EventDetail />} />
-          <Route path="/censo/:token" element={<CensusForm />} />
           <Route path="/encuesta/:token" element={<SurveyForm />} />
           <Route path="*" element={<Navigate to="/" replace />} />
 
