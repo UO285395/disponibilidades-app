@@ -1874,6 +1874,8 @@ def admin_delete_user(
     db.query(AdminAssignment).filter(AdminAssignment.granted_by == user_id).update(
         {AdminAssignment.granted_by: None}, synchronize_session=False)
     db.query(models.DeviceToken).filter(models.DeviceToken.user_id == user_id).delete(synchronize_session=False)
+    db.query(UserOrgUnit).filter(UserOrgUnit.user_id == user_id).delete(synchronize_session=False)
+    db.query(WebPushSubscription).filter(WebPushSubscription.user_id == user_id).delete(synchronize_session=False)
     db.query(models.GuestPolicy).filter(models.GuestPolicy.updated_by == user_id).update(
         {models.GuestPolicy.updated_by: None}, synchronize_session=False)
     # created_by es NOT NULL: se reasigna al superadmin que borra para conservar
