@@ -802,7 +802,7 @@ def login(data: Login, request: Request, db: Session = Depends(get_db)):
     email = (data.email or "").strip().lower()
     _ensure_login_allowed(db, email)
 
-    user = db.query(User).filter(User.email == email).first()
+    user = db.query(User).filter(func.lower(User.email) == email).first()
     if not user or not verify_password(data.password, user.hashed_password):
         _record_login_failure(db, email, request)
         raise HTTPException(400, "Credenciales incorrectas")
@@ -1394,7 +1394,8 @@ def admin_create_user(
     if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role, set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
         raise HTTPException(403, "Gestión de usuarios deshabilitada para tu dominio")
 
-    email = data.email.strip().lower()
+    email = data.email.strip()          # se guarda tal como se escribió
+    email_lower = email.lower()          # solo para validaciones y deduplicación
     full_name = data.full_name.strip()
     password = data.password.strip()
 
@@ -1405,7 +1406,7 @@ def admin_create_user(
     if not password:
         raise HTTPException(400, "Contraseña obligatoria")
 
-    if db.query(User).filter(User.email == email).first():
+    if db.query(User).filter(func.lower(User.email) == email_lower).first():
         raise HTTPException(400, "Email ya registrado")
 
     # El alcance ya NO se deduce del email: el usuario se crea en la estructura
