@@ -3733,7 +3733,22 @@ def admin_all_availability(
         .options(joinedload(Availability.user))
     )
     if allowed_unit_ids is not None:
-        query = query.filter(User.org_unit_id.in_(allowed_unit_ids)) if allowed_unit_ids else query.filter(False)
+        if not allowed_unit_ids:
+            query = query.filter(False)
+        else:
+            # Un militante aparece si su unidad primaria O alguna de sus membresías
+            # adicionales (UserOrgUnit) coincide con el ámbito seleccionado.
+            extra_member_ids = (
+                db.query(UserOrgUnit.user_id)
+                .filter(UserOrgUnit.org_unit_id.in_(allowed_unit_ids))
+                .subquery()
+            )
+            query = query.filter(
+                or_(
+                    User.org_unit_id.in_(allowed_unit_ids),
+                    User.id.in_(extra_member_ids),
+                )
+            )
     items = query.all()
 
     unit_names = {u.id: u.name for u in db.query(models.OrgUnit).all()}
