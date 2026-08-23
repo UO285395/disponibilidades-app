@@ -1,6 +1,5 @@
-from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException, Body, Query, Request, Response
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session, joinedload
@@ -781,23 +780,6 @@ class GeoCityCreate(BaseModel):
 
 # =========================================================
 # AUTH
-# =========================================================
-# Descarga de la APK Android
-# =========================================================
-_APK_PATH = Path(__file__).parent / "static" / "disponibilidad.apk"
-
-@app.get("/descargar/app", include_in_schema=False)
-def download_app():
-    """Descarga directa de la APK Android. Sin autenticación."""
-    if not _APK_PATH.exists():
-        raise HTTPException(404, "APK no disponible")
-    return FileResponse(
-        path=str(_APK_PATH),
-        filename="disponibilidad.apk",
-        media_type="application/vnd.android.package-archive",
-    )
-
-
 # =========================================================
 @app.post("/register")
 def register(data: Register, db: Session = Depends(get_db)):
