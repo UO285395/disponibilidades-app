@@ -255,4 +255,17 @@ export const adminAPI = {
   usersInUnit(unitId) {
     return request(`/admin/users?unit_id=${unitId}`);
   },
+
+  // Membresías adicionales (comités superiores, sin rol de admin)
+  listUserMemberships(userId) {
+    return request(`/admin/users/${userId}/memberships`);
+  },
+
+  addUserMembership(userId, orgUnitId) {
+    return request(`/admin/users/${userId}/memberships`, "POST", { org_unit_id: orgUnitId });
+  },
+
+  removeUserMembership(userId, membershipId) {
+    return request(`/admin/users/${userId}/memberships/${membershipId}`, "DELETE");
+  },
 };

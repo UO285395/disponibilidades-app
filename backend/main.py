@@ -49,6 +49,7 @@ from models import (
     DeviceToken,
     NotificationDispatch,
     InstanceLog,
+    UserOrgUnit,
 )
 from database import SessionLocal, engine
 from services.calendar_service import generate_ics
@@ -568,6 +569,10 @@ class AdminUserGroupTagUpdate(BaseModel):
 
 
 class AdminUserOrgUnitUpdate(BaseModel):
+    org_unit_id: int
+
+
+class UserMembershipAdd(BaseModel):
     org_unit_id: int
 
 
@@ -1493,6 +1498,157 @@ def admin_update_user_org_unit(
     db.commit()
     db.refresh(user)
     return {"id": user.id, "org_unit_id": user.org_unit_id, "org_unit_name": unit.name}
+
+
+# ── Membresías adicionales (comités superiores, sin rol de administrador) ──
+
+@app.get("/admin/users/{user_id}/memberships")
+def admin_list_user_memberships(
+    user_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db),
+):
+    admin = get_user_from_token(cred.credentials, db)
+    require_admin(admin)
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role,
+                               set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
+        raise HTTPException(403, "Gestión de usuarios deshabilitada")
+
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(404, "Usuario no encontrado")
+    if not _can_admin_manage_user(admin, target, db):
+        raise HTTPException(403, "No autorizado sobre este usuario")
+
+    rows = (
+        db.query(UserOrgUnit)
+        .options(joinedload(UserOrgUnit.org_unit))
+        .filter(UserOrgUnit.user_id == user_id)
+        .all()
+    )
+    return [
+        {
+            "id": m.id,
+            "org_unit_id": m.org_unit_id,
+            "org_unit_name": m.org_unit.name if m.org_unit else None,
+            "level_label": m.org_unit.level_type.label if (m.org_unit and m.org_unit.level_type) else None,
+        }
+        for m in rows
+    ]
+
+
+@app.post("/admin/users/{user_id}/memberships")
+def admin_add_user_membership(
+    user_id: int,
+    data: UserMembershipAdd,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db),
+):
+    """Asocia al militante con un comité superior (sin rol de administrador).
+    Restricción: máximo una unidad por nivel de jerarquía, incluyendo el
+    colectivo base. El comité debe estar dentro del ámbito del administrador."""
+    admin = get_user_from_token(cred.credentials, db)
+    require_admin(admin)
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role,
+                               set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
+        raise HTTPException(403, "Gestión de usuarios deshabilitada")
+
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(404, "Usuario no encontrado")
+    if not _can_admin_manage_user(admin, target, db):
+        raise HTTPException(403, "No autorizado sobre este usuario")
+
+    unit = db.query(models.OrgUnit).filter(models.OrgUnit.id == data.org_unit_id).first()
+    if not unit:
+        raise HTTPException(404, "Unidad no encontrada")
+    if not org_service.can_manage_unit(db, admin, data.org_unit_id):
+        raise HTTPException(403, "No autorizado sobre esa unidad")
+
+    # No añadir el colectivo base como membresía adicional
+    if target.org_unit_id == data.org_unit_id:
+        raise HTTPException(400, "Esta unidad ya es el colectivo base del militante")
+
+    # Restricción: un nivel de jerarquía por militante
+    # 1) ¿El colectivo base ocupa ya este nivel?
+    if target.org_unit_id:
+        base_unit = db.query(models.OrgUnit).filter(models.OrgUnit.id == target.org_unit_id).first()
+        if base_unit and base_unit.level_type_id == unit.level_type_id:
+            raise HTTPException(
+                400,
+                f"El militante ya pertenece a una unidad de este nivel (colectivo base: {base_unit.name})",
+            )
+    # 2) ¿Ya tiene otra membresía adicional en este nivel?
+    conflict = (
+        db.query(UserOrgUnit)
+        .join(models.OrgUnit, UserOrgUnit.org_unit_id == models.OrgUnit.id)
+        .filter(
+            UserOrgUnit.user_id == user_id,
+            models.OrgUnit.level_type_id == unit.level_type_id,
+        )
+        .first()
+    )
+    if conflict:
+        raise HTTPException(
+            400,
+            "El militante ya pertenece a una unidad de este nivel de jerarquía (uno por nivel)",
+        )
+
+    # Comprobar duplicado exacto
+    existing = (
+        db.query(UserOrgUnit)
+        .filter(UserOrgUnit.user_id == user_id, UserOrgUnit.org_unit_id == data.org_unit_id)
+        .first()
+    )
+    if existing:
+        raise HTTPException(400, "El militante ya es miembro de esta unidad")
+
+    membership = UserOrgUnit(
+        user_id=user_id,
+        org_unit_id=data.org_unit_id,
+        created_at=datetime.utcnow().isoformat(),
+    )
+    db.add(membership)
+    db.commit()
+    db.refresh(membership)
+    return {
+        "id": membership.id,
+        "org_unit_id": membership.org_unit_id,
+        "org_unit_name": unit.name,
+        "level_label": unit.level_type.label if unit.level_type else None,
+    }
+
+
+@app.delete("/admin/users/{user_id}/memberships/{membership_id}")
+def admin_remove_user_membership(
+    user_id: int,
+    membership_id: int,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db),
+):
+    admin = get_user_from_token(cred.credentials, db)
+    require_admin(admin)
+    if not _is_feature_enabled(db, _get_domain(admin.email), "users", admin.role,
+                               set(_parse_group_tags(admin.group_tag)), unit_id=admin.org_unit_id):
+        raise HTTPException(403, "Gestión de usuarios deshabilitada")
+
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(404, "Usuario no encontrado")
+    if not _can_admin_manage_user(admin, target, db):
+        raise HTTPException(403, "No autorizado sobre este usuario")
+
+    membership = (
+        db.query(UserOrgUnit)
+        .filter(UserOrgUnit.id == membership_id, UserOrgUnit.user_id == user_id)
+        .first()
+    )
+    if not membership:
+        raise HTTPException(404, "Membresía no encontrada")
+
+    db.delete(membership)
+    db.commit()
+    return {"ok": True}
 
 
 @app.put("/admin/users/{user_id}/group-tag")
@@ -3561,8 +3717,13 @@ def admin_all_availability(
     if unit_id is not None:
         if not org_service.can_manage_unit(db, admin, unit_id):
             raise HTTPException(403, "No autorizado sobre esa unidad")
-        requested = set(org_service.subtree_unit_ids(db, unit_id))
-        allowed_unit_ids = list(requested if allowed_unit_ids is None else requested.intersection(allowed_unit_ids))
+        # Filtro exacto: solo la unidad elegida, sin incluir las dependientes.
+        # El administrador que quiera ver una rama completa puede no seleccionar
+        # ninguna unidad (devuelve todo su ámbito) o elegir cada unidad aparte.
+        if allowed_unit_ids is None or unit_id in set(allowed_unit_ids):
+            allowed_unit_ids = [unit_id]
+        else:
+            allowed_unit_ids = []  # unidad fuera del ámbito del admin
 
     # joinedload: sin él, leer a.user en la serialización volvería a consultar
     # por cada franja.

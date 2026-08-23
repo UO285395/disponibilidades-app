@@ -325,7 +325,7 @@ const weekStart = useMemo(() => {
       <Group align="flex-end" mb="lg" grow>
         <OrgUnitSelect
           label="Ámbito"
-          description="Incluye las estructuras que dependen de la elegida"
+          description="Muestra solo los militantes de la estructura seleccionada, sin incluir las dependientes"
           placeholder="Todo mi ámbito"
           value={unitId}
           onChange={setUnitId}
@@ -448,6 +448,8 @@ const weekStart = useMemo(() => {
 
       {/* Modal usuarios */}
       <Modal
+        centered
+        size="sm"
         opened={modalOpen}
         onClose={() => setModalOpen(false)}
         title={`Usuarios disponibles (${modalSlot})`}

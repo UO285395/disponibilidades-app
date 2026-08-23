@@ -224,7 +224,7 @@ function CreateUnitModal({ parent, allowedTypes, onClose, onDone }) {
   }
 
   return (
-    <Modal opened onClose={onClose} title={parent ? `Nueva unidad bajo "${parent.name}"` : "Nueva estructura raíz"}>
+    <Modal centered size="sm" opened onClose={onClose} title={parent ? `Nueva unidad bajo "${parent.name}"` : "Nueva estructura raíz"}>
       <Select label="Tipo" data={allowedTypes.map((t) => ({ value: String(t.id), label: t.label }))}
         value={levelTypeId} onChange={setLevelTypeId} allowDeselect={false} mb="sm" />
       <TextInput label="Nombre" value={name} onChange={(e) => setName(e.target.value)} mb="md" />
@@ -252,7 +252,7 @@ function RenameUnitModal({ unit, onClose, onDone }) {
     }
   }
   return (
-    <Modal opened onClose={onClose} title="Renombrar unidad">
+    <Modal centered size="sm" opened onClose={onClose} title="Renombrar unidad">
       <TextInput label="Nombre" value={name} onChange={(e) => setName(e.target.value)} mb="md" />
       <Group justify="flex-end">
         <Button variant="default" onClick={onClose}>Cancelar</Button>
@@ -280,7 +280,7 @@ function MoveUnitModal({ unit, tree, onClose, onDone }) {
     }
   }
   return (
-    <Modal opened onClose={onClose} title={`Mover "${unit.name}"`}>
+    <Modal centered size="sm" opened onClose={onClose} title={`Mover "${unit.name}"`}>
       <Select label="Nueva unidad superior" searchable
         data={candidates.map((u) => ({ value: String(u.id), label: `${u.name} (${u.level_label})` }))}
         value={target} onChange={setTarget} mb="md" />
@@ -338,7 +338,7 @@ function UnitAdminsModal({ unit, onClose }) {
   }
 
   return (
-    <Modal opened onClose={onClose} title={`Administradores de "${unit.name}"`}>
+    <Modal centered size="sm" opened onClose={onClose} title={`Administradores de "${unit.name}"`}>
       {loading ? <Loader /> : (
         <>
           <Stack gap="xs" mb="md">
@@ -456,7 +456,7 @@ function UnitTerritoriesModal({ unit, onClose }) {
   const provinceOptions = provinces.map((p) => ({ value: String(p.id), label: p.name }));
 
   return (
-    <Modal opened onClose={onClose} title={`Territorio de "${unit.name}"`} size="lg">
+    <Modal centered opened onClose={onClose} title={`Territorio de "${unit.name}"`} size="lg">
       {loading ? <Loader /> : (
         <>
           <Text size="xs" c="dimmed" mb="sm">
@@ -533,7 +533,7 @@ function UnitMembersModal({ unit, onClose }) {
     })();
   }, [unit.id]);
   return (
-    <Modal opened onClose={onClose} title={`Personas en "${unit.name}"`}>
+    <Modal centered size="sm" opened onClose={onClose} title={`Personas en "${unit.name}"`}>
       {loading ? <Loader /> : members.length === 0 ? (
         <Text size="sm" c="dimmed">No hay personas en esta unidad.</Text>
       ) : (

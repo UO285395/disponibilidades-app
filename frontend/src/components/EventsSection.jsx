@@ -514,6 +514,8 @@ export default function EventsSection() {
       )}
 
       <Modal
+        centered
+        size="sm"
         opened={companionModalOpen}
         onClose={() => {
           setCompanionModalOpen(false);

@@ -14,6 +14,9 @@ import {
   Badge,
   Select,
   Center,
+  Stack,
+  Loader,
+  Divider,
 } from "@mantine/core";
 import { IconSearch } from "@tabler/icons-react";
 
@@ -33,6 +36,11 @@ export default function AdminUsers({ currentUser }) {
   const [tagDrafts, setTagDrafts] = useState({});
   const [modalUserId, setModalUserId] = useState(null);
   const [moveUser, setMoveUser] = useState(null);
+  const [membershipUserId, setMembershipUserId] = useState(null);
+  const [memberships, setMemberships] = useState([]);
+  const [membershipUnitId, setMembershipUnitId] = useState(null);
+  const [membershipLoading, setMembershipLoading] = useState(false);
+  const [membershipError, setMembershipError] = useState("");
 
   function getGroupTags(user) {
     if (Array.isArray(user?.group_tags)) return user.group_tags;
@@ -128,6 +136,43 @@ export default function AdminUsers({ currentUser }) {
       await reload();
     } catch (e) {
       setError(e?.message || "Error creando usuario");
+    }
+  }
+
+  async function openMemberships(userId) {
+    setMembershipUserId(userId);
+    setMembershipError("");
+    setMembershipUnitId(null);
+    setMembershipLoading(true);
+    try {
+      const data = await adminAPI.listUserMemberships(userId);
+      setMemberships(data);
+    } catch (e) {
+      setMembershipError(e?.message || "Error cargando membresías");
+    } finally {
+      setMembershipLoading(false);
+    }
+  }
+
+  async function addMembership() {
+    if (!membershipUnitId) return;
+    setMembershipError("");
+    try {
+      const m = await adminAPI.addUserMembership(membershipUserId, Number(membershipUnitId));
+      setMemberships((prev) => [...prev, m]);
+      setMembershipUnitId(null);
+    } catch (e) {
+      setMembershipError(e?.message || "No se pudo añadir la membresía");
+    }
+  }
+
+  async function removeMembership(membershipId) {
+    setMembershipError("");
+    try {
+      await adminAPI.removeUserMembership(membershipUserId, membershipId);
+      setMemberships((prev) => prev.filter((m) => m.id !== membershipId));
+    } catch (e) {
+      setMembershipError(e?.message || "No se pudo eliminar la membresía");
     }
   }
 
@@ -373,13 +418,21 @@ export default function AdminUsers({ currentUser }) {
                     </Button>
                   ) : null}
 
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => openMemberships(u.id)}
+                  >
+                    Comités
+                  </Button>
+
                   {currentUser.role === "superadmin" && currentUser.id !== u.id && (
                     <Button
                       size="xs"
                       color="red"
                       onClick={() => deleteUser(u.id)}
                     >
-                      Eliminar usuario
+                      Eliminar
                     </Button>
                   )}
                 </Group>
@@ -391,6 +444,8 @@ export default function AdminUsers({ currentUser }) {
       )}
 
       <Modal
+        centered
+        size="sm"
         opened={Boolean(modalUser)}
         onClose={() => setModalUserId(null)}
         title={modalUser ? `Etiquetas de ${modalUser.full_name}` : "Etiquetas"}
@@ -417,6 +472,21 @@ export default function AdminUsers({ currentUser }) {
         )}
       </Modal>
 
+      {/* Modal de membresías adicionales (comités superiores) */}
+      {membershipUserId !== null && (
+        <MembershipsModal
+          user={sortedRows.find((u) => u.id === membershipUserId) || null}
+          memberships={memberships}
+          loading={membershipLoading}
+          error={membershipError}
+          unitId={membershipUnitId}
+          onUnitChange={setMembershipUnitId}
+          onAdd={addMembership}
+          onRemove={removeMembership}
+          onClose={() => { setMembershipUserId(null); setMemberships([]); }}
+        />
+      )}
+
       {moveUser && (
         <MoveUserModal
           user={moveUser}
@@ -432,7 +502,7 @@ function MoveUserModal({ user, onClose, onConfirm }) {
   const [unitId, setUnitId] = useState(user.org_unit_id ? String(user.org_unit_id) : null);
 
   return (
-    <Modal opened onClose={onClose} title={`Mover a ${user.full_name}`}>
+    <Modal centered size="sm" opened onClose={onClose} title={`Mover a ${user.full_name}`}>
       <Text size="sm" c="dimmed" mb="sm">
         Estructura actual: <b>{user.org_unit_name || "—"}</b>. Solo puedes moverlo
         a tu estructura o a una que dependa de ella.
@@ -449,6 +519,71 @@ function MoveUserModal({ user, onClose, onConfirm }) {
         <Button variant="default" onClick={onClose}>Cancelar</Button>
         <Button disabled={!unitId} onClick={() => onConfirm(unitId)}>Mover</Button>
       </Group>
+    </Modal>
+  );
+}
+
+function MembershipsModal({
+  user, memberships, loading, error,
+  unitId, onUnitChange, onAdd, onRemove, onClose,
+}) {
+  return (
+    <Modal
+      centered
+      size="sm"
+      opened
+      onClose={onClose}
+      title={user ? `Comités de ${user.full_name}` : "Comités adicionales"}
+    >
+      <Stack gap="sm">
+        <Text size="xs" c="dimmed">
+          Comité base: <b>{user?.org_unit_name || "—"}</b>. Aquí puedes añadir
+          membresías a comités superiores (máximo uno por nivel de jerarquía).
+        </Text>
+
+        <Divider />
+
+        {loading ? (
+          <Center py="md"><Loader size="sm" /></Center>
+        ) : memberships.length === 0 ? (
+          <Text size="sm" c="dimmed">Sin comités adicionales.</Text>
+        ) : (
+          <Stack gap="xs">
+            {memberships.map((m) => (
+              <Group key={m.id} justify="space-between" wrap="nowrap">
+                <div>
+                  <Text size="sm" fw={500}>{m.org_unit_name}</Text>
+                  {m.level_label && (
+                    <Text size="xs" c="dimmed">{m.level_label}</Text>
+                  )}
+                </div>
+                <Button
+                  size="compact-xs"
+                  color="red"
+                  variant="subtle"
+                  onClick={() => onRemove(m.id)}
+                >
+                  Eliminar
+                </Button>
+              </Group>
+            ))}
+          </Stack>
+        )}
+
+        {error && <Text size="xs" c="red">{error}</Text>}
+
+        <Divider />
+
+        <OrgUnitSelect
+          label="Añadir comité"
+          placeholder="Selecciona una estructura"
+          value={unitId}
+          onChange={onUnitChange}
+        />
+        <Button disabled={!unitId} onClick={onAdd} fullWidth>
+          Añadir
+        </Button>
+      </Stack>
     </Modal>
   );
 }

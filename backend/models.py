@@ -508,6 +508,26 @@ class ContentDistributionTarget(Base):
     org_unit_id = Column(Integer, ForeignKey("org_units.id"), nullable=False)
 
 
+class UserOrgUnit(Base):
+    """Pertenencia adicional de un militante a comités superiores, sin rol de
+    administrador. Su colectivo base (User.org_unit_id) ya ocupa un nivel de
+    jerarquía; aquí solo se guardan niveles superiores. Regla: máximo una unidad
+    por nivel de jerarquía (level_type_id) por militante, incluyendo el colectivo
+    base."""
+    __tablename__ = "user_org_units"
+    __table_args__ = (
+        UniqueConstraint("user_id", "org_unit_id", name="ux_user_org_units_user_unit"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    org_unit_id = Column(Integer, ForeignKey("org_units.id"), nullable=False, index=True)
+    created_at = Column(String, nullable=True)
+
+    user = relationship("User", foreign_keys=[user_id])
+    org_unit = relationship("OrgUnit")
+
+
 # =========================================================
 # GEOGRAFÍA (para el filtro público por provincia)
 # =========================================================
