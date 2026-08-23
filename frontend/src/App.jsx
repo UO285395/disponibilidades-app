@@ -7,6 +7,7 @@ import PublicHome from "./pages/PublicHome.jsx";
 import EventDetail from "./pages/EventDetail.jsx";
 import { getToken, initializeAuthStorage, subscribeAuthChanges } from "./api/api.js";
 import { initMobileNotifications } from "./services/mobileNotifications.js";
+import { initWebPushServiceWorker } from "./services/webPushService.js";
 
 // Lo que un visitante NO necesita se carga solo al entrar. El panel de
 // administración es la mayor parte del código de la app: un visitante que solo
@@ -45,6 +46,9 @@ export default function App() {
       initMobileNotifications().catch((error) => {
         console.error("No se pudo inicializar push móvil", error);
       });
+
+      // Registra el service worker para web push (solo en web, no en APK).
+      initWebPushServiceWorker().catch(() => {});
     })();
 
     const unsubscribe = subscribeAuthChanges((nextHasSession) => {

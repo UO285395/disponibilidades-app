@@ -50,6 +50,7 @@ from models import (
     NotificationDispatch,
     InstanceLog,
     UserOrgUnit,
+    WebPushSubscription,
 )
 from database import SessionLocal, engine
 from services.calendar_service import generate_ics
@@ -574,6 +575,16 @@ class AdminUserOrgUnitUpdate(BaseModel):
 
 class UserMembershipAdd(BaseModel):
     org_unit_id: int
+
+
+class WebPushSubscribeRequest(BaseModel):
+    endpoint: str
+    p256dh: str
+    auth: str
+
+
+class WebPushUnsubscribeRequest(BaseModel):
+    endpoint: str
 
 
 class AdminUserGroupTagAdd(BaseModel):
@@ -1647,6 +1658,69 @@ def admin_remove_user_membership(
         raise HTTPException(404, "Membresía no encontrada")
 
     db.delete(membership)
+    db.commit()
+    return {"ok": True}
+
+
+# ── Web Push (VAPID) ──────────────────────────────────────────────────────────
+
+@app.get("/web-push/vapid-public-key")
+def get_vapid_public_key():
+    """Devuelve la clave pública VAPID para que el navegador pueda suscribirse.
+    No requiere autenticación (la clave pública es pública por diseño)."""
+    if not _VAPID_PUBLIC_KEY:
+        raise HTTPException(503, "Web push no configurado en este servidor")
+    return {"public_key": _VAPID_PUBLIC_KEY}
+
+
+@app.post("/web-push/subscribe")
+def web_push_subscribe(
+    data: WebPushSubscribeRequest,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db),
+):
+    """Registra o actualiza la suscripción web push del usuario autenticado."""
+    user = get_user_from_token(cred.credentials, db)
+
+    existing = (
+        db.query(WebPushSubscription)
+        .filter(
+            WebPushSubscription.user_id == user.id,
+            WebPushSubscription.endpoint == data.endpoint,
+        )
+        .first()
+    )
+    now_str = datetime.utcnow().isoformat()
+    if existing:
+        existing.p256dh = data.p256dh
+        existing.auth = data.auth
+        existing.last_used = now_str
+    else:
+        sub = WebPushSubscription(
+            user_id=user.id,
+            endpoint=data.endpoint,
+            p256dh=data.p256dh,
+            auth=data.auth,
+            created_at=now_str,
+        )
+        db.add(sub)
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/web-push/unsubscribe")
+def web_push_unsubscribe(
+    data: WebPushUnsubscribeRequest,
+    cred: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    db: Session = Depends(get_db),
+):
+    """Elimina la suscripción web push del usuario autenticado."""
+    user = get_user_from_token(cred.credentials, db)
+
+    db.query(WebPushSubscription).filter(
+        WebPushSubscription.user_id == user.id,
+        WebPushSubscription.endpoint == data.endpoint,
+    ).delete(synchronize_session=False)
     db.commit()
     return {"ok": True}
 
@@ -4851,6 +4925,77 @@ def _can_admin_manage_user(admin: User, target_user: User, db: Session | None = 
     return org_service.can_manage_legacy_domain(db, admin, _get_domain(target_user.email))
 
 
+# =========================================================
+# WEB PUSH (VAPID / RFC 8292)
+# =========================================================
+# Requiere las variables de entorno VAPID_PRIVATE_KEY y VAPID_PUBLIC_KEY
+# (base64url de la clave ECDSA P-256 sin padding). Se generan una sola vez;
+# si no están configuradas, el envío push web se omite silenciosamente.
+
+_VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "").strip()
+_VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "").strip()
+_VAPID_CLAIMS_EMAIL = os.getenv("VAPID_CLAIMS_EMAIL", "admin@partido.local")
+
+
+def _send_web_push(endpoint: str, p256dh: str, auth: str, title: str, body: str, url: str = "/"):
+    """Envía una notificación push web a un suscriptor individual.
+    Devuelve (True, None) si tiene éxito, (False, motivo) si falla."""
+    if not _VAPID_PRIVATE_KEY:
+        return False, "vapid_not_configured"
+    try:
+        from pywebpush import webpush, WebPushException  # noqa: PLC0415
+        subscription_info = {
+            "endpoint": endpoint,
+            "keys": {"p256dh": p256dh, "auth": auth},
+        }
+        payload = json.dumps({"title": title, "body": body, "url": url})
+        webpush(
+            subscription_info=subscription_info,
+            data=payload,
+            vapid_private_key=_VAPID_PRIVATE_KEY,
+            vapid_claims={"sub": f"mailto:{_VAPID_CLAIMS_EMAIL}"},
+        )
+        return True, None
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+
+
+def _send_web_push_to_users(
+    db: Session, user_ids: list[int], title: str, body: str, url: str = "/"
+) -> dict:
+    """Envía push web a todos los suscriptores de los usuarios indicados."""
+    if not user_ids or not _VAPID_PRIVATE_KEY:
+        return {"web_push_sent": 0, "web_push_failed": 0}
+
+    subs = (
+        db.query(WebPushSubscription)
+        .filter(WebPushSubscription.user_id.in_(user_ids))
+        .all()
+    )
+    sent = failed = 0
+    stale_ids: list[int] = []
+    now_str = datetime.utcnow().isoformat()
+
+    for sub in subs:
+        ok, reason = _send_web_push(sub.endpoint, sub.p256dh, sub.auth, title, body, url)
+        if ok:
+            sent += 1
+            sub.last_used = now_str
+        else:
+            failed += 1
+            # 410 Gone → el endpoint caducó; marcar para borrar
+            if reason and "410" in reason:
+                stale_ids.append(sub.id)
+
+    if stale_ids:
+        db.query(WebPushSubscription).filter(
+            WebPushSubscription.id.in_(stale_ids)
+        ).delete(synchronize_session=False)
+
+    db.commit()
+    return {"web_push_sent": sent, "web_push_failed": failed}
+
+
 def _load_fcm_service_account():
     raw = (
         os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
@@ -5056,12 +5201,18 @@ def _notify_users_by_ids(db: Session, user_ids: list[int], title: str, body: str
     unique_tokens = sorted({row.token for row in token_rows if row.token})
 
     result = _send_fcm_notification(unique_tokens, title, body, data=data)
+
+    # Web Push (VAPID) — para navegadores web y PWA (iOS 16.4+)
+    wp = _send_web_push_to_users(db, user_ids, title, body)
+
     return {
         "target_users": len(set(user_ids)),
         "tokens": len(unique_tokens),
         "sent": result["sent"],
         "failed": result["failed"],
         "reason": result["reason"],
+        "web_push_sent": wp["web_push_sent"],
+        "web_push_failed": wp["web_push_failed"],
     }
 
 

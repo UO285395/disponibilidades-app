@@ -1,0 +1,18 @@
+{
+  "name": "Disponibilidades",
+  "short_name": "Disponibilidades",
+  "description": "Gestión de disponibilidad y eventos",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1b2e",
+  "theme_color": "#228be6",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

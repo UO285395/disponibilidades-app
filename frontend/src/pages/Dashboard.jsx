@@ -6,10 +6,16 @@ import {
 } from "@mantine/core";
 import {
   IconCalendarTime, IconCalendarEvent, IconBuildingCommunity, IconDotsVertical,
-  IconUserShield, IconKey, IconLogout, IconBell,
+  IconUserShield, IconKey, IconLogout, IconBell, IconBellOff,
 } from "@tabler/icons-react";
 import { clearToken, eventsAPI } from "../api/api.js";
 import { useSessionUser } from "../hooks/useSessionUser.js";
+import {
+  isWebPushSupported,
+  isWebPushActive,
+  activateWebPush,
+  deactivateWebPush,
+} from "../services/webPushService.js";
 import MobileWeekCalendar from "../components/MobileWeekCalendar.jsx";
 import EventsSection from "../components/EventsSection.jsx";
 import SpaceReservations from "../components/SpaceReservations.jsx";
@@ -33,6 +39,8 @@ export default function Dashboard() {
   const [changePasswordOpened, setChangePasswordOpened] = useState(false);
   const [reminderPrefsOpened, setReminderPrefsOpened] = useState(false);
   const [pendingEvents, setPendingEvents] = useState(0);
+  const [webPushActive, setWebPushActive] = useState(false);
+  const [webPushLoading, setWebPushLoading] = useState(false);
 
   // Conteo ligero de eventos sin responder para el badge de la pestaña.
   // Se hace aquí porque el panel de eventos no está montado si la pestaña no
@@ -58,6 +66,30 @@ export default function Dashboard() {
     })();
     return () => { cancelled = true; };
   }, [user?.events_enabled]);
+
+  // Sincroniza el estado de la suscripción push web al montar.
+  useEffect(() => {
+    isWebPushActive().then(setWebPushActive).catch(() => {});
+  }, []);
+
+  async function toggleWebPush() {
+    setWebPushLoading(true);
+    try {
+      if (webPushActive) {
+        await deactivateWebPush();
+        setWebPushActive(false);
+      } else {
+        const result = await activateWebPush();
+        if (result === "subscribed") setWebPushActive(true);
+        else if (result === "denied") alert("Has bloqueado las notificaciones en este navegador. Actívalas desde los ajustes del navegador.");
+        else if (result === "unsupported") alert("Este navegador no admite notificaciones push. En iOS instala la app en la pantalla de inicio.");
+      }
+    } catch {
+      // Fallo silencioso; el estado queda como estaba.
+    } finally {
+      setWebPushLoading(false);
+    }
+  }
 
   async function logout() {
     await clearToken();
@@ -102,6 +134,15 @@ export default function Dashboard() {
             <Menu.Item leftSection={<IconBell size={18} />} onClick={() => setReminderPrefsOpened(true)}>
               Recordatorios
             </Menu.Item>
+            {isWebPushSupported() && (
+              <Menu.Item
+                leftSection={webPushActive ? <IconBellOff size={18} /> : <IconBell size={18} />}
+                onClick={toggleWebPush}
+                disabled={webPushLoading}
+              >
+                {webPushActive ? "Desactivar notificaciones web" : "Activar notificaciones web"}
+              </Menu.Item>
+            )}
             <Menu.Item leftSection={<IconKey size={18} />} onClick={() => setChangePasswordOpened(true)}>
               Cambiar contraseña
             </Menu.Item>

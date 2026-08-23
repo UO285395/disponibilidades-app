@@ -5,3 +5,4 @@ psycopg2-binary
 python-jose
 passlib[argon2]
 python-multipart
+pywebpush

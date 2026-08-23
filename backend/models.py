@@ -528,6 +528,27 @@ class UserOrgUnit(Base):
     org_unit = relationship("OrgUnit")
 
 
+class WebPushSubscription(Base):
+    """Suscripción web push de un usuario (navegador). Guarda el endpoint
+    del servicio push del navegador y las claves de cifrado del cliente
+    (ECDH p256dh + auth secret) para enviar notificaciones push sin FCM.
+    Compatible con Chrome, Firefox, Edge y Safari (iOS 16.4+ PWA)."""
+    __tablename__ = "web_push_subscriptions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "endpoint", name="ux_web_push_user_endpoint"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    endpoint = Column(String, nullable=False)
+    p256dh = Column(String, nullable=False)   # ECDH public key del cliente (base64url)
+    auth = Column(String, nullable=False)      # auth secret del cliente (base64url)
+    created_at = Column(String, nullable=True)
+    last_used = Column(String, nullable=True)
+
+    user = relationship("User", foreign_keys=[user_id])
+
+
 # =========================================================
 # GEOGRAFÍA (para el filtro público por provincia)
 # =========================================================
