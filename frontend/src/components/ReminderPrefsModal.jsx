@@ -40,7 +40,7 @@ export default function ReminderPrefsModal({ opened, onClose }) {
   }
 
   return (
-    <Modal opened={opened} onClose={onClose} title="Recordatorios" centered>
+    <Modal opened={opened} onClose={onClose} title="Recordatorios" centered size="sm">
       <Stack gap="md">
         <Text size="sm" c="dimmed">
           Configura cómo quieres recibir avisos. Todo es opcional: solo recibirás

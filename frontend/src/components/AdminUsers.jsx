@@ -352,6 +352,7 @@ export default function AdminUsers({ currentUser }) {
           <Text c="dimmed">Ningún usuario coincide con los filtros.</Text>
         </Center>
       ) : (
+      <div style={{ overflowX: "auto" }}>
       <Table highlightOnHover>
         <Table.Thead>
           <Table.Tr>
@@ -441,6 +442,7 @@ export default function AdminUsers({ currentUser }) {
           ))}
         </Table.Tbody>
       </Table>
+      </div>
       )}
 
       <Modal

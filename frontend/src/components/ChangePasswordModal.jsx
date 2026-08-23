@@ -59,6 +59,7 @@ export default function ChangePasswordModal({ opened, onClose }) {
       onClose={onClose}
       title="Cambiar contraseña"
       centered
+      size="sm"
     >
       <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
         {error && (
