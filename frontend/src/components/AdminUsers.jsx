@@ -122,7 +122,7 @@ export default function AdminUsers({ currentUser }) {
     try {
       // La estructura ya no se deduce del email: se indica explícitamente.
       await adminAPI.createUser({
-        email: email.trim().toLowerCase(),
+        email: email.trim(),
         full_name: fullName.trim(),
         password: password,
         group_tags: groupTag.trim() ? [groupTag.trim()] : null,
