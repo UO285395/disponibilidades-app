@@ -510,7 +510,7 @@ class ContentDistributionTarget(Base):
 
 class UserOrgUnit(Base):
     """Pertenencia adicional de un militante a comités superiores, sin rol de
-    administrador. Su colectivo base (User.org_unit_id) ya ocupa un nivel de
+    administrador. Su unidad base (User.org_unit_id) ya ocupa un nivel de
     jerarquía; aquí solo se guardan niveles superiores. Regla: máximo una unidad
     por nivel de jerarquía (level_type_id) por militante, incluyendo el colectivo
     base."""

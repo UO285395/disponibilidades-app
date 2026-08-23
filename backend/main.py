@@ -1576,7 +1576,7 @@ def admin_add_user_membership(
         if base_unit and base_unit.level_type_id == unit.level_type_id:
             raise HTTPException(
                 400,
-                f"El militante ya pertenece a una unidad de este nivel (colectivo base: {base_unit.name})",
+                f"El militante ya pertenece a una unidad de este nivel (unidad base: {base_unit.name})",
             )
     # 2) ¿Ya tiene otra membresía adicional en este nivel?
     conflict = (

@@ -537,7 +537,7 @@ function MembershipsModal({
     >
       <Stack gap="sm">
         <Text size="xs" c="dimmed">
-          Comité base: <b>{user?.org_unit_name || "—"}</b>. Aquí puedes añadir
+          Colectivo: <b>{user?.org_unit_name || "—"}</b>. Aquí puedes añadir
           membresías a comités superiores (máximo uno por nivel de jerarquía).
         </Text>
 
