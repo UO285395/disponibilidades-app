@@ -736,7 +736,7 @@ def login(data: Login, request: Request, db: Session = Depends(get_db)):
     email = (data.email or "").strip().lower()
     _ensure_login_allowed(db, email)
 
-    user = db.query(User).filter(User.email == data.email).first()
+    user = db.query(User).filter(User.email == email).first()
     if not user or not verify_password(data.password, user.hashed_password):
         _record_login_failure(db, email, request)
         raise HTTPException(400, "Credenciales incorrectas")
