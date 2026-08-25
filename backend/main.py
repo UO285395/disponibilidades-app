@@ -728,7 +728,41 @@ class GeoCityCreate(BaseModel):
 # =========================================================
 @app.post("/register")
 def register(data: Register, db: Session = Depends(get_db)):
-    raise HTTPException(403, "Registro público deshabilitado. Un administrador debe crear el usuario.")
+    # Solo se permite registrar cuando aún no existe ningún superadmin.
+    # En cuanto se crea el primero, este endpoint vuelve a quedar cerrado.
+    has_superadmin = db.query(models.User).filter(models.User.role == "superadmin").first()
+    if has_superadmin:
+        raise HTTPException(403, "Registro público deshabilitado. Contacta con el administrador.")
+
+    email = (data.email or "").strip().lower()
+    full_name = (data.full_name or "").strip()
+    password = (data.password or "").strip()
+
+    if not email or "@" not in email:
+        raise HTTPException(400, "Email inválido")
+    if not full_name:
+        raise HTTPException(400, "Nombre obligatorio")
+    if not password:
+        raise HTTPException(400, "Contraseña obligatoria")
+
+    if db.query(models.User).filter(models.User.email == email).first():
+        raise HTTPException(400, "Email ya registrado")
+
+    root_unit = org_service.get_root_unit(db)
+    if root_unit is None:
+        root_unit = org_service.ensure_colectivo_for_domain(db, email.split("@")[-1])
+
+    user = models.User(
+        email=email,
+        full_name=full_name,
+        hashed_password=hash_password(password),
+        role="superadmin",
+        org_unit_id=root_unit.id if root_unit else None,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"id": user.id, "email": user.email, "role": user.role}
 
 
 @app.post("/login")
