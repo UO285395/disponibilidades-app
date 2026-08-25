@@ -732,12 +732,9 @@ class GeoCityCreate(BaseModel):
 # =========================================================
 @app.post("/register")
 def register(data: Register, db: Session = Depends(get_db)):
-    # Solo se permite registrar cuando aún no existe ningún superadmin.
-    # En cuanto se crea el primero, este endpoint vuelve a quedar cerrado.
-    has_superadmin = db.query(models.User).filter(models.User.role == "superadmin").first()
-    if has_superadmin:
-        raise HTTPException(403, "Registro público deshabilitado. Contacta con el administrador.")
-
+    """Registro abierto: cualquier persona puede crear una cuenta de usuario normal.
+    El rol asignado es siempre 'user'; para obtener acceso de administrador
+    hay que usar el endpoint /setup/make-admin (solo disponible una vez)."""
     email = (data.email or "").strip().lower()
     full_name = (data.full_name or "").strip()
     password = (data.password or "").strip()
@@ -760,13 +757,41 @@ def register(data: Register, db: Session = Depends(get_db)):
         email=email,
         full_name=full_name,
         hashed_password=hash_password(password),
-        role="superadmin",
+        role="user",
         org_unit_id=root_unit.id if root_unit else None,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
     return {"id": user.id, "email": user.email, "role": user.role}
+
+
+class MakeAdminRequest(BaseModel):
+    email: str
+
+
+@app.post("/setup/make-admin")
+def setup_make_admin(data: MakeAdminRequest, db: Session = Depends(get_db)):
+    """Endpoint de un solo uso: convierte al usuario indicado en superadmin.
+    Solo funciona si no existe aún ningún superadmin en la instancia.
+    En cuanto se usa una vez queda bloqueado automáticamente."""
+    has_superadmin = db.query(models.User).filter(models.User.role == "superadmin").first()
+    if has_superadmin:
+        raise HTTPException(
+            403,
+            "Ya existe un administrador en esta instancia. "
+            "Este endpoint solo puede usarse una vez."
+        )
+
+    email = (data.email or "").strip().lower()
+    user = db.query(models.User).filter(func.lower(models.User.email) == email).first()
+    if not user:
+        raise HTTPException(404, "Usuario no encontrado. Regístrate primero con /register.")
+
+    user.role = "superadmin"
+    db.commit()
+    db.refresh(user)
+    return {"ok": True, "email": user.email, "role": user.role}
 
 
 @app.post("/login")
