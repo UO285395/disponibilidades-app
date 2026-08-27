@@ -5,6 +5,7 @@ import {
   Checkbox, ActionIcon, Stack, Badge, CopyButton, Divider,
 } from "@mantine/core";
 import { adminAPI } from "../api/adminApi.js";
+import { getShareableOrigin } from "../utils/url.js";
 
 const FIELD_TYPES = [
   { value: "text", label: "Texto corto" },
@@ -276,7 +277,7 @@ export default function AdminCensus() {
   if (!loaded) return null;
 
   const censusUrl = config
-    ? `${window.location.origin}/censo/${config.url_token}`
+    ? `${getShareableOrigin()}/censo/${config.url_token}`
     : null;
 
   return (

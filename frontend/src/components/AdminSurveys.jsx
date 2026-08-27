@@ -23,6 +23,7 @@ import {
 } from "@mantine/core";
 import { IconPencil, IconTrash } from "@tabler/icons-react";
 import { adminAPI } from "../api/adminApi.js";
+import { getShareableOrigin } from "../utils/url.js";
 
 const FIELD_TYPES = [
   { value: "text", label: "Texto corto" },
@@ -69,7 +70,7 @@ export default function AdminSurveys() {
   );
 
   const surveyUrl = selectedSurvey
-    ? `${window.location.origin}/encuesta/${selectedSurvey.url_token}`
+    ? `${getShareableOrigin()}/encuesta/${selectedSurvey.url_token}`
     : "";
 
   useEffect(() => {
