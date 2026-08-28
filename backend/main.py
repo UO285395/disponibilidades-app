@@ -3953,6 +3953,59 @@ def _smtp_attempt_send(smtp_host: str, smtp_port: int, smtp_user: str, smtp_pass
         server.send_message(msg)
 
 
+def _send_census_email_via_brevo(email_to: str, csv_content: str):
+    brevo_api_key = _env_str("BREVO_API_KEY", "")
+    brevo_from = _env_str("BREVO_FROM", _env_str("SMTP_FROM", ""))
+
+    print(
+        "ℹ️ BREVO config census:",
+        {
+            "from": brevo_from or "<empty>",
+            "has_api_key": bool(brevo_api_key),
+            "email_to": email_to,
+        },
+    )
+
+    if not brevo_api_key or not brevo_from:
+        return False, "Brevo no configurado (BREVO_API_KEY/BREVO_FROM)"
+
+    attachment_b64 = base64.b64encode(csv_content.encode("utf-8")).decode("ascii")
+
+    payload = {
+        "sender": {"email": brevo_from},
+        "to": [{"email": email_to}],
+        "subject": "Nueva respuesta de censo",
+        "textContent": "Adjunto se incluye una nueva respuesta del formulario de censo.",
+        "attachment": [{"name": "respuesta_censo.csv", "content": attachment_b64}],
+    }
+
+    req = urllib.request.Request(
+        "https://api.brevo.com/v3/smtp/email",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "api-key": brevo_api_key,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            raw_body = response.read().decode("utf-8", errors="replace")
+            print("✅ Email de censo enviado por Brevo", {"status": response.status, "body": raw_body[:200]})
+            return True, "ok"
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        error = f"Error enviando email por Brevo: HTTP {exc.code} - {error_body}"
+        print(f"⚠️ {error}")
+        return False, error
+    except Exception as exc:
+        error = f"Error enviando email por Brevo: {exc}"
+        print(f"⚠️ {error}")
+        return False, error
+
+
 def _send_census_email_via_resend(email_to: str, csv_content: str):
     resend_api_key = _env_str("RESEND_API_KEY", "")
     resend_from = _env_str("RESEND_FROM", _env_str("SMTP_FROM", ""))
@@ -4163,28 +4216,30 @@ def _send_census_email_via_smtp(email_to: str, csv_content: str):
 
 def _send_census_email(email_to: str, csv_content: str):
     provider = _env_str("CENSUS_EMAIL_PROVIDER", "").strip().lower()
+    brevo_api_key = _env_str("BREVO_API_KEY", "")
     resend_api_key = _env_str("RESEND_API_KEY", "")
     smtp_host = _env_str("SMTP_HOST", "")
 
+    if provider == "brevo":
+        print("ℹ️ Censo email transport seleccionado: brevo")
+        return _send_census_email_via_brevo(email_to, csv_content)
+
     if provider in {"resend", "http", "api"}:
         print("ℹ️ Censo email transport seleccionado: resend")
-        ok, msg = _send_census_email_via_resend(email_to, csv_content)
-        if not ok and smtp_host:
-            print(f"⚠️ Resend falló ({msg}); intentando SMTP como fallback")
-            return _send_census_email_via_smtp(email_to, csv_content)
-        return ok, msg
+        return _send_census_email_via_resend(email_to, csv_content)
 
     if provider == "smtp":
         print("ℹ️ Censo email transport seleccionado: smtp")
         return _send_census_email_via_smtp(email_to, csv_content)
 
+    # Autodetección: Brevo > Resend > SMTP
+    if brevo_api_key:
+        print("ℹ️ Censo email transport autodetectado: brevo")
+        return _send_census_email_via_brevo(email_to, csv_content)
+
     if resend_api_key:
         print("ℹ️ Censo email transport autodetectado: resend")
-        ok, msg = _send_census_email_via_resend(email_to, csv_content)
-        if not ok and smtp_host:
-            print(f"⚠️ Resend falló ({msg}); intentando SMTP como fallback")
-            return _send_census_email_via_smtp(email_to, csv_content)
-        return ok, msg
+        return _send_census_email_via_resend(email_to, csv_content)
 
     print("ℹ️ Censo email transport por defecto: smtp")
     return _send_census_email_via_smtp(email_to, csv_content)
@@ -4388,13 +4443,16 @@ def test_census_email(
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Prueba", "Fecha"])
-    writer.writerow(["Test SMTP", datetime.utcnow().isoformat()])
+    writer.writerow(["Test email", datetime.utcnow().isoformat()])
 
-    ok, message = _send_census_email(target_email, output.getvalue())
-    if not ok:
-        raise HTTPException(500, message)
+    csv_content = output.getvalue()
+    threading.Thread(
+        target=_send_census_email_async,
+        args=(target_email, csv_content),
+        daemon=True,
+    ).start()
 
-    return {"ok": True, "message": "Email de prueba enviado", "email_to": target_email}
+    return {"ok": True, "message": "Enviando email de prueba en segundo plano", "email_to": target_email}
 
 
 @app.get("/censo/{token}/fields")
