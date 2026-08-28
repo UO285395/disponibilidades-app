@@ -4164,10 +4164,15 @@ def _send_census_email_via_smtp(email_to: str, csv_content: str):
 def _send_census_email(email_to: str, csv_content: str):
     provider = _env_str("CENSUS_EMAIL_PROVIDER", "").strip().lower()
     resend_api_key = _env_str("RESEND_API_KEY", "")
+    smtp_host = _env_str("SMTP_HOST", "")
 
     if provider in {"resend", "http", "api"}:
         print("ℹ️ Censo email transport seleccionado: resend")
-        return _send_census_email_via_resend(email_to, csv_content)
+        ok, msg = _send_census_email_via_resend(email_to, csv_content)
+        if not ok and smtp_host:
+            print(f"⚠️ Resend falló ({msg}); intentando SMTP como fallback")
+            return _send_census_email_via_smtp(email_to, csv_content)
+        return ok, msg
 
     if provider == "smtp":
         print("ℹ️ Censo email transport seleccionado: smtp")
@@ -4175,7 +4180,11 @@ def _send_census_email(email_to: str, csv_content: str):
 
     if resend_api_key:
         print("ℹ️ Censo email transport autodetectado: resend")
-        return _send_census_email_via_resend(email_to, csv_content)
+        ok, msg = _send_census_email_via_resend(email_to, csv_content)
+        if not ok and smtp_host:
+            print(f"⚠️ Resend falló ({msg}); intentando SMTP como fallback")
+            return _send_census_email_via_smtp(email_to, csv_content)
+        return ok, msg
 
     print("ℹ️ Censo email transport por defecto: smtp")
     return _send_census_email_via_smtp(email_to, csv_content)
