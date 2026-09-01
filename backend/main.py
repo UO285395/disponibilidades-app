@@ -769,22 +769,54 @@ def register(data: Register, db: Session = Depends(get_db)):
 
 class MakeAdminRequest(BaseModel):
     email: str
+    reemplazar_email: str | None = None  # Email del admin roto a degradar (recuperación)
+
+
+@app.get("/setup/status")
+def setup_status(db: Session = Depends(get_db)):
+    """Estado público de la instancia: usuarios existentes y sus roles.
+    Útil para diagnosticar problemas de acceso sin entrar a la base de datos."""
+    users = db.query(models.User).all()
+    return {
+        "total_usuarios": len(users),
+        "usuarios": [
+            {"email": u.email, "rol": u.role}
+            for u in users
+        ],
+    }
 
 
 @app.post("/setup/make-admin")
 def setup_make_admin(data: MakeAdminRequest, db: Session = Depends(get_db)):
-    """Endpoint de un solo uso: convierte al usuario indicado en superadmin.
-    Solo funciona si no existe aún ningún superadmin en la instancia.
-    En cuanto se usa una vez queda bloqueado automáticamente."""
-    has_superadmin = db.query(models.User).filter(models.User.role == "superadmin").first()
-    if has_superadmin:
+    """Convierte al usuario indicado en superadmin.
+
+    - Sin 'reemplazar_email': solo funciona si no existe ningún superadmin.
+    - Con 'reemplazar_email': degrada ese superadmin a 'user' y promueve al nuevo.
+      Útil para recuperar el acceso cuando el admin inicial quedó roto.
+    """
+    email = (data.email or "").strip().lower()
+    reemplazar = (data.reemplazar_email or "").strip().lower()
+
+    existing_superadmins = db.query(models.User).filter(models.User.role == "superadmin").all()
+
+    if existing_superadmins and not reemplazar:
+        emails = ", ".join(u.email for u in existing_superadmins)
         raise HTTPException(
             403,
-            "Ya existe un administrador en esta instancia. "
-            "Este endpoint solo puede usarse una vez."
+            f"Ya existe un administrador ({emails}). "
+            "Para reemplazarlo incluye 'reemplazar_email' con su email en la petición."
         )
 
-    email = (data.email or "").strip().lower()
+    if existing_superadmins and reemplazar:
+        target = next((u for u in existing_superadmins if u.email.lower() == reemplazar), None)
+        if not target:
+            raise HTTPException(
+                404,
+                f"No se encontró ningún superadmin con email '{reemplazar}'. "
+                "Consulta /setup/status para ver los emails existentes."
+            )
+        target.role = "user"
+
     user = db.query(models.User).filter(func.lower(models.User.email) == email).first()
     if not user:
         raise HTTPException(404, "Usuario no encontrado. Regístrate primero con /register.")
