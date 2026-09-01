@@ -246,11 +246,12 @@ def bootstrap_initial_admin():
     try:
         existing = db.query(models.User).filter(models.User.email == initial_email).first()
         if existing:
-            # Actualizar la contraseña por si cambió la variable de entorno.
-            # Así un redeploy con INITIAL_ADMIN_PASSWORD nuevo siempre sincroniza.
+            # Actualizar contraseña Y rol por si cambió la variable de entorno
+            # o el rol fue modificado. Un redeploy siempre sincroniza el acceso.
             existing.hashed_password = _pwd.hash(initial_password)
+            existing.role = "superadmin"
             db.commit()
-            print(f"ℹ️  Bootstrap: contraseña del superadmin '{initial_email}' actualizada.")
+            print(f"ℹ️  Bootstrap: cuenta '{initial_email}' actualizada (contraseña + rol superadmin).")
             return
 
         # Asegurar que existe la unidad raíz (la crea si falta)
